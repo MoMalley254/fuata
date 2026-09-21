@@ -1,17 +1,25 @@
-# fuata
+# Fuata
 
-A new Flutter project.
+**Follow your money.** 
 
-## Getting Started
+A private, local-first Android app that shows, at a glance, how much you have across cash, mobile money, banks and cards, how much you've spent today, to whom, and where money came from. No account, no server, no internet permission: everything stays on your phone.
 
-This project is a starting point for a Flutter application.
+> Status: in development (target: v0.1.0)
 
-A few resources to get you started if this is your first Flutter project:
+## Why
 
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
+Spending is scattered across cash, mobile money and bank transactions, and reconciling it by hand is a chore. Fuata gives a single, glanceable answer to "Am I okay today?", including a persistent notification banner that shows what's left and whether you're safe, close to your limit, over it, or overdrawn.
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+## Principles
+
+- **Private by design:** no network access, no telemetry, no card or account numbers collected.
+- **Simple by default, deep on demand:** show only what's needed, with more one tap away.
+- **Yours:** you name your money, pick its look, and decide what you see.
+## Docs
+
+- [Requirements](docs/requirements.md)
+- [UI design brief](docs/ui-design-brief.md)
+- [Issue plan](docs/github-issues.md)
+## Tech
+
+Flutter (Android), Riverpod, drift/SQLite, local notifications. No backend.
