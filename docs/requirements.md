@@ -1,4 +1,4 @@
-# Requirements: Pocket (working title)
+# Requirements: Fuata
 
 **Version:** 0.1 · **Status:** Draft · **Author:** _your name_ · **Target release:** v0.1.0 (Thursday)
 

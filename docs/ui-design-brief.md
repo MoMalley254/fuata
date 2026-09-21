@@ -1,4 +1,4 @@
-# UI Design Brief: "Pocket" (working title)
+# UI Design Brief: Fuata
 
 > **How to use this with an AI design tool:** paste this whole document first, then ask for **one screen at a time** ("Design screen 2: Home, light mode, then dark mode"). Ask for a design-token table at the end so the result can be rebuilt in Flutter.
 
