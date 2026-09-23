@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../domain/models/limit_rule.dart';
@@ -127,75 +129,118 @@ class MockData {
   ];
 }
 
+/// A tiny in-memory reactive store: keeps a mutable list and a broadcast
+/// stream that emits a fresh snapshot on every mutation. `watch()` yields
+/// the current snapshot immediately, then every subsequent one.
+///
+/// This fixes a real bug: the previous mock repos used `async* { yield
+/// ...; }`, which emits exactly ONCE and then the stream closes. Riverpod's
+/// StreamProvider got that one snapshot and nothing ever told it a mutation
+/// had happened, so Home never updated after adding a transaction (only
+/// looked right after a full app restart, when the provider re-ran fresh).
+class _Store<T> {
+  _Store(List<T> initial) : _items = List<T>.from(initial);
+
+  final List<T> _items;
+  final _controller = StreamController<List<T>>.broadcast();
+
+  List<T> get _snapshot => List<T>.unmodifiable(_items);
+
+  Stream<List<T>> watch() async* {
+    yield _snapshot;
+    yield* _controller.stream;
+  }
+
+  void add(T item) {
+    _items.add(item);
+    _controller.add(_snapshot);
+  }
+
+  /// Updates the first item matching [test]. No-op if none match.
+  void update(bool Function(T) test, T Function(T) updater) {
+    final i = _items.indexWhere(test);
+    if (i == -1) return;
+    _items[i] = updater(_items[i]);
+    _controller.add(_snapshot);
+  }
+
+  /// Updates the first item matching [test], or appends [item] if none do.
+  void upsert(bool Function(T) test, T item) {
+    final i = _items.indexWhere(test);
+    if (i == -1) {
+      _items.add(item);
+    } else {
+      _items[i] = item;
+    }
+    _controller.add(_snapshot);
+  }
+
+  void removeWhere(bool Function(T) test) {
+    _items.removeWhere(test);
+    _controller.add(_snapshot);
+  }
+
+  void dispose() => _controller.close();
+}
+
 class MockUnitRepository implements UnitRepository {
-  final _units = List<MoneyUnit>.from(MockData.units);
-  final _controller = Stream<List<MoneyUnit>>.empty();
+  final _store = _Store<MoneyUnit>(MockData.units);
 
   @override
-  Stream<List<MoneyUnit>> watchUnits({bool includeArchived = false}) async* {
-    yield _units.where((u) => includeArchived || !u.archived).toList()
-      ..sort((a, b) => a.sortOrder.compareTo(b.sortOrder));
+  Stream<List<MoneyUnit>> watchUnits({bool includeArchived = false}) {
+    return _store.watch().map((list) {
+      return list.where((u) => includeArchived || !u.archived).toList()
+        ..sort((a, b) => a.sortOrder.compareTo(b.sortOrder));
+    });
   }
 
   @override
-  Future<void> addUnit(MoneyUnit unit) async => _units.add(unit);
+  Future<void> addUnit(MoneyUnit unit) async => _store.add(unit);
 
   @override
-  Future<void> updateUnit(MoneyUnit unit) async {
-    final i = _units.indexWhere((u) => u.id == unit.id);
-    if (i != -1) _units[i] = unit;
-  }
+  Future<void> updateUnit(MoneyUnit unit) async =>
+      _store.update((u) => u.id == unit.id, (_) => unit);
 
   @override
-  Future<void> archiveUnit(String unitId) async {
-    final i = _units.indexWhere((u) => u.id == unitId);
-    if (i != -1) _units[i] = _units[i].copyWith(archived: true);
-  }
+  Future<void> archiveUnit(String unitId) async =>
+      _store.update((u) => u.id == unitId, (u) => u.copyWith(archived: true));
 }
 
 class MockTransactionRepository implements TransactionRepository {
-  final _transactions = List<MoneyTransaction>.from(MockData.transactions);
+  final _store = _Store<MoneyTransaction>(MockData.transactions);
 
   @override
-  Stream<List<MoneyTransaction>> watchTransactions({String? unitId}) async* {
-    yield _transactions.where((t) => unitId == null || t.unitId == unitId).toList()
-      ..sort((a, b) => b.occurredAt.compareTo(a.occurredAt));
+  Stream<List<MoneyTransaction>> watchTransactions({String? unitId}) {
+    return _store.watch().map((list) {
+      return list.where((t) => unitId == null || t.unitId == unitId).toList()
+        ..sort((a, b) => b.occurredAt.compareTo(a.occurredAt));
+    });
   }
 
   @override
-  Future<void> addTransaction(MoneyTransaction transaction) async {
-    _transactions.add(transaction);
-  }
+  Future<void> addTransaction(MoneyTransaction transaction) async =>
+      _store.add(transaction);
 
   @override
   Future<void> confirmTransaction(String transactionId) async {
-    final i = _transactions.indexWhere((t) => t.id == transactionId);
-    // Records are immutable; a real (drift) repo updates the row in place.
-    // Mock keeps this a no-op placeholder for UI wiring purposes.
-    assert(i != -1 || true);
+    _store.update(
+          (t) => t.id == transactionId,
+          (t) => t.copyWith(status: TxStatus.confirmed),
+    );
   }
 
   @override
-  Future<void> deleteTransaction(String transactionId) async {
-    _transactions.removeWhere((t) => t.id == transactionId);
-  }
+  Future<void> deleteTransaction(String transactionId) async =>
+      _store.removeWhere((t) => t.id == transactionId);
 }
 
 class MockLimitRepository implements LimitRepository {
-  final _limits = List<LimitRule>.from(MockData.limits);
+  final _store = _Store<LimitRule>(MockData.limits);
 
   @override
-  Stream<List<LimitRule>> watchLimits() async* {
-    yield _limits;
-  }
+  Stream<List<LimitRule>> watchLimits() => _store.watch();
 
   @override
-  Future<void> setLimit(LimitRule limit) async {
-    final i = _limits.indexWhere((l) => l.id == limit.id);
-    if (i == -1) {
-      _limits.add(limit);
-    } else {
-      _limits[i] = limit;
-    }
-  }
+  Future<void> setLimit(LimitRule limit) async =>
+      _store.upsert((l) => l.id == limit.id, limit);
 }

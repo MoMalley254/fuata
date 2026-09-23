@@ -50,4 +50,26 @@ class MoneyTransaction {
   bool get isConfirmed => status == TxStatus.confirmed;
   bool get countsAsSpending => type == TxType.spent && isConfirmed;
   bool get countsAsIncome => type == TxType.got && isConfirmed;
+
+  MoneyTransaction copyWith({TxStatus? status}) {
+    return MoneyTransaction(
+      id: id,
+      unitId: unitId,
+      type: type,
+      amountMinor: amountMinor,
+      counterparty: counterparty,
+      categoryId: categoryId,
+      note: note,
+      code: code,
+      occurredAt: occurredAt,
+      createdAt: createdAt,
+      source: source,
+      status: status ?? this.status,
+      transferGroupId: transferGroupId,
+      parentId: parentId,
+      templateId: templateId,
+      balanceAfterMinor: balanceAfterMinor,
+      rawText: rawText,
+    );
+  }
 }
