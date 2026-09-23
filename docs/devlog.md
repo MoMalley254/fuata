@@ -38,7 +38,7 @@ A running, honest record of the build: goals, what got done, what broke, and why
 
 **Goals**
 - [x] Finish Home screen (#8) properly wired to the real theme/status system
-- [ ] Add-transaction sheet (#9)
+- [X] Add-transaction sheet (#9)
 - [ ] Activity screen (#10)
 - [ ] Drift database and repositories (#13) — domain models, ledger and mock repos already existed from Monday; real SQLite still to do
 - [ ] Banner (#16) and the 2-hour listener spike (#18)
@@ -50,7 +50,7 @@ A running, honest record of the build: goals, what got done, what broke, and why
 - Added `Money.majorValue` and `currencySymbol()` as a documented, display-only bridge between integer minor units and the widgets' `double` + symbol API.
   **What broke / learned**
   Building the theme/components and Home screen as separate pieces (mine from Monday, yours from the same day) meant they never got reconciled until today — Home kept working the whole time, so nothing *looked* broken, but it was quietly running on placeholder colors instead of the real design system. Lesson: when two people (or two sessions) build adjacent layers in parallel, integrate them the same day rather than letting each "work" in isolation. `flutter analyze` didn't catch the `MoneyUnit` collision because the two types never got imported into the same file — worth remembering that the analyzer won't save you from a naming collision unless something actually forces both into scope together.
-
+  Mock repos looked done but weren't reactive (async* yields once, stream closes). New transactions silently vanished until app restart. Fixed with a small broadcast-stream store shared across all three mock repos.
 **Time spent:** _3hours_
 
 ---
