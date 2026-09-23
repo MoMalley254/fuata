@@ -34,8 +34,8 @@ class HomeScreen extends ConsumerWidget {
           loading: () => const Center(child: CircularProgressIndicator()),
           error: (e, st) => Center(child: Text('Something went wrong: $e')),
           data: (state) => state.units.isEmpty
-              ? const _EmptyHome()
-              : _HomeContent(state: state),
+              ? const EmptyHome()
+              : HomeContent(state: state),
         ),
       ),
       floatingActionButton: FloatingActionButton(
@@ -53,9 +53,9 @@ class HomeScreen extends ConsumerWidget {
   }
 }
 
-class _HomeContent extends StatelessWidget {
+class HomeContent extends StatelessWidget {
   final HomeState state;
-  const _HomeContent({required this.state});
+  const HomeContent({super.key, required this.state});
 
   @override
   Widget build(BuildContext context) {
@@ -67,13 +67,13 @@ class _HomeContent extends StatelessWidget {
         100,
       ),
       children: [
-        const _Greeting(name: 'Amina'), // TODO: from settings (#12)
+        const Greeting(name: 'Amina'), // TODO: from settings (#12)
         const SizedBox(height: AppSpacing.lg),
-        _HeroSection(state: state),
+        HeroSection(state: state),
         const SizedBox(height: AppSpacing.lg),
         Text('My money', style: AppTypography.headlineSm.copyWith(color: context.colors.onSurface)),
         const SizedBox(height: AppSpacing.gutterSm),
-        _UnitRow(state: state),
+        UnitRow(state: state),
         const SizedBox(height: AppSpacing.lg),
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -115,9 +115,9 @@ class _HomeContent extends StatelessWidget {
   }
 }
 
-class _Greeting extends StatelessWidget {
+class Greeting extends StatelessWidget {
   final String name;
-  const _Greeting({required this.name});
+  const Greeting({super.key, required this.name});
 
   @override
   Widget build(BuildContext context) {
@@ -146,9 +146,9 @@ class _Greeting extends StatelessWidget {
 /// "Am I okay today?" (ui-design-brief.md section 7.2).
 /// Uses the real StatusRingCard when a daily limit is set; falls back to
 /// a plain total when it isn't (StatusRingCard assumes a limit exists).
-class _HeroSection extends StatelessWidget {
+class HeroSection extends StatelessWidget {
   final HomeState state;
-  const _HeroSection({required this.state});
+  const HeroSection({super.key, required this.state});
 
   @override
   Widget build(BuildContext context) {
@@ -194,9 +194,9 @@ class _HeroSection extends StatelessWidget {
   }
 }
 
-class _UnitRow extends StatelessWidget {
+class UnitRow extends StatelessWidget {
   final HomeState state;
-  const _UnitRow({required this.state});
+  const UnitRow({super.key, required this.state});
 
   @override
   Widget build(BuildContext context) {
@@ -205,10 +205,10 @@ class _UnitRow extends StatelessWidget {
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
         itemCount: state.units.length + 1,
-        separatorBuilder: (_, __) => const SizedBox(width: AppSpacing.gutterSm),
+        separatorBuilder: (_, _) => const SizedBox(width: AppSpacing.gutterSm),
         itemBuilder: (context, i) {
           if (i == state.units.length) {
-            return _AddUnitCard(onTap: () {});
+            return AddUnitCard(onTap: () {});
           }
           final unit = state.units[i];
           final balance = state.balanceByUnit[unit.id] ?? 0;
@@ -225,9 +225,9 @@ class _UnitRow extends StatelessWidget {
   }
 }
 
-class _AddUnitCard extends StatelessWidget {
+class AddUnitCard extends StatelessWidget {
   final VoidCallback onTap;
-  const _AddUnitCard({required this.onTap});
+  const AddUnitCard({super.key, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -248,8 +248,8 @@ class _AddUnitCard extends StatelessWidget {
   }
 }
 
-class _EmptyHome extends StatelessWidget {
-  const _EmptyHome();
+class EmptyHome extends StatelessWidget {
+  const EmptyHome({super.key});
 
   @override
   Widget build(BuildContext context) {
