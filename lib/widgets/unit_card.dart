@@ -1,15 +1,18 @@
 import 'package:flutter/material.dart';
+import 'package:fuata/domain/models/unit.dart' show UnitKind;
 
 import '../ui/theme/app_colors.dart';
 import '../ui/theme/app_spacing.dart';
 import '../ui/theme/app_typography.dart';
 
-enum MoneyUnit { cash, mobileMoney, bank, card }
-
+/// Note: this used to declare its own `enum MoneyUnit {cash, mobileMoney,
+/// bank, card}`, which collided by name with domain/models/unit.dart's
+/// `class MoneyUnit` (the actual unit model). Uses UnitKind — the domain
+/// enum already built for exactly this — instead of a second local one.
 class UnitCard extends StatelessWidget {
   const UnitCard({
     super.key,
-    required this.unit,
+    required this.kind,
     required this.title,
     required this.balance,
     this.emoji,
@@ -17,18 +20,19 @@ class UnitCard extends StatelessWidget {
     this.onTap,
   });
 
-  final MoneyUnit unit;
+  final UnitKind kind;
   final String title;
   final double balance;
   final String? emoji;
   final String currencySymbol;
   final VoidCallback? onTap;
 
-  Color _accent(AppColors c) => switch (unit) {
-    MoneyUnit.cash => c.unitCash,
-    MoneyUnit.mobileMoney => c.unitMobileMoney,
-    MoneyUnit.bank => c.unitBank,
-    MoneyUnit.card => c.unitCard,
+  Color _accent(AppColors c) => switch (kind) {
+    UnitKind.cash => c.unitCash,
+    UnitKind.mobileMoney => c.unitMobileMoney,
+    UnitKind.bank => c.unitBank,
+    UnitKind.card => c.unitCard,
+    UnitKind.other => c.primary,
   };
 
   @override

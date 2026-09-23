@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
+import 'package:fuata/domain/models/limit_rule.dart';
 import '../ui/theme/app_colors.dart';
 import '../ui/theme/app_spacing.dart';
 import '../ui/theme/app_status.dart';
@@ -22,7 +23,7 @@ class StatusRingCard extends StatelessWidget {
   final double remaining;
   final double spent;
   final double limit;
-  final BudgetStatus status;
+  final SpendStatus status;
   final String caption;
   final String currencySymbol;
   final VoidCallback? onTap;

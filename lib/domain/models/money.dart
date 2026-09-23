@@ -1,14 +1,40 @@
 import 'package:intl/intl.dart';
 
 /// Number of decimal places for a currency's minor unit.
-/// unknown codes default to 2 (matches ADR-003).
+/// Extend as needed; unknown codes default to 2 (matches ADR-003).
 int minorUnitExponent(String currencyCode) {
   const zeroDecimal = {'JPY', 'UGX', 'KRW', 'VND', 'CLP'};
   return zeroDecimal.contains(currencyCode.toUpperCase()) ? 0 : 2;
 }
 
+/// Display symbol/prefix for a currency. Falls back to the code itself
+/// (with a trailing space) for anything not listed — never guess wrong.
+String currencySymbol(String currencyCode) {
+  const symbols = {
+    'KES': 'KSh ',
+    'UGX': 'USh ',
+    'TZS': 'TSh ',
+    'USD': '\$',
+    'EUR': '€',
+    'GBP': '£',
+    'NGN': '₦',
+  };
+  return symbols[currencyCode.toUpperCase()] ?? '${currencyCode.toUpperCase()} ';
+}
+
+int pow10(int exponent) {
+  var r = 1;
+  for (var i = 0; i < exponent; i++) {
+    r *= 10;
+  }
+  return r;
+}
+
 /// All amounts in the app are integers in the currency's minor unit
-/// (e.g. cents). (ADR-003).
+/// (e.g. cents). Never use double for money (ADR-003). `majorValue`
+/// exists only to bridge into widgets built around double + symbol
+/// (StatusRingCard, UnitCard, TransactionRow) — never store or do
+/// arithmetic on it.
 class Money {
   final int minor;
   final String currencyCode;
@@ -21,7 +47,7 @@ class Money {
   /// Throws FormatException on invalid input.
   factory Money.parseMajor(String input, String currencyCode) {
     final cleaned = input.replaceAll(',', '').trim();
-    if (cleaned.isEmpty) throw const FormatException('Empty Amount');
+    if (cleaned.isEmpty) throw const FormatException('Empty amount');
     final exponent = minorUnitExponent(currencyCode);
     final parts = cleaned.split('.');
     final wholePart = int.parse(parts[0].isEmpty ? '0' : parts[0]);
@@ -30,20 +56,9 @@ class Money {
       final frac = parts[1].padRight(exponent, '0').substring(0, exponent);
       fractionPart = int.parse(frac);
     }
-    final factor = _pow10(exponent);
+    final factor = pow10(exponent);
     final sign = cleaned.startsWith('-') ? -1 : 1;
-    return Money(
-      sign * (wholePart.abs() * factor + fractionPart),
-      currencyCode,
-    );
-  }
-
-  static int _pow10(int exponent) {
-    var r = 1;
-    for (var i = 0; i < exponent; i++) {
-      r *= 10;
-    }
-    return r;
+    return Money(sign * (wholePart.abs() * factor + fractionPart), currencyCode);
   }
 
   Money operator +(Money other) {
@@ -61,10 +76,14 @@ class Money {
   bool get isNegative => minor < 0;
   bool get isZero => minor == 0;
 
+  /// Double major-unit value, e.g. 125050 minor -> 1250.50. Display-only
+  /// bridge for widgets that take double + a currency symbol string.
+  double get majorValue => minor / pow10(minorUnitExponent(currencyCode));
+
   /// Formatted for display, e.g. "1,250.50".
   String format({bool showSign = false}) {
     final exponent = minorUnitExponent(currencyCode);
-    final divisor = _pow10(exponent);
+    final divisor = pow10(exponent);
     final major = minor.abs() / divisor;
     final formatter = NumberFormat.currency(
       symbol: '',

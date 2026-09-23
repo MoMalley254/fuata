@@ -1,0 +1,49 @@
+{
+  "$schema": "https://repomix.com/schemas/latest/schema.json",
+  "output": {
+    "filePath": "repomix-output.xml",
+    "style": "xml",
+    "fileSummary": true,
+    "directoryStructure": true,
+    "removeComments": false,
+    "showLineNumbers": false
+  },
+  "include": [
+    "lib/**/*.dart",
+    "test/**/*.dart",
+    "android/app/src/**/*.xml",
+    "android/app/src/**/*.kt",
+    "android/app/src/**/*.gradle",
+    "assets/**/*.yaml",
+    "scripts/**/*",
+    "docs/**/*.md",
+    "pubspec.yaml",
+    "analysis_options.yaml",
+    "README.md"
+  ],
+  "ignore": {
+    "useGitignore": true,
+    "useDefaultPatterns": true,
+    "customPatterns": [
+      "**/build/**",
+      "**/.dart_tool/**",
+      "**/.idea/**",
+      "**/.gradle/**",
+      "**/android/.gradle/**",
+      "**/android/local.properties",
+      "**/ios/Pods/**",
+      "**/ios/.symlinks/**",
+      "**/*.freezed.dart",
+      "**/*.g.dart",
+      "**/*.gr.dart",
+      "**/*.iml",
+      "**/*.lock",
+      "**/coverage/**",
+      "**/generated_plugin_registrant.*",
+      "**/generated_plugins.cmake"
+    ]
+  },
+  "security": {
+    "enableSecurityCheck": true
+  }
+}
