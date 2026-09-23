@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
 import '../../domain/models/money.dart';
+import '../../widgets/sheets/add_transaction_sheet.dart';
 import '../providers/app_providers.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_spacing.dart';
@@ -39,16 +40,9 @@ class HomeScreen extends ConsumerWidget {
         ),
       ),
       floatingActionButton: FloatingActionButton(
-        onPressed: () => _openAddTransaction(context),
+        onPressed: () => showAddTransactionSheet(context),
         child: const Icon(Icons.add),
       ),
-    );
-  }
-
-  void _openAddTransaction(BuildContext context) {
-    // Wired up properly in issue #9 (add-transaction sheet).
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Add transaction — coming in #9')),
     );
   }
 }
