@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:fuata/domain/models/limit_rule.dart';
 import 'package:fuata/ui/theme/app_colors.dart';
 import 'package:fuata/ui/theme/app_typography.dart';
 
@@ -6,7 +7,7 @@ import '../ui/theme/app_status.dart';
 
 class StatusPill extends StatelessWidget {
   const StatusPill({super.key, required this.status, this.labelOverride});
-  final BudgetStatus status;
+  final SpendStatus status;
   final String? labelOverride;
 
   @override

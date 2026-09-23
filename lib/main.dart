@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:fuata/ui/screens/home_screen.dart';
 import 'package:fuata/ui/theme/app_theme.dart';
 
 void main() {
-  runApp(const Fuata());
+  runApp(const ProviderScope(child: Fuata()));
 }
 
 class Fuata extends StatefulWidget {
