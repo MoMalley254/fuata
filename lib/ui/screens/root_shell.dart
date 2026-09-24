@@ -1,12 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:fuata/ui/screens/home_screen.dart';
+import 'package:fuata/ui/screens/my_money_screen.dart';
 import 'package:fuata/ui/screens/placeholder_tab_screen.dart';
 
 import 'activity_screen.dart';
 
 /// Persistent bottom nav across the app's 4 main tabs
-/// (ui-design-brief.md section 7.2). Today and Activity are real; My money
-/// and Me are lightweight placeholders until #11/#12 build them properly.
+/// (ui-design-brief.md section 7.2). Today, My Money and Activity are real;
+/// Me is a lightweight placeholders until #12 builds it properly.
 /// Each tab keeps its own Scaffold/AppBar; this shell only owns the nav bar,
 /// so switching tabs doesn't rebuild the others (IndexedStack keeps state).
 class RootShell extends StatefulWidget {
@@ -31,12 +32,7 @@ class _RootShellState extends State<RootShell> {
             }),
           ),
           const ActivityScreen(),
-          const PlaceholderTabScreen(
-            title: 'My money',
-            emoji: '👛',
-            message: "Your units, balances and details live here soon.",
-            issueRef: '#11',
-          ),
+          const MyMoneyScreen(),
           const PlaceholderTabScreen(
             title: 'Me',
             emoji: '⚙️',

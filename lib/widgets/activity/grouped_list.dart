@@ -48,6 +48,8 @@ class GroupedList extends StatelessWidget {
     final days = groups.keys.toList()..sort((a, b) => b.compareTo(a));
 
     return ListView.builder(
+        shrinkWrap: true,
+        physics: const NeverScrollableScrollPhysics(),
         padding: const EdgeInsets.fromLTRB(
           AppSpacing.margin, AppSpacing.sm, AppSpacing.margin, AppSpacing.xl,
         ),
