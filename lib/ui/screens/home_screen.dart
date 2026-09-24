@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 
 import '../../domain/models/money.dart';
 import '../../widgets/sheets/add_transaction_sheet.dart';
+import '../../widgets/sheets/edit_unit_sheet.dart';
 import '../providers/app_providers.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_spacing.dart';
@@ -202,7 +203,7 @@ class UnitRow extends StatelessWidget {
         separatorBuilder: (_, _) => const SizedBox(width: AppSpacing.gutterSm),
         itemBuilder: (context, i) {
           if (i == state.units.length) {
-            return AddUnitCard(onTap: () {});
+            return AddUnitCard(onTap: () => showEditUnitSheet(context));
           }
           final unit = state.units[i];
           final balance = state.balanceByUnit[unit.id] ?? 0;
