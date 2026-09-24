@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:fuata/ui/screens/home_screen.dart';
+import 'package:fuata/ui/screens/root_shell.dart';
 import 'package:fuata/ui/theme/app_theme.dart';
 
 void main() {
@@ -15,7 +15,7 @@ class Fuata extends StatefulWidget {
 }
 
 class _FuataState extends State<Fuata> {
-  ThemeMode _mode = ThemeMode.system;
+  final ThemeMode _mode = ThemeMode.system;
 
   @override
   Widget build(BuildContext context) {
@@ -24,11 +24,7 @@ class _FuataState extends State<Fuata> {
       themeMode: _mode,
       theme: AppTheme.light(),
       darkTheme: AppTheme.dark(),
-      home: HomeScreen(
-        onToggleMode: () => setState(() {
-          _mode = _mode == ThemeMode.dark ? ThemeMode.light : ThemeMode.dark;
-        }),
-      ),
+      home: RootShell(),
     );
   }
 }
