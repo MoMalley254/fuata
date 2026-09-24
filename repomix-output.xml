@@ -93,8 +93,10 @@ lib/
     screens/
       activity_screen.dart
       home_screen.dart
+      my_money_screen.dart
       placeholder_tab_screen.dart
       root_shell.dart
+      unit_detail_screen.dart
     theme/
       app_colors.dart
       app_spacing.dart
@@ -107,13 +109,16 @@ lib/
       grouped_list.dart
     sheets/
       add_transaction_sheet.dart
+      edit_unit_sheet.dart
       transaction_detail_sheet.dart
+      update_balance_sheet.dart
     app_chips.dart
     status_pill.dart
     status_ring_card.dart
     theme_button.dart
     transaction_row.dart
     unit_card.dart
+    unit_list_tile.dart
   main.dart
 scripts/
   setup-github.sh
@@ -127,625 +132,6 @@ README.md
 
 <files>
 This section contains the contents of the repository's files.
-
-<file path="lib/ui/screens/activity_screen.dart">
-import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:fuata/domain/models/transaction.dart';
-import 'package:fuata/domain/models/unit.dart';
-
-import '../../widgets/activity/empty_activity.dart';
-import '../../widgets/activity/grouped_list.dart';
-import '../../widgets/app_chips.dart';
-import '../providers/app_providers.dart';
-import '../theme/app_spacing.dart';
-
-/// One filter at a time: everything, a transaction type, or a single unit.
-/// (ui-design-brief.md section 7.4: "Filter chips on top: All / Spent /
-/// Got / by unit.")
-sealed class Filter {
-  const Filter();
-  bool matches(MoneyTransaction t);
-}
-
-class _AllFilter extends Filter {
-  const _AllFilter();
-  @override
-  bool matches(MoneyTransaction t) => true;
-}
-
-class _TypeFilter extends Filter {
-  const _TypeFilter(this.type);
-  final TxType type;
-  @override
-  bool matches(MoneyTransaction t) => t.type == type;
-}
-
-class _UnitFilter extends Filter {
-  const _UnitFilter(this.unitId);
-  final String unitId;
-  @override
-  bool matches(MoneyTransaction t) => t.unitId == unitId;
-}
-
-class ActivityScreen extends ConsumerStatefulWidget {
-  const ActivityScreen({super.key});
-
-  @override
-  ConsumerState<ActivityScreen> createState() => _ActivityScreenState();
-}
-
-class _ActivityScreenState extends ConsumerState<ActivityScreen> {
-  Filter _filter = const _AllFilter();
-
-  @override
-  Widget build(BuildContext context) {
-    final txAsync = ref.watch(transactionsProvider);
-    final unitsAsync = ref.watch(unitsProvider);
-
-    return Scaffold(
-      appBar: AppBar(title: const Text('Activity'),),
-      body: SafeArea(
-        child: unitsAsync.when(
-          loading: () => const Center(child: CircularProgressIndicator.adaptive(),) ,
-          error: (e, st) => Center(child: Text('Something went wrong: $e'),),
-          data: (units) {
-            final unitById = { for (final u in units) u.id: u };
-            return txAsync.when(
-              loading: () => const Center(child: CircularProgressIndicator.adaptive(),),
-              error: (e, st) => Center(child: Text('Something went wrong: $e'),),
-              data: (transactions) {
-                // Pending (unconfirmed) captures live in the review inbox
-                // (#21/#22), not built yet, so Activity only shows
-                // confirmed transactions for now.
-                final confirmed = transactions.where((t) => t.isConfirmed).toList();
-                final filtered = confirmed.where(_filter.matches).toList()..sort((a, b) => b.occurredAt.compareTo(a.occurredAt));
-
-                return Column(
-                  children: [
-                    FilterBar(
-                      units: units,
-                      selected: _filter,
-                      onSelected: (f) => setState(() {
-                        _filter = f;
-                      }),
-                    ),
-                    Expanded(
-                      child: filtered.isEmpty
-                          ? const EmptyActivity()
-                          : GroupedList(transactions: filtered, unitById: unitById),
-                    ),
-                  ],
-                );
-              }
-            );
-          }
-        ),
-      )
-    );
-  }
-}
-
-class FilterBar extends StatelessWidget {
-  final List<MoneyUnit> units;
-  final Filter selected;
-  final ValueChanged<Filter> onSelected;
-  const FilterBar({super.key, required this.units, required this.selected, required this.onSelected});
-
-  bool _isSelected(Filter f) {
-    if (f is _AllFilter) return selected is _AllFilter;
-    if (f is _TypeFilter && selected is _TypeFilter) {
-      return (selected as _TypeFilter).type == f.type;
-    }
-    if (f is _UnitFilter && selected is _UnitFilter) {
-      return (selected as _UnitFilter).unitId == f.unitId;
-    }
-    return false;
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final chips = <MapEntry<String, Filter>>[
-      const MapEntry('All', _AllFilter()),
-      const MapEntry('Spent', _TypeFilter(TxType.spent)),
-      const MapEntry('Got', _TypeFilter(TxType.got)),
-      const MapEntry('Moved', _TypeFilter(TxType.moved)),
-      for (final u in units) MapEntry('${u.iconEmoji} ${u.name}', _UnitFilter(u.id)),
-    ];
-
-    return SizedBox(
-      height: 52,
-      child: ListView.separated(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.margin, vertical: AppSpacing.sm),
-        itemCount: chips.length,
-        separatorBuilder: (_, _) => const SizedBox(width: AppSpacing.sm),
-        itemBuilder: (context, i) {
-          final entry = chips[i];
-          return AppChoiceChip(
-            label: entry.key,
-            selected: _isSelected(entry.value),
-            onTap: () => onSelected(entry.value),
-          );
-        },
-      ),
-    );
-  }
-}
-</file>
-
-<file path="lib/ui/screens/placeholder_tab_screen.dart">
-import 'package:flutter/material.dart';
-import 'package:fuata/ui/theme/app_colors.dart';
-
-import '../theme/app_spacing.dart';
-import '../theme/app_typography.dart';
-
-/// A named, on-brand "coming soon" for a tab whose real screen is a later
-/// issue. Deliberately simple: exists so navigation is real today rather
-/// than bolted on later, without scope-creeping into #11/#12's work.
-class PlaceholderTabScreen extends StatelessWidget {
-  final String title;
-  final String emoji;
-  final String message;
-  final String issueRef;
-
-  const PlaceholderTabScreen({
-    super.key,
-    required this.title,
-    required this.emoji,
-    required this.message,
-    required this.issueRef,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final c = context.colors;
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(title),
-      ),
-      body: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(AppSpacing.xl),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(emoji, style: const TextStyle(fontSize: 40)),
-              const SizedBox(height: AppSpacing.md),
-              Text(
-                message,
-                textAlign: TextAlign.center,
-                style: AppTypography.bodyMd.copyWith(color: c.onSurfaceVariant),
-              ),
-              const SizedBox(height: AppSpacing.xs),
-              Text(
-                'Coming in $issueRef',
-                style: AppTypography.labelSm.copyWith(color: c.onSurfaceVariant),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-</file>
-
-<file path="lib/ui/screens/root_shell.dart">
-import 'package:flutter/material.dart';
-import 'package:fuata/ui/screens/home_screen.dart';
-import 'package:fuata/ui/screens/placeholder_tab_screen.dart';
-
-import 'activity_screen.dart';
-
-/// Persistent bottom nav across the app's 4 main tabs
-/// (ui-design-brief.md section 7.2). Today and Activity are real; My money
-/// and Me are lightweight placeholders until #11/#12 build them properly.
-/// Each tab keeps its own Scaffold/AppBar; this shell only owns the nav bar,
-/// so switching tabs doesn't rebuild the others (IndexedStack keeps state).
-class RootShell extends StatefulWidget {
-  const RootShell({super.key});
-
-  @override
-  State<RootShell> createState() => _RootShellState();
-}
-
-class _RootShellState extends State<RootShell> {
-  int _index = 0;
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      body: IndexedStack(
-        index: _index,
-        children: [
-          HomeScreen(
-            onSeeAllActivity: () => setState(() {
-              _index = 1;
-            }),
-          ),
-          const ActivityScreen(),
-          const PlaceholderTabScreen(
-            title: 'My money',
-            emoji: '👛',
-            message: "Your units, balances and details live here soon.",
-            issueRef: '#11',
-          ),
-          const PlaceholderTabScreen(
-            title: 'Me',
-            emoji: '⚙️',
-            message: 'Personalisation, limits and privacy settings land here.',
-            issueRef: '#12',
-          ),
-        ],
-      ),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _index,
-        onDestinationSelected: (i) => setState(() => _index = i),
-        destinations: const [
-          NavigationDestination(icon: Icon(Icons.today_rounded), label: 'Today'),
-          NavigationDestination(icon: Icon(Icons.receipt_long_rounded), label: 'Activity'),
-          NavigationDestination(icon: Icon(Icons.account_balance_wallet_rounded), label: 'My money'),
-          NavigationDestination(icon: Icon(Icons.person_rounded), label: 'Me'),
-        ],
-      ),
-    );
-  }
-}
-</file>
-
-<file path="lib/widgets/activity/empty_activity.dart">
-import 'package:flutter/material.dart';
-import 'package:fuata/ui/theme/app_colors.dart';
-
-import '../../ui/theme/app_spacing.dart';
-import '../../ui/theme/app_typography.dart';
-
-class EmptyActivity extends StatelessWidget {
-  const EmptyActivity({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    final c = context.colors;
-
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(AppSpacing.xl),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text('🗂️', style: TextStyle(fontSize: 36)),
-            const SizedBox(height: AppSpacing.sm),
-            Text(
-              'Nothing here yet.',
-              style: AppTypography.bodyMd.copyWith(color: c.onSurfaceVariant),
-              textAlign: TextAlign.center,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-</file>
-
-<file path="lib/widgets/activity/grouped_list.dart">
-import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
-
-import '../../domain/models/money.dart';
-import '../../domain/models/transaction.dart';
-import '../../domain/models/unit.dart';
-import '../../ui/theme/app_colors.dart';
-import '../../ui/theme/app_spacing.dart';
-import '../../ui/theme/app_typography.dart';
-import '../sheets/transaction_detail_sheet.dart';
-import '../transaction_row.dart';
-
-
-Future<void> showTransactionDetail(
-    BuildContext context, {
-      required MoneyTransaction transaction,
-      required MoneyUnit? unit,
-    }) {
-  return showModalBottomSheet(
-    context: context,
-    isScrollControlled: true,
-    backgroundColor: Colors.transparent,
-    builder: (_) => TransactionDetailSheet(transaction: transaction, unit: unit),
-  );
-}
-
-class GroupedList extends StatelessWidget {
-  final List<MoneyTransaction> transactions;
-  final Map<String, MoneyUnit> unitById;
-  const GroupedList({super.key, required this.transactions, required this.unitById});
-
-  String _dayHeader(DateTime day) {
-    final now = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
-    if (day == today) return 'Today';
-    if (day == today.subtract(const Duration(days: 1))) return 'Yesterday';
-    return DateFormat('EEE, d MMM').format(day);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final groups = <DateTime, List<MoneyTransaction>>{};
-    for (final t in transactions) {
-      final day = DateTime(t.occurredAt.year, t.occurredAt.month, t.occurredAt.day);
-      groups.putIfAbsent(day, () => []).add(t);
-    }
-    final days = groups.keys.toList()..sort((a, b) => b.compareTo(a));
-
-    return ListView.builder(
-        padding: const EdgeInsets.fromLTRB(
-          AppSpacing.margin, AppSpacing.sm, AppSpacing.margin, AppSpacing.xl,
-        ),
-        itemCount: days.length,
-        itemBuilder: (context, i) {
-          final day = days[i];
-          final dayTx = groups[day]!;
-          final currency = dayTx.isNotEmpty ? unitById[dayTx.first.unitId]?.currencyCode ?? 'KES' : 'KES';
-          final netMinor = dayTx
-              .where((t) => t.type == TxType.spent || t.type == TxType.got)
-              .fold(0, (sum, t) => sum + t.amountMinor);
-
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(_dayHeader(day), style: AppTypography.labelMd.copyWith(color: context.colors.onSurfaceVariant)),
-                    Text(
-                      Money(netMinor, currency).format(showSign: true),
-                      style: AppTypography.labelSm.copyWith(
-                        color: netMinor >= 0 ? context.colors.statusSafe : context.colors.onSurfaceVariant,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              ...dayTx.map((t) {
-                final unit = unitById[t.unitId];
-                return TransactionRow(
-                  title: t.counterparty ?? unit?.name ?? 'Unknown',
-                  subtitle: DateFormat('h:mm a').format(t.occurredAt),
-                  amount: Money(t.amountMinor, unit?.currencyCode ?? 'KES').majorValue,
-                  emoji: unit?.iconEmoji ?? '💰',
-                  accent: unit?.color,
-                  onTap: () => showTransactionDetail(context, transaction: t, unit: unit),
-                );
-              }),
-              const SizedBox(height: AppSpacing.sm,),
-            ],
-          );
-        }
-    );
-  }
-}
-</file>
-
-<file path="lib/widgets/sheets/transaction_detail_sheet.dart">
-import 'package:flutter/material.dart';
-import 'package:fuata/domain/models/money.dart';
-import 'package:intl/intl.dart';
-
-import '../../domain/models/transaction.dart';
-import '../../domain/models/unit.dart';
-import '../../ui/theme/app_colors.dart';
-import '../../ui/theme/app_spacing.dart';
-import '../../ui/theme/app_typography.dart';
-import '../app_chips.dart';
-
-// ---------------------------------------------------------------------------
-// Transaction detail sheet, shown at Simple / Balanced / Detailed levels
-// (ui-design-brief.md sections 3 and 7.4). A per-settings default detail
-// level is issue #12's job; this sheet carries its own local toggle so the
-// three levels can be seen and used today.
-// ---------------------------------------------------------------------------
-
-enum _DetailLevel { simple, balanced, detailed }
-
-class TransactionDetailSheet extends StatefulWidget {
-  final MoneyTransaction transaction;
-  final MoneyUnit? unit;
-  const TransactionDetailSheet({super.key, required this.transaction, required this.unit});
-
-  @override
-  State<TransactionDetailSheet> createState() => _TransactionDetailSheetState();
-}
-
-class _TransactionDetailSheetState extends State<TransactionDetailSheet> {
-  _DetailLevel _level = _DetailLevel.balanced;
-
-  @override
-  Widget build(BuildContext context) {
-    final c = context.colors;
-    final t = widget.transaction;
-    final unit = widget.unit;
-    final currency = unit?.currencyCode ?? 'KES';
-    final amount = Money(t.amountMinor.abs(), currency);
-    final isInflow = t.amountMinor >=0;
-
-    return SafeArea(
-      child: Container(
-        decoration: BoxDecoration(
-          color: c.surface,
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(AppSpacing.cardRadiusHero)),
-        ),
-        padding: const EdgeInsets.fromLTRB(AppSpacing.lg, AppSpacing.md, AppSpacing.lg, AppSpacing.lg),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-Center(
-  child: Container(
-    width: 40,
-    height: 4,
-    margin: const EdgeInsets.only(bottom: AppSpacing.md),
-    decoration: BoxDecoration(
-      color: c.outlineVariant,
-      borderRadius: BorderRadius.circular(AppSpacing.pill),
-    ),
-  ),
-),
-            Row(
-              children: [
-                Container(
-                  width: 44,
-                  height: 44,
-                  decoration: BoxDecoration(
-                    color: (unit?.color ?? c.primary).withValues(alpha: 0.18),
-                    shape: BoxShape.circle,
-                  ),
-                  alignment: Alignment.center,
-                  child: Text(unit?.iconEmoji ?? '💰', style: const TextStyle(fontSize: 20)),
-                ),
-                const SizedBox(width: AppSpacing.md),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        t.counterparty ?? unit?.name ?? 'Unknown',
-                        style: AppTypography.headlineSm.copyWith(color: c.onSurface),
-                      ),
-                      Text(
-                        DateFormat('EEEE, d MMM · h:mm a').format(t.occurredAt),
-                        style: AppTypography.bodySm.copyWith(color: c.onSurfaceVariant),
-                      ),
-                    ],
-                  ),
-                )
-              ],
-            ),
-            const SizedBox(height: AppSpacing.md),
-            Text(
-              '${isInflow ? '+' : '-'}${amount.format()}',
-              style: AppTypography.headlineLg.copyWith(
-                color: isInflow ? c.statusSafe : c.onSurface,
-              ),
-            ),
-            const SizedBox(height: AppSpacing.md,),
-            Row(
-              children: _DetailLevel.values.map((lvl) {
-                return Padding(
-                  padding: const EdgeInsets.only(right: AppSpacing.sm),
-                  child: AppChoiceChip(
-                    label: switch (lvl) {
-                      _DetailLevel.simple => 'Simple',
-                      _DetailLevel.balanced => 'Balanced',
-                      _DetailLevel.detailed => 'Detailed',
-                    },
-                    selected: _level == lvl,
-                    onTap: () => setState(() => _level = lvl),
-                  ),
-                );
-              }).toList(),
-            ),
-            const SizedBox(height: AppSpacing.md),
-            ...detailRows(context),
-          ],
-        ),
-      ),
-    );
-  }
-
-  List<Widget> detailRows(BuildContext context) {
-    final t = widget.transaction;
-    final unit = widget.unit;
-    final rows = <MapEntry<String, String>>[];
-
-    // Simple: nothing extra — title/time/amount above is already the
-    // whole story.
-    if (_level == _DetailLevel.simple) return const [];
-
-    // Balanced: unit and a friendly type label.
-    rows.add(MapEntry('Money', unit?.name ?? 'Unknown'));
-    rows.add(MapEntry('Type', switch (t.type) {
-      TxType.spent => 'Spent',
-      TxType.got => 'Got',
-      TxType.moved => 'Moved',
-      TxType.adjustment => 'Balance update',
-    }));
-
-    if (_level == _DetailLevel.detailed) {
-      rows.add(MapEntry('Exact time', DateFormat('d MMM yyyy, h:mm:ss a').format(t.occurredAt)));
-      if (t.code != null) rows.add(MapEntry('Code', t.code!));
-      if (t.transferGroupId != null) rows.add(const MapEntry('Transfer', 'Linked to another entry'));
-      if (t.parentId != null) rows.add(MapEntry('Fee for', t.parentId!));
-      if (t.note != null) rows.add(MapEntry('Note', t.note!));
-      rows.add(MapEntry('Added via', switch (t.source) {
-        TxSource.manual => 'Typed in',
-        TxSource.shared => 'Shared message',
-        TxSource.notification => 'Caught from a notification',
-      }));
-      if (t.balanceAfterMinor != null) {
-        rows.add(MapEntry(
-          'Balance after (reported)',
-          Money(t.balanceAfterMinor!, unit?.currencyCode ?? 'KES').format(),
-        ));
-      }
-    }
-
-    final c = context.colors;
-    return rows
-        .map((e) => Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text(e.key, style: AppTypography.bodySm.copyWith(color: c.onSurfaceVariant)),
-          Flexible(
-            child: Text(
-              e.value,
-              textAlign: TextAlign.right,
-              style: AppTypography.bodySm.copyWith(color: c.onSurface),
-            ),
-          ),
-        ],
-      ),
-    ))
-        .toList();
-  }
-}
-</file>
-
-<file path="lib/widgets/theme_button.dart">
-import 'package:flutter/material.dart';
-
-//TODO: Will be handled via Riverpod later
-
-class ThemeButton extends StatefulWidget {
-  const ThemeButton({super.key});
-
-  @override
-  State<ThemeButton> createState() => _ThemeButtonState();
-}
-
-class _ThemeButtonState extends State<ThemeButton> {
-  ThemeMode mode = ThemeMode.system;
-
-  void toggleTheme() {
-    setState(() {
-      mode = mode == ThemeMode.dark ? ThemeMode.light : ThemeMode.dark;
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return IconButton(
-      onPressed: toggleTheme,
-      icon: const Icon(Icons.brightness_6_rounded),
-    );
-  }
-}
-</file>
 
 <file path="android/app/src/debug/AndroidManifest.xml">
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
@@ -1681,6 +1067,570 @@ abstract class LimitRepository {
 }
 </file>
 
+<file path="lib/ui/screens/activity_screen.dart">
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:fuata/domain/models/transaction.dart';
+import 'package:fuata/domain/models/unit.dart';
+
+import '../../widgets/activity/empty_activity.dart';
+import '../../widgets/activity/grouped_list.dart';
+import '../../widgets/app_chips.dart';
+import '../providers/app_providers.dart';
+import '../theme/app_spacing.dart';
+
+/// One filter at a time: everything, a transaction type, or a single unit.
+/// (ui-design-brief.md section 7.4: "Filter chips on top: All / Spent /
+/// Got / by unit.")
+sealed class Filter {
+  const Filter();
+  bool matches(MoneyTransaction t);
+}
+
+class _AllFilter extends Filter {
+  const _AllFilter();
+  @override
+  bool matches(MoneyTransaction t) => true;
+}
+
+class _TypeFilter extends Filter {
+  const _TypeFilter(this.type);
+  final TxType type;
+  @override
+  bool matches(MoneyTransaction t) => t.type == type;
+}
+
+class _UnitFilter extends Filter {
+  const _UnitFilter(this.unitId);
+  final String unitId;
+  @override
+  bool matches(MoneyTransaction t) => t.unitId == unitId;
+}
+
+class ActivityScreen extends ConsumerStatefulWidget {
+  const ActivityScreen({super.key});
+
+  @override
+  ConsumerState<ActivityScreen> createState() => _ActivityScreenState();
+}
+
+class _ActivityScreenState extends ConsumerState<ActivityScreen> {
+  Filter _filter = const _AllFilter();
+
+  @override
+  Widget build(BuildContext context) {
+    final txAsync = ref.watch(transactionsProvider);
+    final unitsAsync = ref.watch(unitsProvider);
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('Activity'),),
+      body: SafeArea(
+        child: unitsAsync.when(
+          loading: () => const Center(child: CircularProgressIndicator.adaptive(),) ,
+          error: (e, st) => Center(child: Text('Something went wrong: $e'),),
+          data: (units) {
+            final unitById = { for (final u in units) u.id: u };
+            return txAsync.when(
+              loading: () => const Center(child: CircularProgressIndicator.adaptive(),),
+              error: (e, st) => Center(child: Text('Something went wrong: $e'),),
+              data: (transactions) {
+                // Pending (unconfirmed) captures live in the review inbox
+                // (#21/#22), not built yet, so Activity only shows
+                // confirmed transactions for now.
+                final confirmed = transactions.where((t) => t.isConfirmed).toList();
+                final filtered = confirmed.where(_filter.matches).toList()..sort((a, b) => b.occurredAt.compareTo(a.occurredAt));
+
+                return Column(
+                  children: [
+                    FilterBar(
+                      units: units,
+                      selected: _filter,
+                      onSelected: (f) => setState(() {
+                        _filter = f;
+                      }),
+                    ),
+                    Expanded(
+                      child: filtered.isEmpty
+                          ? const EmptyActivity()
+                          : GroupedList(transactions: filtered, unitById: unitById),
+                    ),
+                  ],
+                );
+              }
+            );
+          }
+        ),
+      )
+    );
+  }
+}
+
+class FilterBar extends StatelessWidget {
+  final List<MoneyUnit> units;
+  final Filter selected;
+  final ValueChanged<Filter> onSelected;
+  const FilterBar({super.key, required this.units, required this.selected, required this.onSelected});
+
+  bool _isSelected(Filter f) {
+    if (f is _AllFilter) return selected is _AllFilter;
+    if (f is _TypeFilter && selected is _TypeFilter) {
+      return (selected as _TypeFilter).type == f.type;
+    }
+    if (f is _UnitFilter && selected is _UnitFilter) {
+      return (selected as _UnitFilter).unitId == f.unitId;
+    }
+    return false;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final chips = <MapEntry<String, Filter>>[
+      const MapEntry('All', _AllFilter()),
+      const MapEntry('Spent', _TypeFilter(TxType.spent)),
+      const MapEntry('Got', _TypeFilter(TxType.got)),
+      const MapEntry('Moved', _TypeFilter(TxType.moved)),
+      for (final u in units) MapEntry('${u.iconEmoji} ${u.name}', _UnitFilter(u.id)),
+    ];
+
+    return SizedBox(
+      height: 52,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.margin, vertical: AppSpacing.sm),
+        itemCount: chips.length,
+        separatorBuilder: (_, _) => const SizedBox(width: AppSpacing.sm),
+        itemBuilder: (context, i) {
+          final entry = chips[i];
+          return AppChoiceChip(
+            label: entry.key,
+            selected: _isSelected(entry.value),
+            onTap: () => onSelected(entry.value),
+          );
+        },
+      ),
+    );
+  }
+}
+</file>
+
+<file path="lib/ui/screens/my_money_screen.dart">
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:fuata/ui/providers/app_providers.dart';
+import 'package:fuata/ui/screens/unit_detail_screen.dart';
+
+import '../../domain/models/money.dart';
+import '../../widgets/sheets/edit_unit_sheet.dart';
+import '../../widgets/unit_list_tile.dart';
+import '../theme/app_colors.dart';
+import '../theme/app_spacing.dart';
+import '../theme/app_typography.dart';
+
+/// My money (ui-design-brief.md section 7.5): a total with a privacy eye,
+/// then every unit as a full-width row. Tapping a unit opens its detail
+/// page; "+ Add something" opens the same sheet used to edit a unit.
+class MyMoneyScreen extends ConsumerStatefulWidget {
+  const MyMoneyScreen({super.key});
+
+  @override
+  ConsumerState<MyMoneyScreen> createState() => _MyMoneyScreenState();
+}
+
+class _MyMoneyScreenState extends ConsumerState<MyMoneyScreen> {
+  bool _hidden = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final homeAsync = ref.watch(homeStateProvider);
+    final c = context.colors;
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('My Money')),
+      body: SafeArea(
+        child: homeAsync.when(
+          loading: () =>
+              const Center(child: CircularProgressIndicator.adaptive()),
+          error: (e, st) => Center(child: Text('Something went wrong: $e')),
+          data: (state) {
+            final currency = state.units.isNotEmpty
+                ? state.units.first.currencyCode
+                : 'KES';
+            final total = state.balanceByUnit.values.fold(0, (a, b) => a + b);
+
+            return ListView(
+              padding: const EdgeInsets.fromLTRB(
+                AppSpacing.margin,
+                AppSpacing.sm,
+                AppSpacing.margin,
+                100,
+              ),
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Altogether you have',
+                          style: AppTypography.bodyMd.copyWith(
+                            color: c.onSurfaceVariant,
+                          ),
+                        ),
+                        Text(
+                          _hidden ? '•••••' : Money(total, currency).format(),
+                          style: AppTypography.displayHeroMobile.copyWith(
+                            color: c.onSurface,
+                          ),
+                        ),
+                      ],
+                    ),
+                    IconButton(
+                      onPressed: () => setState(() => _hidden = !_hidden),
+                      icon: Icon(
+                        _hidden
+                            ? Icons.visibility_off_rounded
+                            : Icons.visibility_rounded,
+                        color: c.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: AppSpacing.lg),
+                for (final unit in state.units) ...[
+                  UnitListTile(
+                    emoji: unit.iconEmoji,
+                    color: unit.color,
+                    name: unit.name,
+                    balanceText: Money(
+                      state.balanceByUnit[unit.id] ?? 0,
+                      unit.currencyCode,
+                    ).format(),
+                    lastVerifiedAt: unit.lastVerifiedAt,
+                    hideAmount: _hidden,
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => UnitDetailScreen(unitId: unit.id),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: AppSpacing.sm),
+                ],
+                InkWell(
+                  onTap: () => showEditUnitSheet(context),
+                  borderRadius: BorderRadius.circular(
+                    AppSpacing.unitTileRadius,
+                  ),
+                  child: Container(
+                    padding: const EdgeInsets.all(AppSpacing.md),
+                    decoration: BoxDecoration(
+                      border: Border.all(color: c.outlineVariant),
+                      borderRadius: BorderRadius.circular(
+                        AppSpacing.unitTileRadius,
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(Icons.add, color: c.onSurfaceVariant),
+                        const SizedBox(width: AppSpacing.sm),
+                        Text(
+                          'Add something',
+                          style: AppTypography.bodyLg.copyWith(
+                            color: c.onSurfaceVariant,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
+</file>
+
+<file path="lib/ui/screens/placeholder_tab_screen.dart">
+import 'package:flutter/material.dart';
+import 'package:fuata/ui/theme/app_colors.dart';
+
+import '../theme/app_spacing.dart';
+import '../theme/app_typography.dart';
+
+/// A named, on-brand "coming soon" for a tab whose real screen is a later
+/// issue. Deliberately simple: exists so navigation is real today rather
+/// than bolted on later, without scope-creeping into #11/#12's work.
+class PlaceholderTabScreen extends StatelessWidget {
+  final String title;
+  final String emoji;
+  final String message;
+  final String issueRef;
+
+  const PlaceholderTabScreen({
+    super.key,
+    required this.title,
+    required this.emoji,
+    required this.message,
+    required this.issueRef,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(title),
+      ),
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(AppSpacing.xl),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(emoji, style: const TextStyle(fontSize: 40)),
+              const SizedBox(height: AppSpacing.md),
+              Text(
+                message,
+                textAlign: TextAlign.center,
+                style: AppTypography.bodyMd.copyWith(color: c.onSurfaceVariant),
+              ),
+              const SizedBox(height: AppSpacing.xs),
+              Text(
+                'Coming in $issueRef',
+                style: AppTypography.labelSm.copyWith(color: c.onSurfaceVariant),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+</file>
+
+<file path="lib/ui/screens/unit_detail_screen.dart">
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:fuata/domain/logic/ledger.dart';
+import 'package:intl/intl.dart';
+
+import '../../domain/models/money.dart';
+import '../../widgets/activity/empty_activity.dart';
+import '../../widgets/activity/grouped_list.dart';
+import '../../widgets/sheets/edit_unit_sheet.dart';
+import '../../widgets/sheets/update_balance_sheet.dart';
+import '../providers/app_providers.dart';
+import '../theme/app_colors.dart';
+import '../theme/app_spacing.dart';
+import '../theme/app_typography.dart';
+
+/// Unit page (ui-design-brief.md section 7.5): balance, "Update balance",
+/// edit name/icon/colour, archive, and that unit's recent activity —
+/// reusing GroupedList/showTransactionDetail from the Activity screen
+/// rather than a second implementation.
+///
+/// Per-unit limit and message-reading-rule rows are shown as "coming
+/// soon" placeholders: those are #15/#17 (limits UI) and #19/#20
+/// (capture) work, not built yet, flagged rather than silently omitted.
+
+class UnitDetailScreen extends ConsumerWidget {
+  final String unitId;
+  const UnitDetailScreen({super.key, required this.unitId});
+
+  void _confirmArchive(BuildContext context, WidgetRef ref, String unitId, String name) {
+    showDialog(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text('Archive $name?'),
+        content: const Text(
+          "It'll disappear from Home and My money, but its history stays safe.",
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () async {
+              await ref.read(unitRepositoryProvider).archiveUnit(unitId);
+              if (dialogContext.mounted) Navigator.of(dialogContext).pop();
+              if (context.mounted) Navigator.of(context).pop();
+            },
+            child: const Text('Archive'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final c = context.colors;
+    final unitsAsync = ref.watch(unitsProvider);
+    final txAsync = ref.watch(transactionsProvider);
+
+    return unitsAsync.when(
+      loading: () => const Center(child: CircularProgressIndicator.adaptive(),),
+      error: (e, st) => Center(child: Text('Something went wrong: $e'),),
+      data: (units) {
+        final unit = units.where((u) => u.id == unitId).firstOrNull;
+        if (unit == null) {
+          return Scaffold(
+            appBar: AppBar(),
+            body: Center(
+              child: Text("This one's gone.", style: AppTypography.bodyMd.copyWith(color: c.onSurfaceVariant)),
+            ),
+          );
+        }
+
+        return txAsync.when(
+          loading: () => const Center(child: CircularProgressIndicator.adaptive(),),
+          error: (e, st) => Center(child: Text('Something went wrong: $e')),
+          data: (allTransactions) {
+            final balance = Ledger.balanceOf(unit, allTransactions);
+            final unitTransactions = allTransactions
+                .where((t) => t.unitId == unit.id && t.isConfirmed)
+                .toList()
+              ..sort((a, b) => b.occurredAt.compareTo(a.occurredAt));
+
+            return Scaffold(
+              appBar: AppBar(
+                title: Text(unit.name),
+                actions: [
+                  IconButton(
+                    tooltip: 'Edit',
+                    onPressed: () => showEditUnitSheet(context, existing: unit),
+                    icon: const Icon(Icons.edit_outlined),
+                  ),
+                  PopupMenuButton<String>(
+                    onSelected: (v) {
+                      if (v == 'archive') _confirmArchive(context, ref, unit.id, unit.name);
+                    },
+                    itemBuilder: (_) => const [
+                      PopupMenuItem(value: 'archive', child: Text('Archive')),
+                    ],
+                  ),
+                ],
+              ),
+              body: SafeArea(
+                child: ListView(
+                  padding: const EdgeInsets.fromLTRB(AppSpacing.margin, AppSpacing.sm, AppSpacing.margin, AppSpacing.xl),
+                  children: [
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(AppSpacing.lg),
+                      decoration: BoxDecoration(
+                        color: unit.color.withValues(alpha: 0.10),
+                        borderRadius: BorderRadius.circular(AppSpacing.cardRadiusHero),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Text(unit.iconEmoji, style: const TextStyle(fontSize: 28)),
+                              const SizedBox(width: AppSpacing.sm),
+                              Text(unit.name, style: AppTypography.headlineSm.copyWith(color: c.onSurface)),
+                            ],
+                          ),
+                          const SizedBox(height: AppSpacing.sm),
+                          Text(
+                            Money(balance, unit.currencyCode).format(),
+                            style: AppTypography.displayHeroMobile.copyWith(color: c.onSurface),
+                          ),
+                          const SizedBox(height: AppSpacing.xs),
+                          Text(
+                            unit.lastVerifiedAt == null
+                                ? 'Not checked yet'
+                                : 'Last checked ${DateFormat('d MMM, h:mm a').format(unit.lastVerifiedAt!)}',
+                            style: AppTypography.bodySm.copyWith(color: c.onSurfaceVariant),
+                          ),
+                          const SizedBox(height: AppSpacing.md),
+                          FilledButton.tonal(
+                            onPressed: () => showUpdateBalanceSheet(
+                              context,
+                              unit: unit,
+                              currentBalanceMinor: balance,
+                            ),
+                            child: const Text('Update balance'),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: AppSpacing.lg),
+                    _ComingSoonRow(
+                      icon: Icons.speed_rounded,
+                      title: 'Limit for this unit',
+                      subtitle: 'Set a spending limit just for this one — coming in #15/#17',
+                    ),
+                    const SizedBox(height: AppSpacing.sm),
+                    _ComingSoonRow(
+                      icon: Icons.mark_email_read_outlined,
+                      title: 'Reading messages',
+                      subtitle: 'Teach the app to catch transactions here — coming in #19/#20',
+                    ),
+                    const SizedBox(height: AppSpacing.lg),
+                    Text('Recent activity', style: AppTypography.headlineSm.copyWith(color: c.onSurface)),
+                    const SizedBox(height: AppSpacing.sm),
+                    if (unitTransactions.isEmpty)
+                      const EmptyActivity()
+                    else
+                      GroupedList(transactions: unitTransactions, unitById: {unit.id: unit}),
+
+                  ],
+                ),
+              ),
+            );
+          }
+        );
+      }
+    );
+  }
+}
+
+class _ComingSoonRow extends StatelessWidget {
+  const _ComingSoonRow({required this.icon, required this.title, required this.subtitle});
+  final IconData icon;
+  final String title;
+  final String subtitle;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    return Container(
+      padding: const EdgeInsets.all(AppSpacing.md),
+      decoration: BoxDecoration(
+        border: Border.all(color: c.outlineVariant.withValues(alpha: 0.35)),
+        borderRadius: BorderRadius.circular(AppSpacing.unitTileRadius),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, color: c.onSurfaceVariant),
+          const SizedBox(width: AppSpacing.sm),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title, style: AppTypography.bodyMd.copyWith(color: c.onSurface)),
+                Text(subtitle, style: AppTypography.bodySm.copyWith(color: c.onSurfaceVariant)),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+extension _FirstOrNull<T> on Iterable<T> {
+  T? get firstOrNull => isEmpty ? null : first;
+}
+</file>
+
 <file path="lib/ui/theme/app_colors.dart">
 import 'package:flutter/material.dart';
 
@@ -2137,6 +2087,41 @@ class AppTheme {
         contentTextStyle: AppTypography.bodyMd.copyWith(color: c.onSurface),
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      ),
+    );
+  }
+}
+</file>
+
+<file path="lib/widgets/activity/empty_activity.dart">
+import 'package:flutter/material.dart';
+import 'package:fuata/ui/theme/app_colors.dart';
+
+import '../../ui/theme/app_spacing.dart';
+import '../../ui/theme/app_typography.dart';
+
+class EmptyActivity extends StatelessWidget {
+  const EmptyActivity({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(AppSpacing.xl),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('🗂️', style: TextStyle(fontSize: 36)),
+            const SizedBox(height: AppSpacing.sm),
+            Text(
+              'Nothing here yet.',
+              style: AppTypography.bodyMd.copyWith(color: c.onSurfaceVariant),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -2781,6 +2766,713 @@ class MoreSection extends StatelessWidget {
 }
 </file>
 
+<file path="lib/widgets/sheets/edit_unit_sheet.dart">
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../../domain/models/unit.dart';
+import '../../ui/providers/app_providers.dart';
+import '../../ui/theme/app_colors.dart';
+import '../../ui/theme/app_spacing.dart';
+import '../../ui/theme/app_typography.dart';
+import '../app_chips.dart';
+
+/// Create a unit, or edit an existing one's name/icon/colour
+/// (ui-design-brief.md section 7.5: "edit name/icon/colour" is a separate
+/// action from "Update balance" — kind and currency are fixed at creation,
+/// matching MoneyUnit, which has no way to change them after the fact).
+///
+/// Simplification, flagged rather than silently done: currency defaults to
+/// KES with no picker in v0.1 (see design.md ADR — overall limits are
+/// single-currency for now). Multi-currency unit creation is future work.
+Future<void> showEditUnitSheet(BuildContext context, {MoneyUnit? existing}) {
+  return showModalBottomSheet(
+    context: context,
+    isScrollControlled: true,
+    backgroundColor: Colors.transparent,
+    builder: (_) => EditUnitSheet(existing: existing),
+  );
+}
+
+const _kindOptions = [
+  (UnitKind.cash, '💵', 'Cash'),
+  (UnitKind.mobileMoney, '📱', 'Mobile money'),
+  (UnitKind.bank, '🏦', 'Bank'),
+  (UnitKind.card, '💳', 'Card'),
+  (UnitKind.other, '👛', 'Other'),
+];
+
+const _emojiOptions = [
+  '💵',
+  '📱',
+  '🏦',
+  '💳',
+  '👛',
+  '💰',
+  '🏧',
+  '💷',
+  '💶',
+  '🐷',
+];
+
+class EditUnitSheet extends ConsumerStatefulWidget {
+  final MoneyUnit? existing;
+  const EditUnitSheet({super.key, this.existing});
+
+  @override
+  ConsumerState<EditUnitSheet> createState() => _EditUnitSheetState();
+}
+
+class _EditUnitSheetState extends ConsumerState<EditUnitSheet> {
+  late final _nameController = TextEditingController(
+    text: widget.existing?.name ?? '',
+  );
+  late final _openingController = TextEditingController();
+  late UnitKind _kind = widget.existing?.kind ?? UnitKind.cash;
+  late String _emoji = widget.existing?.iconEmoji ?? _emojiOptions.first;
+  late Color? _color = widget.existing?.color;
+  bool _saving = false;
+  String? _error;
+
+  bool get _isEdit => widget.existing != null;
+
+  Future<void> _save() async {
+    final name = _nameController.text.trim();
+    if (name.isEmpty) {
+      setState(() => _error = 'Give it a name');
+      return;
+    }
+
+    setState(() {
+      _saving = true;
+      _error = null;
+    });
+
+    final repo = ref.read(unitRepositoryProvider);
+
+    try {
+      if (_isEdit) {
+        await repo.updateUnit(
+          widget.existing!.copyWith(
+            name: name,
+            iconEmoji: _emoji,
+            color: _color,
+          ),
+        );
+      } else {
+        int openingMinor = 0;
+        final openingText = _openingController.text.trim();
+        if (openingText.isNotEmpty) {
+          final parsed = double.tryParse(openingText.replaceAll(',', '')) ?? 0;
+          openingMinor = (parsed * 100).round(); // KES-only in v0.1, 2dp
+        }
+        final now = DateTime.now();
+        await repo.addUnit(
+          MoneyUnit(
+            id: 'unit_${now.microsecondsSinceEpoch}',
+            name: name,
+            kind: _kind,
+            currencyCode: 'KES',
+            iconEmoji: _emoji,
+            color: _color!,
+            openingBalanceMinor: openingMinor,
+            sortOrder: now.microsecondsSinceEpoch,
+            createdAt: now,
+          ),
+        );
+      }
+      if (mounted) Navigator.of(context).pop();
+    } catch (error) {
+      setState(() {
+        _saving = false;
+        _error = 'Could not save: $error';
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _openingController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    final palette = [
+      c.unitCash,
+      c.unitMobileMoney,
+      c.unitBank,
+      c.unitCard,
+      c.secondary,
+      c.primary,
+      c.statusWarning,
+      c.statusDanger,
+    ];
+    _color ??= palette.first;
+
+    return SafeArea(
+      child: Container(
+        decoration: BoxDecoration(
+          color: c.surface,
+          borderRadius: const BorderRadius.vertical(
+            top: Radius.circular(AppSpacing.cardRadiusHero),
+          ),
+        ),
+        child: Padding(
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.of(context).viewInsets.bottom,
+          ),
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(
+              AppSpacing.lg,
+              AppSpacing.md,
+              AppSpacing.lg,
+              AppSpacing.lg,
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Center(
+                  child: Container(
+                    width: 40,
+                    height: 4,
+                    margin: const EdgeInsets.only(bottom: AppSpacing.md),
+                    decoration: BoxDecoration(
+                      color: c.outlineVariant,
+                      borderRadius: BorderRadius.circular(AppSpacing.pill),
+                    ),
+                  ),
+                ),
+                Text(
+                  _isEdit ? 'Edit ${widget.existing!.name}' : 'Add some money',
+                  style: AppTypography.headlineSm.copyWith(color: c.onSurface),
+                ),
+                const SizedBox(height: AppSpacing.md),
+                TextField(
+                  controller: _nameController,
+                  decoration: const InputDecoration(
+                    hintText: 'What do you call it?',
+                  ),
+                  style: AppTypography.bodyLg.copyWith(color: c.onSurface),
+                ),
+                const SizedBox(height: AppSpacing.md),
+                if (!_isEdit) ...[
+                  Text(
+                    'Kind',
+                    style: AppTypography.labelMd.copyWith(
+                      color: c.onSurfaceVariant,
+                    ),
+                  ),
+                  const SizedBox(height: AppSpacing.sm),
+                  Wrap(
+                    spacing: AppSpacing.sm,
+                    runSpacing: AppSpacing.sm,
+                    children: _kindOptions.map((opt) {
+                      final (kind, emoji, label) = opt;
+                      return AppChoiceChip(
+                        label: '$emoji $label',
+                        selected: _kind == kind,
+                        onTap: () => setState(() => _kind = kind),
+                      );
+                    }).toList(),
+                  ),
+                  const SizedBox(height: AppSpacing.md),
+                ],
+                Text(
+                  'Icon',
+                  style: AppTypography.labelMd.copyWith(
+                    color: c.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.sm),
+                Wrap(
+                  spacing: AppSpacing.sm,
+                  runSpacing: AppSpacing.sm,
+                  children: _emojiOptions.map((e) {
+                    final selected = _emoji == e;
+                    return InkWell(
+                      onTap: () => setState(() => _emoji = e),
+                      borderRadius: BorderRadius.circular(AppSpacing.pill),
+                      child: Container(
+                        width: 40,
+                        height: 40,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: selected
+                              ? c.primary.withValues(alpha: 0.15)
+                              : c.surfaceContainer,
+                          border: Border.all(
+                            color: selected ? c.primary : Colors.transparent,
+                          ),
+                        ),
+                        alignment: Alignment.center,
+                        child: Text(e, style: const TextStyle(fontSize: 18)),
+                      ),
+                    );
+                  }).toList(),
+                ),
+                const SizedBox(height: AppSpacing.md),
+                Text(
+                  'Colour',
+                  style: AppTypography.labelMd.copyWith(
+                    color: c.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.sm),
+                Wrap(
+                  spacing: AppSpacing.sm,
+                  runSpacing: AppSpacing.sm,
+                  children: palette.map((swatch) {
+                    final selected = _color!.toARGB32() == swatch.toARGB32();
+                    return InkWell(
+                      onTap: () => setState(() => _color = swatch),
+                      borderRadius: BorderRadius.circular(AppSpacing.pill),
+                      child: Container(
+                        width: 32,
+                        height: 32,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: swatch,
+                          border: Border.all(
+                            color: selected ? c.onSurface : Colors.transparent,
+                            width: 2,
+                          ),
+                        ),
+                      ),
+                    );
+                  }).toList(),
+                ),
+                if (!_isEdit) ...[
+                  const SizedBox(height: AppSpacing.md),
+                  TextField(
+                    controller: _openingController,
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                    decoration: const InputDecoration(
+                      hintText: 'How much is in it now? (optional)',
+                    ),
+                    style: AppTypography.bodyLg.copyWith(color: c.onSurface),
+                  ),
+                ],
+                if (_error != null) ...[
+                  const SizedBox(height: AppSpacing.sm),
+                  Text(
+                    _error!,
+                    style: AppTypography.bodySm.copyWith(color: c.statusDanger),
+                  ),
+                ],
+                const SizedBox(height: AppSpacing.lg),
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton(
+                    onPressed: _saving ? null : _save,
+                    child: _saving
+                        ? const SizedBox(
+                            height: 18,
+                            width: 18,
+                            child: CircularProgressIndicator.adaptive(
+                              strokeWidth: 2,
+                            ),
+                          )
+                        : Text(_isEdit ? 'Save' : 'Add'),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+</file>
+
+<file path="lib/widgets/sheets/transaction_detail_sheet.dart">
+import 'package:flutter/material.dart';
+import 'package:fuata/domain/models/money.dart';
+import 'package:intl/intl.dart';
+
+import '../../domain/models/transaction.dart';
+import '../../domain/models/unit.dart';
+import '../../ui/theme/app_colors.dart';
+import '../../ui/theme/app_spacing.dart';
+import '../../ui/theme/app_typography.dart';
+import '../app_chips.dart';
+
+// ---------------------------------------------------------------------------
+// Transaction detail sheet, shown at Simple / Balanced / Detailed levels
+// (ui-design-brief.md sections 3 and 7.4). A per-settings default detail
+// level is issue #12's job; this sheet carries its own local toggle so the
+// three levels can be seen and used today.
+// ---------------------------------------------------------------------------
+
+enum _DetailLevel { simple, balanced, detailed }
+
+class TransactionDetailSheet extends StatefulWidget {
+  final MoneyTransaction transaction;
+  final MoneyUnit? unit;
+  const TransactionDetailSheet({super.key, required this.transaction, required this.unit});
+
+  @override
+  State<TransactionDetailSheet> createState() => _TransactionDetailSheetState();
+}
+
+class _TransactionDetailSheetState extends State<TransactionDetailSheet> {
+  _DetailLevel _level = _DetailLevel.balanced;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    final t = widget.transaction;
+    final unit = widget.unit;
+    final currency = unit?.currencyCode ?? 'KES';
+    final amount = Money(t.amountMinor.abs(), currency);
+    final isInflow = t.amountMinor >=0;
+
+    return SafeArea(
+      child: Container(
+        decoration: BoxDecoration(
+          color: c.surface,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(AppSpacing.cardRadiusHero)),
+        ),
+        padding: const EdgeInsets.fromLTRB(AppSpacing.lg, AppSpacing.md, AppSpacing.lg, AppSpacing.lg),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+Center(
+  child: Container(
+    width: 40,
+    height: 4,
+    margin: const EdgeInsets.only(bottom: AppSpacing.md),
+    decoration: BoxDecoration(
+      color: c.outlineVariant,
+      borderRadius: BorderRadius.circular(AppSpacing.pill),
+    ),
+  ),
+),
+            Row(
+              children: [
+                Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    color: (unit?.color ?? c.primary).withValues(alpha: 0.18),
+                    shape: BoxShape.circle,
+                  ),
+                  alignment: Alignment.center,
+                  child: Text(unit?.iconEmoji ?? '💰', style: const TextStyle(fontSize: 20)),
+                ),
+                const SizedBox(width: AppSpacing.md),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        t.counterparty ?? unit?.name ?? 'Unknown',
+                        style: AppTypography.headlineSm.copyWith(color: c.onSurface),
+                      ),
+                      Text(
+                        DateFormat('EEEE, d MMM · h:mm a').format(t.occurredAt),
+                        style: AppTypography.bodySm.copyWith(color: c.onSurfaceVariant),
+                      ),
+                    ],
+                  ),
+                )
+              ],
+            ),
+            const SizedBox(height: AppSpacing.md),
+            Text(
+              '${isInflow ? '+' : '-'}${amount.format()}',
+              style: AppTypography.headlineLg.copyWith(
+                color: isInflow ? c.statusSafe : c.onSurface,
+              ),
+            ),
+            const SizedBox(height: AppSpacing.md,),
+            Row(
+              children: _DetailLevel.values.map((lvl) {
+                return Padding(
+                  padding: const EdgeInsets.only(right: AppSpacing.sm),
+                  child: AppChoiceChip(
+                    label: switch (lvl) {
+                      _DetailLevel.simple => 'Simple',
+                      _DetailLevel.balanced => 'Balanced',
+                      _DetailLevel.detailed => 'Detailed',
+                    },
+                    selected: _level == lvl,
+                    onTap: () => setState(() => _level = lvl),
+                  ),
+                );
+              }).toList(),
+            ),
+            const SizedBox(height: AppSpacing.md),
+            ...detailRows(context),
+          ],
+        ),
+      ),
+    );
+  }
+
+  List<Widget> detailRows(BuildContext context) {
+    final t = widget.transaction;
+    final unit = widget.unit;
+    final rows = <MapEntry<String, String>>[];
+
+    // Simple: nothing extra — title/time/amount above is already the
+    // whole story.
+    if (_level == _DetailLevel.simple) return const [];
+
+    // Balanced: unit and a friendly type label.
+    rows.add(MapEntry('Money', unit?.name ?? 'Unknown'));
+    rows.add(MapEntry('Type', switch (t.type) {
+      TxType.spent => 'Spent',
+      TxType.got => 'Got',
+      TxType.moved => 'Moved',
+      TxType.adjustment => 'Balance update',
+    }));
+
+    if (_level == _DetailLevel.detailed) {
+      rows.add(MapEntry('Exact time', DateFormat('d MMM yyyy, h:mm:ss a').format(t.occurredAt)));
+      if (t.code != null) rows.add(MapEntry('Code', t.code!));
+      if (t.transferGroupId != null) rows.add(const MapEntry('Transfer', 'Linked to another entry'));
+      if (t.parentId != null) rows.add(MapEntry('Fee for', t.parentId!));
+      if (t.note != null) rows.add(MapEntry('Note', t.note!));
+      rows.add(MapEntry('Added via', switch (t.source) {
+        TxSource.manual => 'Typed in',
+        TxSource.shared => 'Shared message',
+        TxSource.notification => 'Caught from a notification',
+      }));
+      if (t.balanceAfterMinor != null) {
+        rows.add(MapEntry(
+          'Balance after (reported)',
+          Money(t.balanceAfterMinor!, unit?.currencyCode ?? 'KES').format(),
+        ));
+      }
+    }
+
+    final c = context.colors;
+    return rows
+        .map((e) => Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(e.key, style: AppTypography.bodySm.copyWith(color: c.onSurfaceVariant)),
+          Flexible(
+            child: Text(
+              e.value,
+              textAlign: TextAlign.right,
+              style: AppTypography.bodySm.copyWith(color: c.onSurface),
+            ),
+          ),
+        ],
+      ),
+    ))
+        .toList();
+  }
+}
+</file>
+
+<file path="lib/widgets/sheets/update_balance_sheet.dart">
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../../domain/models/money.dart';
+import '../../domain/models/transaction.dart';
+import '../../domain/models/unit.dart';
+import '../../ui/providers/app_providers.dart';
+import '../../ui/theme/app_colors.dart';
+import '../../ui/theme/app_spacing.dart';
+import '../../ui/theme/app_typography.dart';
+
+/// "Update balance" (ui-design-brief.md section 7.5): the user types the
+/// true amount; the app records the DIFFERENCE as an adjustment entry
+/// rather than overwriting anything (design.md field rules table —
+/// balances are always derived from the ledger, never stored directly).
+Future<void> showUpdateBalanceSheet(
+  BuildContext context, {
+  required MoneyUnit unit,
+  required int currentBalanceMinor,
+}) {
+  return showModalBottomSheet(
+    context: context,
+    isScrollControlled: true,
+    backgroundColor: Colors.transparent,
+    builder: (_) => UpdateBalanceSheet(
+      unit: unit,
+      currentBalanceMinor: currentBalanceMinor,
+    ),
+  );
+}
+
+class UpdateBalanceSheet extends ConsumerStatefulWidget {
+  final MoneyUnit unit;
+  final int currentBalanceMinor;
+  const UpdateBalanceSheet({
+    super.key,
+    required this.unit,
+    required this.currentBalanceMinor,
+  });
+
+  @override
+  ConsumerState<UpdateBalanceSheet> createState() => _UpdateBalanceSheetState();
+}
+
+class _UpdateBalanceSheetState extends ConsumerState<UpdateBalanceSheet> {
+  late final _controller = TextEditingController(
+    text: Money(widget.currentBalanceMinor, widget.unit.currencyCode).format(),
+  );
+  bool _saving = false;
+  String? _error;
+
+  Future<void> _save() async {
+    late final Money trueBalance;
+    try {
+      trueBalance = Money.parseMajor(
+        _controller.text,
+        widget.unit.currencyCode,
+      );
+    } on FormatException {
+      setState(() => _error = "That doesn't look like an amount");
+      return;
+    }
+
+    final diff = trueBalance.minor - widget.currentBalanceMinor;
+    setState(() {
+      _saving = true;
+      _error = null;
+    });
+
+    try {
+      if (diff != 0) {
+        final now = DateTime.now();
+        await ref
+            .read(transactionRepositoryProvider)
+            .addTransaction(
+              MoneyTransaction(
+                id: 'adj_${now.microsecondsSinceEpoch}',
+                unitId: widget.unit.id,
+                type: TxType.adjustment,
+                amountMinor: diff,
+                counterparty: 'Balance update',
+                occurredAt: now,
+                createdAt: now,
+              ),
+            );
+      }
+      await ref
+          .read(unitRepositoryProvider)
+          .updateUnit(widget.unit.copyWith(lastVerifiedAt: DateTime.now()));
+      if (mounted) Navigator.of(context).pop();
+    } catch (error) {
+      setState(() {
+        _saving = false;
+        _error = 'Could not save: $error';
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    final symbol = currencySymbol(widget.unit.currencyCode);
+
+    return SafeArea(
+      child: Container(
+        decoration: BoxDecoration(
+          color: c.surface,
+          borderRadius: const BorderRadius.vertical(
+            top: Radius.circular(AppSpacing.cardRadiusHero),
+          ),
+        ),
+        child: Padding(
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.of(context).viewInsets.bottom,
+          ),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(
+              AppSpacing.lg,
+              AppSpacing.md,
+              AppSpacing.lg,
+              AppSpacing.lg,
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Center(
+                  child: Container(
+                    width: 40,
+                    height: 4,
+                    margin: const EdgeInsets.only(bottom: AppSpacing.md),
+                    decoration: BoxDecoration(
+                      color: c.outlineVariant,
+                      borderRadius: BorderRadius.circular(AppSpacing.pill),
+                    ),
+                  ),
+                ),
+                Text(
+                  'Update ${widget.unit.name}',
+                  style: AppTypography.headlineSm.copyWith(color: c.onSurface),
+                ),
+                const SizedBox(height: AppSpacing.xs),
+                Text(
+                  "What's the true balance right now?",
+                  style: AppTypography.bodySm.copyWith(
+                    color: c.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.md),
+                TextField(
+                  controller: _controller,
+                  autofocus: true,
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
+                  decoration: InputDecoration(prefixText: symbol),
+                  style: AppTypography.headlineLg.copyWith(color: c.onSurface),
+                ),
+                if (_error != null) ...[
+                  const SizedBox(height: AppSpacing.sm),
+                  Text(
+                    _error!,
+                    style: AppTypography.bodySm.copyWith(color: c.statusDanger),
+                  ),
+                ],
+                const SizedBox(height: AppSpacing.lg),
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton(
+                    onPressed: _saving ? null : _save,
+                    child: _saving
+                        ? const SizedBox(
+                            height: 18,
+                            width: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Text('Update'),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+</file>
+
 <file path="lib/widgets/app_chips.dart">
 import 'package:flutter/material.dart';
 
@@ -2917,6 +3609,37 @@ class WordLabelChip extends StatelessWidget {
 }
 </file>
 
+<file path="lib/widgets/theme_button.dart">
+import 'package:flutter/material.dart';
+
+//TODO: Will be handled via Riverpod later
+
+class ThemeButton extends StatefulWidget {
+  const ThemeButton({super.key});
+
+  @override
+  State<ThemeButton> createState() => _ThemeButtonState();
+}
+
+class _ThemeButtonState extends State<ThemeButton> {
+  ThemeMode mode = ThemeMode.system;
+
+  void toggleTheme() {
+    setState(() {
+      mode = mode == ThemeMode.dark ? ThemeMode.light : ThemeMode.dark;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return IconButton(
+      onPressed: toggleTheme,
+      icon: const Icon(Icons.brightness_6_rounded),
+    );
+  }
+}
+</file>
+
 <file path="lib/widgets/transaction_row.dart">
 import 'package:flutter/material.dart';
 
@@ -3017,6 +3740,95 @@ class TransactionRow extends StatelessWidget {
       buf.write(s[i]);
     }
     return buf.toString();
+  }
+}
+</file>
+
+<file path="lib/widgets/unit_list_tile.dart">
+import 'package:flutter/material.dart';
+import 'package:fuata/ui/theme/app_colors.dart';
+import 'package:fuata/ui/theme/app_spacing.dart';
+import 'package:intl/intl.dart';
+
+import '../ui/theme/app_typography.dart';
+
+/// Vertical unit row for My money (ui-design-brief.md section 7.5):
+/// "Cards for each unit with icon, name, amount, and a small 'last
+/// updated' or 'checked' hint." Distinct from the horizontal UnitCard
+/// used on Home — different layout, same accent-colour convention.
+class UnitListTile extends StatelessWidget {
+  final String emoji;
+  final Color color;
+  final String name;
+  final String balanceText;
+  final DateTime? lastVerifiedAt;
+  final bool hideAmount;
+  final VoidCallback? onTap;
+
+  const UnitListTile({
+    super.key,
+    required this.emoji,
+    required this.color,
+    required this.name,
+    required this.balanceText,
+    this.lastVerifiedAt,
+    this.hideAmount = false,
+    this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final c= context.colors;
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(AppSpacing.unitTileRadius),
+        child: Ink(
+          decoration: BoxDecoration(
+            color: c.surface,
+            borderRadius: BorderRadius.circular(AppSpacing.unitTileRadius),
+            border: Border.all(color: c.outlineVariant.withValues(alpha: 0.35)),
+          ),
+          padding: const EdgeInsets.all(AppSpacing.md),
+          child: Row(
+            children: [
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(color: color.withValues(alpha: 0.18), shape: BoxShape.circle),
+                alignment: Alignment.center,
+                child: Text(emoji, style: const TextStyle(fontSize: 20)),
+              ),
+              const SizedBox(width: AppSpacing.md),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(name, style: AppTypography.bodyLg.copyWith(color: c.onSurface)),
+                    Text(
+                      lastVerifiedAt == null
+                          ? 'Not checked yet'
+                          : 'Checked ${DateFormat('d MMM').format(lastVerifiedAt!)}',
+                      style: AppTypography.bodySm.copyWith(color: c.onSurfaceVariant),
+                    ),
+                  ],
+                ),
+              ),
+              Text(
+                hideAmount ? '••••' : balanceText,
+                style: AppTypography.headlineSm.copyWith(
+                  color: c.onSurface,
+                  fontFeatures: AppTypography.numericKeypad.fontFeatures,
+                ),
+              ),
+              Icon(Icons.chevron_right_rounded, color: c.onSurfaceVariant),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }
 </file>
@@ -4143,6 +4955,65 @@ extension _FirstOrNull<T> on Iterable<T> {
 }
 </file>
 
+<file path="lib/ui/screens/root_shell.dart">
+import 'package:flutter/material.dart';
+import 'package:fuata/ui/screens/home_screen.dart';
+import 'package:fuata/ui/screens/my_money_screen.dart';
+import 'package:fuata/ui/screens/placeholder_tab_screen.dart';
+
+import 'activity_screen.dart';
+
+/// Persistent bottom nav across the app's 4 main tabs
+/// (ui-design-brief.md section 7.2). Today, My Money and Activity are real;
+/// Me is a lightweight placeholders until #12 builds it properly.
+/// Each tab keeps its own Scaffold/AppBar; this shell only owns the nav bar,
+/// so switching tabs doesn't rebuild the others (IndexedStack keeps state).
+class RootShell extends StatefulWidget {
+  const RootShell({super.key});
+
+  @override
+  State<RootShell> createState() => _RootShellState();
+}
+
+class _RootShellState extends State<RootShell> {
+  int _index = 0;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: IndexedStack(
+        index: _index,
+        children: [
+          HomeScreen(
+            onSeeAllActivity: () => setState(() {
+              _index = 1;
+            }),
+          ),
+          const ActivityScreen(),
+          const MyMoneyScreen(),
+          const PlaceholderTabScreen(
+            title: 'Me',
+            emoji: '⚙️',
+            message: 'Personalisation, limits and privacy settings land here.',
+            issueRef: '#12',
+          ),
+        ],
+      ),
+      bottomNavigationBar: NavigationBar(
+        selectedIndex: _index,
+        onDestinationSelected: (i) => setState(() => _index = i),
+        destinations: const [
+          NavigationDestination(icon: Icon(Icons.today_rounded), label: 'Today'),
+          NavigationDestination(icon: Icon(Icons.receipt_long_rounded), label: 'Activity'),
+          NavigationDestination(icon: Icon(Icons.account_balance_wallet_rounded), label: 'My money'),
+          NavigationDestination(icon: Icon(Icons.person_rounded), label: 'Me'),
+        ],
+      ),
+    );
+  }
+}
+</file>
+
 <file path="lib/ui/theme/app_status.dart">
 import 'package:flutter/material.dart';
 
@@ -4309,6 +5180,108 @@ class AppTypography {
     labelMedium: labelMd.copyWith(color: variant),
     labelSmall: labelSm.copyWith(color: variant),
   );
+}
+</file>
+
+<file path="lib/widgets/activity/grouped_list.dart">
+import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
+
+import '../../domain/models/money.dart';
+import '../../domain/models/transaction.dart';
+import '../../domain/models/unit.dart';
+import '../../ui/theme/app_colors.dart';
+import '../../ui/theme/app_spacing.dart';
+import '../../ui/theme/app_typography.dart';
+import '../sheets/transaction_detail_sheet.dart';
+import '../transaction_row.dart';
+
+
+Future<void> showTransactionDetail(
+    BuildContext context, {
+      required MoneyTransaction transaction,
+      required MoneyUnit? unit,
+    }) {
+  return showModalBottomSheet(
+    context: context,
+    isScrollControlled: true,
+    backgroundColor: Colors.transparent,
+    builder: (_) => TransactionDetailSheet(transaction: transaction, unit: unit),
+  );
+}
+
+class GroupedList extends StatelessWidget {
+  final List<MoneyTransaction> transactions;
+  final Map<String, MoneyUnit> unitById;
+  const GroupedList({super.key, required this.transactions, required this.unitById});
+
+  String _dayHeader(DateTime day) {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    if (day == today) return 'Today';
+    if (day == today.subtract(const Duration(days: 1))) return 'Yesterday';
+    return DateFormat('EEE, d MMM').format(day);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final groups = <DateTime, List<MoneyTransaction>>{};
+    for (final t in transactions) {
+      final day = DateTime(t.occurredAt.year, t.occurredAt.month, t.occurredAt.day);
+      groups.putIfAbsent(day, () => []).add(t);
+    }
+    final days = groups.keys.toList()..sort((a, b) => b.compareTo(a));
+
+    return ListView.builder(
+        shrinkWrap: true,
+        physics: const NeverScrollableScrollPhysics(),
+        padding: const EdgeInsets.fromLTRB(
+          AppSpacing.margin, AppSpacing.sm, AppSpacing.margin, AppSpacing.xl,
+        ),
+        itemCount: days.length,
+        itemBuilder: (context, i) {
+          final day = days[i];
+          final dayTx = groups[day]!;
+          final currency = dayTx.isNotEmpty ? unitById[dayTx.first.unitId]?.currencyCode ?? 'KES' : 'KES';
+          final netMinor = dayTx
+              .where((t) => t.type == TxType.spent || t.type == TxType.got)
+              .fold(0, (sum, t) => sum + t.amountMinor);
+
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(_dayHeader(day), style: AppTypography.labelMd.copyWith(color: context.colors.onSurfaceVariant)),
+                    Text(
+                      Money(netMinor, currency).format(showSign: true),
+                      style: AppTypography.labelSm.copyWith(
+                        color: netMinor >= 0 ? context.colors.statusSafe : context.colors.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              ...dayTx.map((t) {
+                final unit = unitById[t.unitId];
+                return TransactionRow(
+                  title: t.counterparty ?? unit?.name ?? 'Unknown',
+                  subtitle: DateFormat('h:mm a').format(t.occurredAt),
+                  amount: Money(t.amountMinor, unit?.currencyCode ?? 'KES').majorValue,
+                  emoji: unit?.iconEmoji ?? '💰',
+                  accent: unit?.color,
+                  onTap: () => showTransactionDetail(context, transaction: t, unit: unit),
+                );
+              }),
+              const SizedBox(height: AppSpacing.sm,),
+            ],
+          );
+        }
+    );
+  }
 }
 </file>
 
@@ -4743,39 +5716,6 @@ A running, honest record of the build: goals, what got done, what broke, and why
 **Tomorrow:** see Day 2.
 </file>
 
-<file path="lib/main.dart">
-import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:fuata/ui/screens/root_shell.dart';
-import 'package:fuata/ui/theme/app_theme.dart';
-
-void main() {
-  runApp(const ProviderScope(child: Fuata()));
-}
-
-class Fuata extends StatefulWidget {
-  const Fuata({super.key});
-
-  @override
-  State<Fuata> createState() => _FuataState();
-}
-
-class _FuataState extends State<Fuata> {
-  final ThemeMode _mode = ThemeMode.system;
-
-  @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      debugShowCheckedModeBanner: false,
-      themeMode: _mode,
-      theme: AppTheme.light(),
-      darkTheme: AppTheme.dark(),
-      home: RootShell(),
-    );
-  }
-}
-</file>
-
 <file path="pubspec.yaml">
 name: fuata
 description: "A new Flutter project."
@@ -4819,6 +5759,39 @@ flutter:
           weight: 700
 </file>
 
+<file path="lib/main.dart">
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:fuata/ui/screens/root_shell.dart';
+import 'package:fuata/ui/theme/app_theme.dart';
+
+void main() {
+  runApp(const ProviderScope(child: Fuata()));
+}
+
+class Fuata extends StatefulWidget {
+  const Fuata({super.key});
+
+  @override
+  State<Fuata> createState() => _FuataState();
+}
+
+class _FuataState extends State<Fuata> {
+  final ThemeMode _mode = ThemeMode.system;
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      debugShowCheckedModeBanner: false,
+      themeMode: _mode,
+      theme: AppTheme.light(),
+      darkTheme: AppTheme.dark(),
+      home: RootShell(),
+    );
+  }
+}
+</file>
+
 <file path="lib/ui/screens/home_screen.dart">
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -4827,6 +5800,7 @@ import 'package:intl/intl.dart';
 
 import '../../domain/models/money.dart';
 import '../../widgets/sheets/add_transaction_sheet.dart';
+import '../../widgets/sheets/edit_unit_sheet.dart';
 import '../providers/app_providers.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_spacing.dart';
@@ -5024,7 +5998,7 @@ class UnitRow extends StatelessWidget {
         separatorBuilder: (_, _) => const SizedBox(width: AppSpacing.gutterSm),
         itemBuilder: (context, i) {
           if (i == state.units.length) {
-            return AddUnitCard(onTap: () {});
+            return AddUnitCard(onTap: () => showEditUnitSheet(context));
           }
           final unit = state.units[i];
           final balance = state.balanceByUnit[unit.id] ?? 0;
