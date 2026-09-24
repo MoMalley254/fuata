@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:fuata/widgets/theme_button.dart';
 import 'package:intl/intl.dart';
 
 import '../../domain/models/money.dart';
@@ -13,8 +14,9 @@ import '../../widgets/unit_card.dart';
 import '../../widgets/transaction_row.dart';
 
 class HomeScreen extends ConsumerWidget {
-  const HomeScreen({super.key, required this.onToggleMode});
-  final VoidCallback onToggleMode;
+  final VoidCallback? onSeeAllActivity;
+
+  const HomeScreen({super.key, required this.onSeeAllActivity});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -24,10 +26,7 @@ class HomeScreen extends ConsumerWidget {
       appBar: AppBar(
         title: const Text('Today'),
         actions: [
-          IconButton(
-            onPressed: onToggleMode,
-            icon: const Icon(Icons.brightness_6_rounded),
-          ),
+          ThemeButton(),
         ],
       ),
       body: SafeArea(
@@ -36,7 +35,7 @@ class HomeScreen extends ConsumerWidget {
           error: (e, st) => Center(child: Text('Something went wrong: $e')),
           data: (state) => state.units.isEmpty
               ? const EmptyHome()
-              : HomeContent(state: state),
+              : HomeContent(state: state, onSeeAllActivity: onSeeAllActivity),
         ),
       ),
       floatingActionButton: FloatingActionButton(
@@ -49,7 +48,8 @@ class HomeScreen extends ConsumerWidget {
 
 class HomeContent extends StatelessWidget {
   final HomeState state;
-  const HomeContent({super.key, required this.state});
+  final VoidCallback? onSeeAllActivity;
+  const HomeContent({super.key, required this.state, this.onSeeAllActivity});
 
   @override
   Widget build(BuildContext context) {
@@ -73,7 +73,7 @@ class HomeContent extends StatelessWidget {
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
             Text('Lately', style: AppTypography.headlineSm.copyWith(color: context.colors.onSurface)),
-            TextButton(onPressed: () {}, child: const Text('See all')),
+            TextButton(onPressed: onSeeAllActivity, child: const Text('See all')),
           ],
         ),
         if (state.lately.isEmpty)
