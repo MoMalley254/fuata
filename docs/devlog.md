@@ -2,7 +2,7 @@
 
 A running, honest record of the build: goals, what got done, what broke, and why decisions were made. Newest day first. Keep entries short; this is raw material for the README, the changelog and interviews.
 
-*What broke / learned* and *Decisions*. 
+*What broke / learned* and *Decisions*.
 
 ---
 
@@ -18,6 +18,27 @@ A running, honest record of the build: goals, what got done, what broke, and why
 **Cut order if behind:** summaries first, then banner quick-add, then review inbox (auto-accept instead). Never cut ledger and limit-engine tests.
 
 **Done / What broke / Decisions:** _(fill in at the end of the day)_
+
+---
+
+## Day 2 (cont.): Drift database and repositories (#13)
+
+**Done**
+- Wrote the drift schema (`lib/data/db/tables.dart`) covering every entity in design.md's ER diagram — Unit, Transaction, Category, LimitRule, Template, CaptureSource, UnparsedCapture, plus the settings key/value table — not just the four issue #13 names, since Transaction/Template/LimitRule already reference the others by id.
+- `AppDatabase` (`lib/data/db/app_database.dart`): single file in app-private storage, opened lazily, foreign keys enforced, `schemaVersion 1` with an `onUpgrade` stub for the next change.
+- `Drift*Repository` classes implement the same four interfaces (`UnitRepository`, `TransactionRepository`, `LimitRepository`, `SettingsRepository`) the mocks already did, and are now the default in `app_providers.dart` via a new `appDatabaseProvider`. No screen changed.
+- Settings are stored as loose key/value rows rather than typed columns, so adding one more personalisation toggle later never needs a migration; `DriftSettingsRepository` owns the mapping to/from `AppSettings` and falls back to `AppSettings.defaults` on a fresh install.
+- Round-trip tests in `test/data/db/app_database_test.dart` against an in-memory database: unit archive/unarchive, a linked `moved` pair, limit upsert-by-id, and settings defaults-then-save.
+
+**Decisions**
+- Renamed every generated drift data class with `@DataClassName` (`UnitRow`, `TransactionRow`, `LimitRuleRow`, ...) — drift's default naming would otherwise generate a `LimitRule` fighting with the domain model of the same name.
+- Enums stored as their `.name` string, not an int index: reordering an enum's cases can't silently reinterpret an old row as the wrong value.
+- Category, Template, CaptureSource and UnparsedCapture get tables now but no repository yet — deferred to the issues that build the features that use them (#19-#22), so this issue stays scoped to what #13 actually asked for.
+
+**What broke / learned**
+Nothing broke yet — the schema and repositories are new code with no prior implementation to reconcile against. The real test is still ahead: `dart run build_runner build` has to run before any of this compiles, and the two-isolate spike (#18) is where a schema written today either holds up or doesn't.
+
+**Time spent:** _~2 hours_
 
 ---
 
@@ -39,8 +60,8 @@ A running, honest record of the build: goals, what got done, what broke, and why
 **Goals**
 - [x] Finish Home screen (#8) properly wired to the real theme/status system
 - [X] Add-transaction sheet (#9)
-- [ ] Activity screen (#10)
-- [ ] Drift database and repositories (#13) — domain models, ledger and mock repos already existed from Monday; real SQLite still to do
+- [X] Activity screen (#10)
+- [X] Drift database and repositories (#13) — domain models, ledger and mock repos already existed from Monday; real SQLite still to do
 - [ ] Banner (#16) and the 2-hour listener spike (#18)
 
   **Done**
@@ -51,7 +72,7 @@ A running, honest record of the build: goals, what got done, what broke, and why
   **What broke / learned**
   Building the theme/components and Home screen as separate pieces (mine from Monday, yours from the same day) meant they never got reconciled until today — Home kept working the whole time, so nothing *looked* broken, but it was quietly running on placeholder colors instead of the real design system. Lesson: when two people (or two sessions) build adjacent layers in parallel, integrate them the same day rather than letting each "work" in isolation. `flutter analyze` didn't catch the `MoneyUnit` collision because the two types never got imported into the same file — worth remembering that the analyzer won't save you from a naming collision unless something actually forces both into scope together.
   Mock repos looked done but weren't reactive (async* yields once, stream closes). New transactions silently vanished until app restart. Fixed with a small broadcast-stream store shared across all three mock repos.
-**Time spent:** _3hours_
+  **Time spent:** _3hours_
 
 ---
 

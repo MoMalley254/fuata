@@ -198,6 +198,7 @@ Supporting tables (not drawn): `unparsed_capture` (id, receivedAt, sourcePackage
 - **Decision:** drift on SQLite.
 - **Why:** typed queries, streams for reactive screens, built-in migrations, isolate support. Key-value stores (Hive) and object stores fit aggregations poorly; raw `sqflite` lacks typed queries and streams.
 - **Consequences:** Code generation (`build_runner`); the two-isolate access must be tested early.
+- **Implemented (#13):** schema lives in `lib/data/db/tables.dart` — one table per ER-diagram entity, `@DataClassName`-renamed so generated row classes (`UnitRow`, `TransactionRow`, `LimitRuleRow`, ...) don't collide with the domain models of nearly the same name. `AppDatabase` (`lib/data/db/app_database.dart`) opens a single file in app-private storage via a `LazyDatabase`, enforces `PRAGMA foreign_keys = ON`, and starts at `schemaVersion 1` with an `onUpgrade` stub ready for the first real migration. `Drift*Repository` classes (`lib/data/db/drift_repositories.dart`) implement the same four interfaces the mock repos do and are now the default in `app_providers.dart`; screens didn't change. Category, Template, CaptureSource and UnparsedCapture have tables but no repository yet — those land with the features that use them (#19-#22).
 
 ### ADR-002: Riverpod for state management
 - **Decision:** `flutter_riverpod`.
@@ -249,6 +250,7 @@ Supporting tables (not drawn): `unparsed_capture` (id, receivedAt, sourcePackage
 
 | Item | Status |
 |---|---|
-| Listener + DB from a background isolate (issue #18) | Pending: record outcome here |
+| Local database and repositories (issue #13) | **Done.** See ADR-001's "Implemented" note. |
+| Listener + DB from a background isolate (issue #18) | Pending: record outcome here. Now that the schema exists, the spike can open the same `fuata.sqlite` file from a second drift connection and confirm two isolates can write to it safely (drift's isolate mode, or WAL — see ADR-001 context). |
 | Final visual tokens (colours, type scale, radii) | Pending: copy from the implemented theme into a "Visual direction" section |
 | Which providers get bundled template presets | Deferred to v1.1 |
