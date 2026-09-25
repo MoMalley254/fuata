@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../data/mock/mock_repositories.dart';
+import '../../data/db/app_database.dart';
+import '../../data/db/drift_repositories.dart';
 import '../../domain/logic/ledger.dart';
 import '../../domain/models/limit_rule.dart';
 import '../../domain/models/settings.dart';
@@ -8,22 +9,34 @@ import '../../domain/models/transaction.dart';
 import '../../domain/models/unit.dart';
 import '../../domain/repositories/repositories.dart';
 
-/// Swap these three overrides for drift-backed repos in issue #13.
-/// No screen below needs to change when that happens.
+/// One database for the app's lifetime. Opening the file is deferred
+/// until the first query (AppDatabase wraps it in a LazyDatabase), so
+/// creating this provider eagerly at startup is cheap.
+final appDatabaseProvider = Provider<AppDatabase>((ref) {
+  final db = AppDatabase();
+  ref.onDispose(db.close);
+  return db;
+});
+
+/// Issue #13: these four now point at the real drift-backed repositories
+/// instead of data/mock/mock_repositories.dart. No screen below needed to
+/// change for the swap — they only ever depended on the interfaces in
+/// domain/repositories/repositories.dart (design.md, "UI-first approach").
+/// The mock repositories are kept around for widget tests/previews.
 final unitRepositoryProvider = Provider<UnitRepository>((ref) {
-  return MockUnitRepository();
+  return DriftUnitRepository(ref.watch(appDatabaseProvider));
 });
 
 final transactionRepositoryProvider = Provider<TransactionRepository>((ref) {
-  return MockTransactionRepository();
+  return DriftTransactionRepository(ref.watch(appDatabaseProvider));
 });
 
 final limitRepositoryProvider = Provider<LimitRepository>((ref) {
-  return MockLimitRepository();
+  return DriftLimitRepository(ref.watch(appDatabaseProvider));
 });
 
 final settingsRepositoryProvider = Provider<SettingsRepository>((ref) {
-  return MockSettingsRepository();
+  return DriftSettingsRepository(ref.watch(appDatabaseProvider));
 });
 
 final unitsProvider = StreamProvider<List<MoneyUnit>>((ref) {
