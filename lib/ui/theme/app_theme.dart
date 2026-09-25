@@ -4,8 +4,18 @@ import 'app_spacing.dart';
 import 'app_typography.dart';
 
 class AppTheme {
-  static ThemeData light() => _build(AppColors.light, Brightness.light);
-  static ThemeData dark() => _build(AppColors.dark, Brightness.dark);
+  /// [accent] is the user's chosen accent colour (Me → personalise,
+  /// default `AppAccents.teal`). Omit it to get the original fixed
+  /// palette — used by tests/tooling that don't care about accents.
+  static ThemeData light({Color? accent}) => _build(
+    accent == null ? AppColors.light : AppColors.light.withAccent(accent, Brightness.light),
+    Brightness.light,
+  );
+
+  static ThemeData dark({Color? accent}) => _build(
+    accent == null ? AppColors.dark : AppColors.dark.withAccent(accent, Brightness.dark),
+    Brightness.dark,
+  );
 
   static ThemeData _build(AppColors c, Brightness brightness) {
     final scheme = ColorScheme(

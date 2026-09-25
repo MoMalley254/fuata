@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:fuata/ui/screens/home_screen.dart';
+import 'package:fuata/ui/screens/me_screen.dart';
 import 'package:fuata/ui/screens/my_money_screen.dart';
 import 'package:fuata/ui/screens/placeholder_tab_screen.dart';
 
@@ -33,12 +34,7 @@ class _RootShellState extends State<RootShell> {
           ),
           const ActivityScreen(),
           const MyMoneyScreen(),
-          const PlaceholderTabScreen(
-            title: 'Me',
-            emoji: '⚙️',
-            message: 'Personalisation, limits and privacy settings land here.',
-            issueRef: '#12',
-          ),
+          const MeScreen(),
         ],
       ),
       bottomNavigationBar: NavigationBar(

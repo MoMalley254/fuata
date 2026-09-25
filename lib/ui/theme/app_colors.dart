@@ -267,3 +267,41 @@ class AppColors extends ThemeExtension<AppColors> {
 extension AppColorsX on BuildContext {
   AppColors get colors => Theme.of(this).extension<AppColors>()!;
 }
+
+/// Re-derives the primary/on-primary/container tokens from a
+/// user-chosen accent colour (ui-design-brief.md: "Accent colour for the
+/// whole app ... plus custom", Me → personalise). Every other token
+/// (surfaces, status colours, unit colours) is untouched — status
+/// colours are semantic (safe/warning/danger/overdraft) and must never
+/// be driven by the decorative accent.
+///
+/// This is a straightforward HSL lightness swap rather than a hand-tuned
+/// palette per swatch — acceptable for v0.1 (design.md section 5 already
+/// flags "final visual tokens" as pending polish) and keeps every accent
+/// choice readable in both themes without a lookup table to maintain.
+extension AccentColors on AppColors {
+  AppColors withAccent(Color accent, Brightness brightness) {
+    final hsl = HSLColor.fromColor(accent);
+    final isDark = brightness == Brightness.dark;
+
+    final primary = isDark
+        ? hsl.withLightness(hsl.lightness.clamp(0.62, 0.82).toDouble()).toColor()
+        : hsl.withLightness(hsl.lightness.clamp(0.26, 0.40).toDouble()).toColor();
+    final onPrimary = isDark
+        ? hsl.withLightness(0.14).withSaturation(hsl.saturation * 0.6).toColor()
+        : Colors.white;
+    final primaryContainer = isDark
+        ? hsl.withLightness(0.32).toColor()
+        : hsl.withLightness(0.34).toColor();
+    final onPrimaryContainer = isDark
+        ? hsl.withLightness(0.92).withSaturation(hsl.saturation * 0.5).toColor()
+        : Colors.white;
+
+    return copyWith(
+      primary: primary,
+      onPrimary: onPrimary,
+      primaryContainer: primaryContainer,
+      onPrimaryContainer: onPrimaryContainer,
+    );
+  }
+}
