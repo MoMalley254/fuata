@@ -4,8 +4,10 @@ import '../models/transaction.dart';
 import '../models/unit.dart';
 
 /// Screens depend only on these interfaces (design.md, "UI-first approach").
-/// Today: MockUnitRepository etc. Later (#13): drift-backed implementations,
-/// swapped in via Riverpod provider overrides — no screen changes needed.
+/// Two implementations exist: MockUnitRepository etc. (data/mock, used by
+/// widget tests/previews) and Drift*Repository (data/db, wired up by
+/// default in app_providers.dart as of #13) — swapped via Riverpod
+/// provider overrides, with no screen changes needed either way.
 abstract class UnitRepository {
   Stream<List<MoneyUnit>> watchUnits({bool includeArchived = false});
   Future<void> addUnit(MoneyUnit unit);
