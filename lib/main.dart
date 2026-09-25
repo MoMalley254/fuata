@@ -1,30 +1,31 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:fuata/ui/providers/app_providers.dart';
 import 'package:fuata/ui/screens/root_shell.dart';
 import 'package:fuata/ui/theme/app_theme.dart';
+
+import 'domain/models/settings.dart';
 
 void main() {
   runApp(const ProviderScope(child: Fuata()));
 }
 
-class Fuata extends StatefulWidget {
+/// Theme mode and accent colour now come from settings (#12) rather than
+/// local widget state — `ThemeButton`'s old "TODO: Riverpod later" is
+/// done, and that widget is retired in favour of Me → Appearance.
+class Fuata extends ConsumerWidget {
   const Fuata({super.key});
 
   @override
-  State<Fuata> createState() => _FuataState();
-}
+  Widget build(BuildContext context, WidgetRef ref) {
+    final settings = ref.watch(currentSettingsProvider);
 
-class _FuataState extends State<Fuata> {
-  final ThemeMode _mode = ThemeMode.system;
-
-  @override
-  Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      themeMode: _mode,
-      theme: AppTheme.light(),
-      darkTheme: AppTheme.dark(),
-      home: RootShell(),
+      themeMode: settings.themeMode.flutterThemeMode,
+      theme: AppTheme.light(accent: settings.accent),
+      darkTheme: AppTheme.dark(accent: settings.accent),
+      home: const RootShell(),
     );
   }
 }

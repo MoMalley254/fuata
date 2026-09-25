@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../domain/models/limit_rule.dart';
+import '../../domain/models/settings.dart';
 import '../../domain/models/transaction.dart';
 import '../../domain/models/unit.dart';
 import '../../domain/repositories/repositories.dart';
@@ -243,4 +244,19 @@ class MockLimitRepository implements LimitRepository {
   @override
   Future<void> setLimit(LimitRule limit) async =>
       _store.upsert((l) => l.id == limit.id, limit);
+}
+
+/// `_Store<T>` is built around lists, but reusing it here (with a
+/// permanently one-item list) keeps this repo the same shape and the
+/// same "broadcast on every mutation" behaviour as the other three,
+/// rather than a bespoke ValueNotifier just for this one case.
+class MockSettingsRepository implements SettingsRepository {
+  final _store = _Store<AppSettings>([AppSettings.defaults]);
+
+  @override
+  Stream<AppSettings> watchSettings() => _store.watch().map((list) => list.first);
+
+  @override
+  Future<void> updateSettings(AppSettings settings) async =>
+      _store.update((_) => true, (_) => settings);
 }

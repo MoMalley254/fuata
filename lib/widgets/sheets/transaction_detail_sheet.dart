@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:fuata/domain/models/money.dart';
 import 'package:intl/intl.dart';
 
+import '../../domain/models/settings.dart';
 import '../../domain/models/transaction.dart';
 import '../../domain/models/unit.dart';
+import '../../ui/providers/app_providers.dart';
 import '../../ui/theme/app_colors.dart';
 import '../../ui/theme/app_spacing.dart';
 import '../../ui/theme/app_typography.dart';
@@ -11,24 +14,30 @@ import '../app_chips.dart';
 
 // ---------------------------------------------------------------------------
 // Transaction detail sheet, shown at Simple / Balanced / Detailed levels
-// (ui-design-brief.md sections 3 and 7.4). A per-settings default detail
-// level is issue #12's job; this sheet carries its own local toggle so the
-// three levels can be seen and used today.
+// (ui-design-brief.md sections 3 and 7.4). Opens at the person's default
+// from Me → Detail level (#12); DetailLevel is the one shared enum
+// (domain/models/settings.dart) — this used to carry its own private
+// `_DetailLevel` copy before that setting existed. The local chip row
+// still lets you change it just for this sheet, same as before.
 // ---------------------------------------------------------------------------
 
-enum _DetailLevel { simple, balanced, detailed }
-
-class TransactionDetailSheet extends StatefulWidget {
+class TransactionDetailSheet extends ConsumerStatefulWidget {
   final MoneyTransaction transaction;
   final MoneyUnit? unit;
   const TransactionDetailSheet({super.key, required this.transaction, required this.unit});
 
   @override
-  State<TransactionDetailSheet> createState() => _TransactionDetailSheetState();
+  ConsumerState<TransactionDetailSheet> createState() => _TransactionDetailSheetState();
 }
 
-class _TransactionDetailSheetState extends State<TransactionDetailSheet> {
-  _DetailLevel _level = _DetailLevel.balanced;
+class _TransactionDetailSheetState extends ConsumerState<TransactionDetailSheet> {
+  late DetailLevel _level;
+
+  @override
+  void initState() {
+    super.initState();
+    _level = ref.read(currentSettingsProvider).detailLevel;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -50,17 +59,17 @@ class _TransactionDetailSheetState extends State<TransactionDetailSheet> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-Center(
-  child: Container(
-    width: 40,
-    height: 4,
-    margin: const EdgeInsets.only(bottom: AppSpacing.md),
-    decoration: BoxDecoration(
-      color: c.outlineVariant,
-      borderRadius: BorderRadius.circular(AppSpacing.pill),
-    ),
-  ),
-),
+            Center(
+              child: Container(
+                width: 40,
+                height: 4,
+                margin: const EdgeInsets.only(bottom: AppSpacing.md),
+                decoration: BoxDecoration(
+                  color: c.outlineVariant,
+                  borderRadius: BorderRadius.circular(AppSpacing.pill),
+                ),
+              ),
+            ),
             Row(
               children: [
                 Container(
@@ -100,14 +109,14 @@ Center(
             ),
             const SizedBox(height: AppSpacing.md,),
             Row(
-              children: _DetailLevel.values.map((lvl) {
+              children: DetailLevel.values.map((lvl) {
                 return Padding(
                   padding: const EdgeInsets.only(right: AppSpacing.sm),
                   child: AppChoiceChip(
                     label: switch (lvl) {
-                      _DetailLevel.simple => 'Simple',
-                      _DetailLevel.balanced => 'Balanced',
-                      _DetailLevel.detailed => 'Detailed',
+                      DetailLevel.simple => 'Simple',
+                      DetailLevel.balanced => 'Balanced',
+                      DetailLevel.detailed => 'Detailed',
                     },
                     selected: _level == lvl,
                     onTap: () => setState(() => _level = lvl),
@@ -130,7 +139,7 @@ Center(
 
     // Simple: nothing extra — title/time/amount above is already the
     // whole story.
-    if (_level == _DetailLevel.simple) return const [];
+    if (_level == DetailLevel.simple) return const [];
 
     // Balanced: unit and a friendly type label.
     rows.add(MapEntry('Money', unit?.name ?? 'Unknown'));
@@ -141,7 +150,7 @@ Center(
       TxType.adjustment => 'Balance update',
     }));
 
-    if (_level == _DetailLevel.detailed) {
+    if (_level == DetailLevel.detailed) {
       rows.add(MapEntry('Exact time', DateFormat('d MMM yyyy, h:mm:ss a').format(t.occurredAt)));
       if (t.code != null) rows.add(MapEntry('Code', t.code!));
       if (t.transferGroupId != null) rows.add(const MapEntry('Transfer', 'Linked to another entry'));

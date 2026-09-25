@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:fuata/widgets/theme_button.dart';
 import 'package:intl/intl.dart';
 
 import '../../domain/models/money.dart';
+import '../../domain/models/settings.dart';
 import '../../widgets/sheets/add_transaction_sheet.dart';
 import '../../widgets/sheets/edit_unit_sheet.dart';
 import '../providers/app_providers.dart';
@@ -22,13 +22,13 @@ class HomeScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final homeAsync = ref.watch(homeStateProvider);
+    final settings = ref.watch(currentSettingsProvider);
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('Today'),
-        actions: [
-          ThemeButton(),
-        ],
+        // Theme toggling moved to Me → Appearance (#12); it belongs with
+        // the rest of personalisation rather than living on its own here.
       ),
       body: SafeArea(
         child: homeAsync.when(
@@ -36,7 +36,11 @@ class HomeScreen extends ConsumerWidget {
           error: (e, st) => Center(child: Text('Something went wrong: $e')),
           data: (state) => state.units.isEmpty
               ? const EmptyHome()
-              : HomeContent(state: state, onSeeAllActivity: onSeeAllActivity),
+              : HomeContent(
+            state: state,
+            settings: settings,
+            onSeeAllActivity: onSeeAllActivity,
+          ),
         ),
       ),
       floatingActionButton: FloatingActionButton(
@@ -49,11 +53,20 @@ class HomeScreen extends ConsumerWidget {
 
 class HomeContent extends StatelessWidget {
   final HomeState state;
+  final AppSettings settings;
   final VoidCallback? onSeeAllActivity;
-  const HomeContent({super.key, required this.state, this.onSeeAllActivity});
+  const HomeContent({
+    super.key,
+    required this.state,
+    required this.settings,
+    this.onSeeAllActivity,
+  });
 
   @override
   Widget build(BuildContext context) {
+    final showUnits = settings.homeSections.contains(HomeSection.units);
+    final showLately = settings.homeSections.contains(HomeSection.lately);
+
     return ListView(
       padding: const EdgeInsets.fromLTRB(
         AppSpacing.margin,
@@ -62,38 +75,42 @@ class HomeContent extends StatelessWidget {
         100,
       ),
       children: [
-        const Greeting(name: 'Amina'), // TODO: from settings (#12)
+        Greeting(name: settings.name),
         const SizedBox(height: AppSpacing.lg),
-        HeroSection(state: state),
-        const SizedBox(height: AppSpacing.lg),
-        Text('My money', style: AppTypography.headlineSm.copyWith(color: context.colors.onSurface)),
-        const SizedBox(height: AppSpacing.gutterSm),
-        UnitRow(state: state),
-        const SizedBox(height: AppSpacing.lg),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Text('Lately', style: AppTypography.headlineSm.copyWith(color: context.colors.onSurface)),
-            TextButton(onPressed: onSeeAllActivity, child: const Text('See all')),
-          ],
-        ),
-        if (state.lately.isEmpty)
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: AppSpacing.md),
-            child: Text(
-              'Nothing yet today. Nice and calm.',
-              style: AppTypography.bodyMd.copyWith(color: context.colors.onSurfaceVariant),
-            ),
-          )
-        else
-          ...state.lately.map((t) => TransactionRow(
-            title: t.counterparty ?? state.units.firstWhere((u) => u.id == t.unitId).name,
-            subtitle: _friendlyTime(t.occurredAt),
-            amount: Money(t.amountMinor, state.units.firstWhere((u) => u.id == t.unitId).currencyCode)
-                .majorValue,
-            emoji: state.units.firstWhere((u) => u.id == t.unitId).iconEmoji,
-            accent: state.units.firstWhere((u) => u.id == t.unitId).color,
-          )),
+        HeroSection(state: state, headline: settings.homeHeadline),
+        if (showUnits) ...[
+          const SizedBox(height: AppSpacing.lg),
+          Text('My money', style: AppTypography.headlineSm.copyWith(color: context.colors.onSurface)),
+          const SizedBox(height: AppSpacing.gutterSm),
+          UnitRow(state: state),
+        ],
+        if (showLately) ...[
+          const SizedBox(height: AppSpacing.lg),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text('Lately', style: AppTypography.headlineSm.copyWith(color: context.colors.onSurface)),
+              TextButton(onPressed: onSeeAllActivity, child: const Text('See all')),
+            ],
+          ),
+          if (state.lately.isEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: AppSpacing.md),
+              child: Text(
+                'Nothing yet today. Nice and calm.',
+                style: AppTypography.bodyMd.copyWith(color: context.colors.onSurfaceVariant),
+              ),
+            )
+          else
+            ...state.lately.map((t) => TransactionRow(
+              title: t.counterparty ?? state.units.firstWhere((u) => u.id == t.unitId).name,
+              subtitle: _friendlyTime(t.occurredAt),
+              amount: Money(t.amountMinor, state.units.firstWhere((u) => u.id == t.unitId).currencyCode)
+                  .majorValue,
+              emoji: state.units.firstWhere((u) => u.id == t.unitId).iconEmoji,
+              accent: state.units.firstWhere((u) => u.id == t.unitId).color,
+            )),
+        ],
       ],
     );
   }
@@ -143,17 +160,43 @@ class Greeting extends StatelessWidget {
 /// a plain total when it isn't (StatusRingCard assumes a limit exists).
 class HeroSection extends StatelessWidget {
   final HomeState state;
-  const HeroSection({super.key, required this.state});
+  final HomeHeadline headline;
+  const HeroSection({super.key, required this.state, this.headline = HomeHeadline.leftToday});
 
   @override
   Widget build(BuildContext context) {
     final limit = state.dailyLimit;
     final currency = state.units.isNotEmpty ? state.units.first.currencyCode : 'KES';
     final symbol = currencySymbol(currency);
+    final total = state.balanceByUnit.values.fold(0, (a, b) => a + b);
 
-    if (limit == null) {
+    // "Left today" is the ring's native story and needs a limit to mean
+    // anything; the other two headlines (total / spent today) always
+    // have a number to show, so they get the plain card even when a
+    // limit exists. Making every headline drive the ring itself (so the
+    // *number* on it changes while the *progress* stays spend-based) is
+    // future polish, flagged rather than done partially here.
+    if (limit == null || headline != HomeHeadline.leftToday) {
       final c = context.colors;
-      final total = state.balanceByUnit.values.fold(0, (a, b) => a + b);
+      final (label, amountMinor, caption) = switch (headline) {
+        HomeHeadline.leftToday => (
+        'Altogether you have',
+        total,
+        'Set a daily limit to see how today is going.',
+        ),
+        HomeHeadline.totalIHave => (
+        'Altogether you have',
+        total,
+        'Across everything you\'ve told Fuata about.',
+        ),
+        HomeHeadline.spentToday => (
+        'Spent today',
+        state.spentToday,
+        limit == null
+            ? 'Set a daily limit to see how today is going.'
+            : 'of ${Money(limit.amountMinor, currency).format()} · resets at midnight',
+        ),
+      };
       return Container(
         width: double.infinity,
         padding: const EdgeInsets.all(AppSpacing.lg),
@@ -165,15 +208,14 @@ class HeroSection extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Altogether you have', style: AppTypography.bodyMd.copyWith(color: c.onSurfaceVariant)),
+            Text(label, style: AppTypography.bodyMd.copyWith(color: c.onSurfaceVariant)),
             const SizedBox(height: AppSpacing.xs),
             Text(
-              Money(total, currency).format(),
+              Money(amountMinor, currency).format(),
               style: AppTypography.displayHeroMobile.copyWith(color: c.onSurface),
             ),
             const SizedBox(height: AppSpacing.xs),
-            Text('Set a daily limit to see how today is going.',
-                style: AppTypography.bodySm.copyWith(color: c.onSurfaceVariant)),
+            Text(caption, style: AppTypography.bodySm.copyWith(color: c.onSurfaceVariant)),
           ],
         ),
       );

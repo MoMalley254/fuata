@@ -1,4 +1,5 @@
 import '../models/limit_rule.dart';
+import '../models/settings.dart';
 import '../models/transaction.dart';
 import '../models/unit.dart';
 
@@ -22,4 +23,12 @@ abstract class TransactionRepository {
 abstract class LimitRepository {
   Stream<List<LimitRule>> watchLimits();
   Future<void> setLimit(LimitRule limit);
+}
+
+/// Personalisation settings (design.md's `settings` key/value table).
+/// One object in, one object out — same reasoning as the other
+/// repositories: screens never see how it's stored.
+abstract class SettingsRepository {
+  Stream<AppSettings> watchSettings();
+  Future<void> updateSettings(AppSettings settings);
 }
