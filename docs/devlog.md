@@ -6,6 +6,32 @@ A running, honest record of the build: goals, what got done, what broke, and why
 
 ---
 
+## Day 5: Fri 25 Sep 2026 — Spike #18 and MIUI rabbit hole
+
+**Goals**
+- [x] Run spike #18 end to end on a real device
+- [x] Confirm drift's two-isolate write is safe (ADR-001's top risk)
+- [x] Record the finding in `docs/design.md` §5.1
+
+**Done**
+- Wired a temporary "Notification access" button into Me → Limits, banner and messages, so the grant can be reached without `adb shell cmd notification allow_listener`. Added a new `ActionRow` widget next to the existing `ComingSoonRow` family — same visual language, primary-tinted border and chevron so it reads as live rather than placeholder.
+- Ran the spike across four scenarios: foreground, backgrounded, rapid-fire (×10), post-reboot-without-launching-the-app. All four captured reliably. 23 rows written across the session with no `SQLITE_BUSY` and no engine-startup failures.
+- Confirmed the two-isolate write path: the background isolate opens its own `AppDatabase` while the UI isolate has one open on the same `fuata.sqlite`, and both commit cleanly. `NativeDatabase.createInBackground` is safe. **ADR-001's top risk is closed.**
+
+**What broke / learned**
+- **MIUI does not bind the listener on a `cmd notification allow_listener` grant.** Symptoms: `enabled_notification_listeners` contains the component, `dumpsys package` reports the app enabled and unstopped, but Fuata is absent from `dumpsys notification`'s "Live notification listeners" section and `dumpsys activity services` shows no bound service. Notifications are silently dropped with no callback. The grant has to go through **Settings → Notification access** as an off→on toggle, which routes through `MiuiSecurityCenter` and forces a re-register; the adb path only edits `Settings.Secure`, which MIUI's own permission layer doesn't read.
+- **`am kill <pkg>` is a no-op while notification access is granted** — the bound listener keeps the process alive by design. Worse, the kill request itself can make the notification manager unbind the listener without rebinding it, so subsequent notifications are dropped until the app is relaunched. Use `am force-stop` for the "stopped package" test instead, and accept that it too is expected to prevent capture until the user opens the app.
+- **`run-as ... sqlite3` fails on release builds** (`Permission denied: exec failed for sqlite3`) even though `run-as cat` works — the app's SELinux context can't execute the system binary. Workaround: `adb exec-out run-as $PKG cat $DB > /tmp/…` plus the `-wal` and `-shm` sidecars, then query locally. Worth remembering for #22/#26 — the on-device query isn't reliable across OEMs.
+- **Debug-build caveat noted.** `am kill` behaviour and background lifecycle differ meaningfully between debug and release (JIT, memory footprint, low-memory killer aggressiveness). The finding above is from a debug build; the release verification is deferred to #26's device test pass.
+
+**Decisions**
+- Recorded the MIUI prerequisite in `docs/design.md` §5.1 and cross-referenced it from ADR-006, so the next person to build a capture feature hits the working path directly rather than re-deriving it.
+- Left the ~20 spike rows in `unparsed_captures` in place — useful evidence for #22 to compare extraction behaviour against. Not cleaning them out.
+
+**Time spent:** _~3 hours_
+
+**Tomorrow:** parser and template model (#19), pure Dart with unit tests against fake bank messages; no device required.
+
 ## Day 4: Thu 24 Sep 2026 (planned)
 
 **Goals**

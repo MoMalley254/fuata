@@ -30,6 +30,20 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+
+        <!-- Issue #18 spike: throwaway notification listener, no allow-list
+             yet (#22). Requires the user to grant special access in
+             Settings > Notification access; MainActivity's
+             openNotificationAccessSettings() opens that screen directly. -->
+        <service
+            android:name=".NotificationListener"
+            android:label="Fuata capture (spike)"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
     </application>
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility and

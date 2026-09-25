@@ -223,7 +223,7 @@ Supporting tables (not drawn): `unparsed_capture` (id, receivedAt, sourcePackage
 ### ADR-006: Notification listener over SMS permission
 - **Context:** Reading SMS directly is the most reliable capture but is heavily restricted by Google Play policy.
 - **Decision:** Use `NotificationListenerService` (special access granted by the user) plus share/paste as a permission-free path; manual entry always works.
-- **Consequences:** Only sees what the SMS app shows (may be truncated); sideloaded builds hit Android's "restricted settings" step, so onboarding must explain it; some manufacturers kill background services. Everything not on the user's allow-list is discarded immediately.
+- - **Consequences:** Only sees what the SMS app shows (may be truncated); sideloaded builds hit Android's "restricted settings" step, so onboarding must explain it; some manufacturers kill background services (**see §5.1 for a confirmed MIUI case: the listener is granted but not bound unless the grant goes through the UI toggle**). Everything not on the user's allow-list is discarded immediately.
 
 ### ADR-007: Template-based parsing (user-labeled), not ML
 - **Decision:** The user pastes a sample and labels spans; the app generates a regex with typed groups. Multiple templates per unit.
@@ -251,6 +251,16 @@ Supporting tables (not drawn): `unparsed_capture` (id, receivedAt, sourcePackage
 | Item | Status |
 |---|---|
 | Local database and repositories (issue #13) | **Done.** See ADR-001's "Implemented" note. |
-| Listener + DB from a background isolate (issue #18) | Pending: record outcome here. Now that the schema exists, the spike can open the same `fuata.sqlite` file from a second drift connection and confirm two isolates can write to it safely (drift's isolate mode, or WAL — see ADR-001 context). |
+| Listener + DB from a background isolate (issue #18) | **Done.** See §5.1 below. ||
 | Final visual tokens (colours, type scale, radii) | Pending: copy from the implemented theme into a "Visual direction" section |
 | Which providers get bundled template presets | Deferred to v1.1 |
+
+### 5.1 Spike findings — listener + background isolate (issue #18)
+
+**Question.** Can a background isolate, started by Android when the app is not running, safely open the same `fuata.sqlite` the UI isolate has open and write to it? This was ADR-001's top project risk.
+
+**Answer: yes.** Tested on a Xiaomi/[model], Android [version], MIUI, debug build. Notifications captured reliably across four scenarios — foreground, backgrounded, rapid-fire dispatch, and post-reboot-without-launching-the-app — with no `SQLITE_BUSY`, no `FAILED to write`, and no crashes. `NativeDatabase.createInBackground` is confirmed safe for two isolates on the same file. ADR-001's top risk is closed.
+
+**MIUI-specific prerequisite (recorded for #22).** `cmd notification allow_listener` and direct edits to `Settings.Secure.enabled_notification_listeners` are not sufficient on MIUI — the grant is reported as active, but the system never calls `bindService` and Fuata never appears in `dumpsys notification`'s "Live notification listeners" section. Notifications are silently dropped with no `onNotificationPosted` callback. The listener only binds after toggling the grant **off→on through Settings → Notification access** (the UI path, which goes through `MiuiSecurityCenter`), with Autostart on. Once bound, capture survives backgrounding, rapid-fire dispatch, and reboot — no "open the app after reboot" guidance is needed.
+
+**Known gap for #22 (not a spike failure).** `NotificationListener.kt`'s text extraction writes `sbn.tag` into `raw_text` instead of the notification body on this device. Confirmed against two separate tests. The real listener needs an extras-walk helper that checks `EXTRA_TITLE`, `EXTRA_TEXT`, `EXTRA_BIG_TEXT`, `EXTRA_SUB_TEXT`, `EXTRA_TEXT_LINES` and ticker text in a documented order, and explicitly excludes `sbn.tag`. Filed in #22.

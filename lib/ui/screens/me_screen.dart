@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../domain/models/settings.dart';
+import '../../platform/listener_spike.dart';
 import '../../widgets/coming_soon_row.dart';
+import '../../widgets/personalization/action_row.dart';
 import '../../widgets/personalization/detail_level_example.dart';
 import '../../widgets/personalization/label.dart';
 import '../../widgets/personalization/privayc_card.dart';
@@ -113,7 +115,21 @@ class MeScreen extends ConsumerWidget {
             const SizedBox(height: AppSpacing.lg),
             SectionCard(
               title: 'Limits, banner and messages',
-              children: const [
+              children: [
+                ActionRow(
+                  icon: Icons.notifications_active_outlined,
+                  title: 'Notification access',
+                  subtitle:
+                  'Grant Fuata permission to read bank/mobile-money notifications.',
+                  onTap: openNotificationAccessSettings,
+                ),
+                const SizedBox(height: AppSpacing.sm),
+                const ComingSoonRow(
+                  icon: Icons.mark_email_read_outlined,
+                  title: 'Message reading rules',
+                  subtitle: 'Rules and allowed apps for auto-catch — coming in #19–#22',
+                ),
+                const SizedBox(height: AppSpacing.sm),
                 ComingSoonRow(
                   icon: Icons.speed_rounded,
                   title: 'Limits & alerts',
