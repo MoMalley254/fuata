@@ -106,7 +106,14 @@ class CaptureTemplate {
       fieldMap[groupName] = span.type;
       cursor = span.end;
     }
-    buffer.write(_escapeLiteral(sampleText.substring(cursor)));
+
+    // #20 Intentionally no trailing literal: the pattern ends where the last
+// labeled field ends. Real messages have variable tails (URLs, "see all
+// your balances", counters, per-message limits) that we don't want to
+// require on every future message. Leading literals before the first
+// label are still kept — a header like "Confirmed." pins the rule to
+// the right kind of message.
+//     buffer.write(_escapeLiteral(sampleText.substring(cursor)));
     return CaptureTemplate(
       id: id,
       unitId: unitId,
@@ -207,7 +214,7 @@ class CaptureTemplate {
         // Optional currency label/prefix, digits with optional thousands
         // separators, optional decimal part — "Ksh350.00", "KES 1,250",
         // "350" all match (testing.md P-02).
-        return r'(?:[A-Za-z]{2,5}\.?\s*)?[\d,]+(?:\.\d+)?';
+      return r'(?:[A-Za-z]{2,5}\.?\s*)?[\d,]+(?:\.\d+)?[.,;:!?]?';
       case TemplateFieldType.code:
         return r'[A-Za-z0-9]+';
       case TemplateFieldType.date:
@@ -217,4 +224,5 @@ class CaptureTemplate {
         return r'[\s\S]+?';
     }
   }
+
 }

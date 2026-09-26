@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../../domain/models/limit_rule.dart';
 import '../../domain/models/settings.dart';
+import '../../domain/models/template.dart';
 import '../../domain/models/transaction.dart';
 import '../../domain/models/unit.dart';
 import '../../domain/repositories/repositories.dart';
@@ -259,4 +260,23 @@ class MockSettingsRepository implements SettingsRepository {
   @override
   Future<void> updateSettings(AppSettings settings) async =>
       _store.update((_) => true, (_) => settings);
+}
+
+class MockTemplateRepository implements TemplateRepository {
+  final _store = _Store<CaptureTemplate>([]);
+
+  @override
+  Stream<List<CaptureTemplate>> watchTemplates({String? unitId}) {
+    return _store.watch().map(
+          (list) => list.where((t) => unitId == null || t.unitId == unitId).toList(),
+    );
+  }
+
+  @override
+  Future<void> saveTemplate(CaptureTemplate template) async =>
+      _store.upsert((t) => t.id == template.id, template);
+
+  @override
+  Future<void> deleteTemplate(String templateId) async =>
+      _store.removeWhere((t) => t.id == templateId);
 }

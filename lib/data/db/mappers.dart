@@ -10,9 +10,11 @@
 
 // --- enum <-> text -----------------------------------------------------
 
+import 'dart:convert';
 import 'dart:ui';
 
 import 'package:drift/drift.dart';
+import 'package:fuata/domain/models/template.dart';
 
 import '../../domain/models/limit_rule.dart';
 import '../../domain/models/transaction.dart';
@@ -155,5 +157,42 @@ LimitRulesCompanion limitRuleToCompanion(LimitRule l) {
     warnAt: Value(l.warnAt),
     dangerAt: Value(l.dangerAt),
     enabled: Value(l.enabled),
+  );
+}
+
+// --- Template ------------------------------------------------------------
+
+/// The row carries exactly the keys [CaptureTemplate.fromJson] expects —
+/// only `fieldMap` is stored on disk as JSON text (tables.dart's
+/// `fieldMapJson` column), so decode that one before handing over.
+CaptureTemplate templateFromRow(TemplateRow row) {
+  return CaptureTemplate.fromJson({
+    'id': row.id,
+    'unitId': row.unitId,
+    'captureSourceId': row.captureSourceId,
+    'name': row.name,
+    'direction': row.direction,
+    'pattern': row.pattern,
+    'fieldMap': jsonDecode(row.fieldMapJson),
+    'sampleText': row.sampleText,
+    'version': row.version,
+    'enabled': row.enabled,
+  });
+}
+
+TemplatesCompanion templateToCompanion(CaptureTemplate t) {
+  return TemplatesCompanion.insert(
+    id: t.id,
+    unitId: t.unitId,
+    captureSourceId: Value(t.captureSourceId),
+    name: t.name,
+    direction: Value(t.direction.name),
+    pattern: t.pattern,
+    fieldMapJson: jsonEncode(
+      t.fieldMap.map((groupName, type) => MapEntry(groupName, type.name)),
+    ),
+    sampleText: t.sampleText,
+    version: Value(t.version),
+    enabled: Value(t.enabled),
   );
 }

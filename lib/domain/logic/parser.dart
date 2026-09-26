@@ -138,14 +138,22 @@ class Parser {
     }
   }
 
-  /// Strips an optional currency-letter prefix ("Ksh", "KES ") the amount
-  /// field pattern allows, then reuses `Money.parseMajor` for the actual
-  /// minor-unit math (ADR-003: integer minor units, no floats).
-  static int _parseAmountMinor(String raw, String currencyCode) {
+  ///#20 Parses one labeled money capture. Returns null instead of throwing —
+  /// a labeled field that we can't parse should be reported as "not found"
+  /// for that field, never abort the whole parse. (Amount's null is then
+  /// treated as "no match" by the caller; fee/balance's null just means
+  /// those rows show as "not labeled".)
+  static int? _parseAmountMinor(String raw, String currencyCode) {
     final stripped = raw
         .replaceFirst(RegExp(r'^[A-Za-z]{2,5}\.?\s*'), '')
+        .replaceAll(RegExp(r'[.,;:!?]+$'), '')
         .trim();
-    return Money.parseMajor(stripped, currencyCode).minor;
+    if (stripped.isEmpty) return null;
+    try {
+      return Money.parseMajor(stripped, currencyCode).minor;
+    } on FormatException {
+      return null;
+    }
   }
 
   /// testing.md P-09: "21/9/26 at 1:12 PM" and ISO both need to parse to
@@ -155,7 +163,10 @@ class Parser {
   /// a message that otherwise matched shouldn't be discarded over a date
   /// the app doesn't yet know how to read.
   static DateTime? _parseDate(String raw) {
-    final iso = DateTime.tryParse(raw);
+    final cleaned = raw.replaceAll(RegExp(r'[.,;:!?]+$'), '').trim();
+    if (cleaned.isEmpty) return null;
+
+    final iso = DateTime.tryParse(cleaned);
     if (iso != null) return iso;
 
     const patterns = [
@@ -168,7 +179,11 @@ class Parser {
     ];
     for (final p in patterns) {
       try {
-        return DateFormat(p).parse(raw);
+        //#20
+        // Pin the locale: without it DateFormat uses the device locale,
+        // which may not have a 12-hour AM/PM pattern defined and can fail
+        // to parse "10:19 AM" on some devices.
+        return DateFormat(p, 'en_US').parse(cleaned);
       } on FormatException {
         continue;
       }
