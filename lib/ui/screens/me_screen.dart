@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:fuata/ui/screens/rule_builder_screen.dart';
 
 import '../../domain/models/settings.dart';
 import '../../platform/listener_spike.dart';
@@ -124,10 +125,13 @@ class MeScreen extends ConsumerWidget {
                   onTap: openNotificationAccessSettings,
                 ),
                 const SizedBox(height: AppSpacing.sm),
-                const ComingSoonRow(
+                ActionRow(
                   icon: Icons.mark_email_read_outlined,
                   title: 'Message reading rules',
-                  subtitle: 'Rules and allowed apps for auto-catch — coming in #19–#22',
+                  subtitle: 'Teach Fuata to read a bank or mobile-money message',
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const RuleBuilderScreen()),
+                  ),
                 ),
                 const SizedBox(height: AppSpacing.sm),
                 ComingSoonRow(
