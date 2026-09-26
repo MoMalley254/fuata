@@ -1,27 +1,30 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:fuata/domain/logic/ledger.dart';
+import 'package:fuata/ui/screens/rule_builder_screen.dart';
 import 'package:intl/intl.dart';
 
 import '../../domain/models/money.dart';
 import '../../widgets/activity/empty_activity.dart';
 import '../../widgets/activity/grouped_list.dart';
 import '../../widgets/coming_soon_row.dart';
+import '../../widgets/personalization/action_row.dart';
 import '../../widgets/sheets/edit_unit_sheet.dart';
 import '../../widgets/sheets/update_balance_sheet.dart';
 import '../providers/app_providers.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_spacing.dart';
 import '../theme/app_typography.dart';
+import 'manage_rules_screen.dart';
 
 /// Unit page (ui-design-brief.md section 7.5): balance, "Update balance",
 /// edit name/icon/colour, archive, and that unit's recent activity —
 /// reusing GroupedList/showTransactionDetail from the Activity screen
 /// rather than a second implementation.
 ///
-/// Per-unit limit and message-reading-rule rows are shown as "coming
-/// soon" placeholders: those are #15/#17 (limits UI) and #19/#20
-/// (capture) work, not built yet, flagged rather than silently omitted.
+/// The per-unit limit row is still a "coming soon" placeholder (#15/#17);
+/// the message-reading row is live as of #20 — it opens the rule builder
+/// pre-set to this unit and shows how many rules the unit already has.
 
 class UnitDetailScreen extends ConsumerWidget {
   final String unitId;
@@ -154,10 +157,23 @@ class UnitDetailScreen extends ConsumerWidget {
                           subtitle: 'Set a spending limit just for this one — coming in #15/#17',
                         ),
                         const SizedBox(height: AppSpacing.sm),
-                        const ComingSoonRow(
-                          icon: Icons.mark_email_read_outlined,
-                          title: 'Reading messages',
-                          subtitle: 'Teach the app to catch transactions here — coming in #19/#20',
+                        Builder(
+                          builder: (context) {
+                            final templates =
+                                ref.watch(unitTemplatesProvider(unit.id)).value ?? [];
+                            return ActionRow(
+                              icon: Icons.mark_email_read_outlined,
+                              title: 'Reading messages',
+                              subtitle: templates.isEmpty
+                                  ? 'Teach the app to read messages for this unit'
+                                  : '${templates.length} rule${templates.length == 1 ? '' : 's'} · add or review',
+                              onTap: () => Navigator.of(context).push(
+                                MaterialPageRoute(
+                                  builder: (_) => ManageRulesScreen(unitId: unit.id),
+                                ),
+                              ),
+                            );
+                          },
                         ),
                         const SizedBox(height: AppSpacing.lg),
                         Text('Recent activity', style: AppTypography.headlineSm.copyWith(color: c.onSurface)),

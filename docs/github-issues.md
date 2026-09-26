@@ -88,3 +88,22 @@ One branch per issue: `feat/<short-name>`, `fix/<short-name>`, `docs/<short-name
 - Opt-in redacted diagnostics copy button `v1.1`
 - iOS manual/share-sheet edition `v1.1`
 - Open-source licence review and contribution guide `v1.1`
+- Rule builder: "This part changes" wildcard `area: capture` `area: ui` `v1.1`
+- Rule builder: user-defined custom fields `area: capture` `area: ui` `v1.1`
+
+## Post-#20 follow-ups
+
+Two enhancements from ui-design-brief.md 7.7's palette that #20 deliberately
+did not build (both need a domain-model addition, so are out of scope for #20):
+
+55. **feat(capture): "This part changes" wildcard** `type: feature` `area: capture` `area: ui` `v1.1`
+    A span labeled as a wildcard compiles to a non-capturing `[\s\S]+?` —
+    "this word varies between messages". Today any unlabeled word becomes
+    fixed literal text and breaks the rule on the next differently-worded
+    message.
+
+56. **feat(capture): user-defined custom fields** `type: feature` `area: capture` `area: ui` `v1.1`
+    7.7's palette has "Add my own field". Today only the six built-in
+    `TemplateFieldType` values are labelable. Needs a template-owned
+    custom field type, `ParsedFields.custom` (a `Map<String, String>`),
+    and UI in `FieldPalette` to name one.

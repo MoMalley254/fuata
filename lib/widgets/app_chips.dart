@@ -53,13 +53,17 @@ class AppChoiceChip extends StatelessWidget {
   }
 }
 
-/// Word-label chip used in the SMS rule-builder (raw text exploded into tokens).
+/// Word-label chip used in the rule builder (raw text exploded into
+/// tokens; issue #20). Long-press starts phrase-selection; [highlighted]
+/// marks the in-progress selection.
 class WordLabelChip extends StatelessWidget {
   const WordLabelChip({
     super.key,
     required this.word,
     this.assignedField,
     this.onTap,
+    this.onLongPress,
+    this.highlighted = false,
   });
 
   final String word;
@@ -67,6 +71,10 @@ class WordLabelChip extends StatelessWidget {
   /// When non-null, chip is "assigned" and takes a pastel tinted fill.
   final String? assignedField;
   final VoidCallback? onTap;
+  final VoidCallback? onLongPress;
+
+  /// True while this word sits inside a phrase being selected.
+  final bool highlighted;
 
   @override
   Widget build(BuildContext context) {
@@ -78,14 +86,21 @@ class WordLabelChip extends StatelessWidget {
       color: Colors.transparent,
       child: InkWell(
         onTap: onTap,
+        onLongPress: onLongPress,
         borderRadius: BorderRadius.circular(AppSpacing.pill),
         child: Ink(
           decoration: BoxDecoration(
-            color: assigned ? tint.withValues(alpha: 0.18) : c.surfaceContainer,
+            color: assigned
+                ? tint.withValues(alpha: 0.18)
+                : highlighted
+                ? c.primary.withValues(alpha: 0.15)
+                : c.surfaceContainer,
             borderRadius: BorderRadius.circular(AppSpacing.pill),
             border: Border.all(
               color: assigned
                   ? tint.withValues(alpha: 0.5)
+                  : highlighted
+                  ? c.primary.withValues(alpha: 0.5)
                   : c.outlineVariant.withValues(alpha: 0.4),
             ),
           ),
@@ -96,7 +111,11 @@ class WordLabelChip extends StatelessWidget {
               Text(
                 word,
                 style: AppTypography.labelMd.copyWith(
-                  color: assigned ? tint : c.onSurface,
+                  color: assigned
+                      ? tint
+                      : highlighted
+                      ? c.primary
+                      : c.onSurface,
                 ),
               ),
               if (assigned) ...[
@@ -116,7 +135,13 @@ class WordLabelChip extends StatelessWidget {
     );
   }
 
-  static Color _tintFor(String? field, AppColors c) {
+  static Color _tintFor(String? field, AppColors c) =>
+      field == null ? c.primary : fieldTint(field, c);
+
+  /// Tint per labeled-field display name, shared with the rule builder's
+  /// palette and preview card (lib/ui/screens/rule_builder_screen.dart)
+  /// so a field keeps one colour everywhere.
+  static Color fieldTint(String field, AppColors c) {
     switch (field) {
       case 'Amount':
         return c.statusSafe;
@@ -126,6 +151,10 @@ class WordLabelChip extends StatelessWidget {
         return c.unitBank;
       case 'Payee':
         return c.unitCard;
+      case 'When':
+        return c.unitMobileMoney;
+      case 'Balance':
+        return c.secondary;
       default:
         return c.primary;
     }

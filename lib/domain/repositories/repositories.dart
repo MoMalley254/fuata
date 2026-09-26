@@ -1,5 +1,6 @@
 import '../models/limit_rule.dart';
 import '../models/settings.dart';
+import '../models/template.dart';
 import '../models/transaction.dart';
 import '../models/unit.dart';
 
@@ -33,4 +34,15 @@ abstract class LimitRepository {
 abstract class SettingsRepository {
   Stream<AppSettings> watchSettings();
   Future<void> updateSettings(AppSettings settings);
+}
+
+/// Capture templates (design.md TEMPLATE, ADR-007): built by the rule
+/// builder (#20) from a pasted sample plus user-labeled spans, consumed
+/// by the parser whenever a message is matched (#21/#22). The Templates
+/// drift table has existed since #13; this interface is the seam the
+/// rule builder talks through so it never learns that drift exists.
+abstract class TemplateRepository {
+  Stream<List<CaptureTemplate>> watchTemplates({String? unitId});
+  Future<void> saveTemplate(CaptureTemplate template);
+  Future<void> deleteTemplate(String templateId);
 }

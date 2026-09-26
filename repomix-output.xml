@@ -71,11 +71,14 @@ docs/
   design.md
   devlog.md
   github-issues.md
+  issue-status.md
   requirements.md
   testing.md
   ui-design-brief.md
 lib/
   data/
+    constants/
+      rule_builder_constants.dart
     db/
       app_database.dart
       drift_repositories.dart
@@ -104,10 +107,12 @@ lib/
     screens/
       activity_screen.dart
       home_screen.dart
+      manage_rules_screen.dart
       me_screen.dart
       my_money_screen.dart
       placeholder_tab_screen.dart
       root_shell.dart
+      rule_builder_screen.dart
       unit_detail_screen.dart
     theme/
       app_colors.dart
@@ -127,6 +132,14 @@ lib/
       profile_block.dart
       section_card.dart
       toggle_row.dart
+    rule_builder/
+      field_palette.dart
+      found_card.dart
+      hint_card.dart
+      pattern_preview_card.dart
+      rule_card.dart
+      rules_body.dart
+      step_label.dart
     sheets/
       add_transaction_sheet.dart
       edit_unit_sheet.dart
@@ -141,6 +154,8 @@ lib/
     unit_list_tile.dart
   main.dart
 scripts/
+  pack.sh
+  refresh-issue-status.sh
   setup-github.sh
 test/
   data/
@@ -157,716 +172,1327 @@ README.md
 <files>
 This section contains the contents of the repository's files.
 
-<file path="lib/domain/logic/parser.dart">
-import 'package:intl/intl.dart';
+<file path="lib/data/constants/rule_builder_constants.dart">
+import '../../domain/models/template.dart';
 
-import '../models/money.dart';
-import '../models/template.dart';
-import '../models/transaction.dart';
+/// The labelable fields, palette order. Amount first deliberately: a
+/// rule is useless without it, and both the palette UX and the save
+/// button lean on that.
+const palette = [
+  (TemplateFieldType.amount, 'Amount', 'The money that moved'),
+  (TemplateFieldType.code, 'Code', 'Reference like QW12ABC3'),
+  (TemplateFieldType.date, 'When', 'Date and time'),
+  (TemplateFieldType.person, 'Payee', 'Who or where, to or from'),
+  (TemplateFieldType.balance, 'Balance', 'New balance quoted'),
+  (TemplateFieldType.fee, 'Fee', 'Any charge taken'),
+];
 
-/// The typed fields recovered from a message, in the vocabulary
-/// requirements.md US-08 asks the rule builder to let the user label:
-/// amount, code, date, person, balance, fee. All-optional because not
-/// every template labels every field (e.g. a template with no fee).
-class ParsedFields {
-  final int? amountMinor;
-  final int? feeMinor;
-  final int? balanceAfterMinor;
-  final String? code;
-  final DateTime? occurredAt;
-  final String? counterparty;
+String fieldName(TemplateFieldType type) => switch (type) {
+  TemplateFieldType.amount => 'Amount',
+  TemplateFieldType.code => 'Code',
+  TemplateFieldType.date => 'When',
+  TemplateFieldType.person => 'Payee',
+  TemplateFieldType.balance => 'Balance',
+  TemplateFieldType.fee => 'Fee',
+};
 
-  const ParsedFields({
-    this.amountMinor,
-    this.feeMinor,
-    this.balanceAfterMinor,
-    this.code,
-    this.occurredAt,
-    this.counterparty,
-  });
+/// One whitespace-delimited run of the sample, with its offsets so a
+/// label span can be built from token indices.
+class WordToken {
+  const WordToken(this.start, this.end, this.text);
+  final int start;
+  final int end; // exclusive
+  final String text;
+}
+
+/// A human-readable version of what a rule will demand from a future
+/// message: the sample with each labeled span replaced by
+/// `xxxx(FieldName)`. Anything after the *last* labeled span is dropped,
+/// because [CaptureTemplate.fromLabeledSample] ends the compiled pattern
+/// at the last label — real messages vary in their tail (URLs, per-message
+/// counters, "see all your balances"), and requiring an exact tail would
+/// break the rule on the very next message.
+///
+/// Purely presentational; the compiled regex is unaffected.
+String describePattern({
+  required String sampleText,
+  required List<LabeledSpan> labels,
+}) {
+  if (labels.isEmpty) return sampleText;
+  final sorted = [...labels]..sort((a, b) => a.start.compareTo(b.start));
+  final buffer = StringBuffer();
+  var cursor = 0;
+  for (final span in sorted) {
+    if (span.start < cursor) continue; // defensive: overlapping span
+    buffer.write(sampleText.substring(cursor, span.start));
+    buffer.write('xxxx(${fieldName(span.type)})');
+    cursor = span.end;
+  }
+  return buffer.toString();
+}
+</file>
+
+<file path="lib/ui/screens/manage_rules_screen.dart">
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:fuata/ui/providers/app_providers.dart';
+import 'package:fuata/ui/theme/app_colors.dart';
+
+import '../../widgets/rule_builder/rules_body.dart';
+import '../theme/app_typography.dart';
+
+/// Manage the message-reading rules for a unit  #20.
+///
+/// The unit page's "Reading messages" row used to say "N rules · add or
+/// review" but only supported "add" — tapping it opened the rule builder
+/// directly. This screen is the "review" half: it lists every template
+/// saved for [unitId], lets the person enable/disable each one and
+/// delete ones they no longer want, and links into the builder to add
+/// another. It's the only place `deleteTemplate` and
+/// `CaptureTemplate.enabled` are actually used.
+class ManageRulesScreen extends ConsumerWidget {
+  final String unitId;
+  const ManageRulesScreen({super.key, required this.unitId});
 
   @override
-  String toString() =>
-      'ParsedFields(amount: $amountMinor, fee: $feeMinor, balanceAfter: $balanceAfterMinor, '
-      'code: $code, occurredAt: $occurredAt, counterparty: $counterparty)';
-}
+  Widget build(BuildContext context, WidgetRef ref) {
+    final c = context.colors;
+    final unitsAsync = ref.read(unitsProvider);
 
-/// The outcome of `Parser.parse`. A non-match (testing.md P-05) is a
-/// normal, expected result — callers route it to the "couldn't read this"
-/// list (design.md's capture flow), not an error.
-class ParseResult {
-  final CaptureTemplate? template;
-  final TxType? type;
-  final ParsedFields? fields;
-
-  const ParseResult._({this.template, this.type, this.fields});
-
-  const ParseResult.noMatch() : this._();
-
-  const ParseResult.matched({
-    required CaptureTemplate template,
-    required TxType type,
-    required ParsedFields fields,
-  }) : this._(template: template, type: type, fields: fields);
-
-  bool get matched => template != null;
-}
-
-/// Pure functions only — no Flutter, no I/O (design.md section 1) — so
-/// this is unit-testable against fake messages without a device
-/// (testing.md's Parser plan, P-01 to P-12). Dedupe against already-stored
-/// transactions needs repository access and is out of scope here; it's
-/// built alongside the review inbox and listener (#21/#22).
-class Parser {
-  const Parser._();
-
-  /// Tries each enabled template in order (a unit can have several — one
-  /// per message shape, testing.md P-06) and returns the first match.
-  /// [currencyCode] is the unit's currency, used to turn a captured amount
-  /// string into minor units via [Money.parseMajor].
-  static ParseResult parse(
-    String message,
-    List<CaptureTemplate> templates, {
-    required String currencyCode,
-  }) {
-    for (final template in templates.where((t) => t.enabled)) {
-      final match = template.compiled.firstMatch(message);
-      if (match == null) continue;
-
-      int? amountMinor;
-      int? feeMinor;
-      int? balanceAfterMinor;
-      String? code;
-      DateTime? occurredAt;
-      String? counterparty;
-
-      for (final entry in template.fieldMap.entries) {
-        final raw = match.namedGroup(entry.key);
-        if (raw == null) continue;
-        switch (entry.value) {
-          case TemplateFieldType.amount:
-            amountMinor = _parseAmountMinor(raw, currencyCode);
-            break;
-          case TemplateFieldType.fee:
-            feeMinor = _parseAmountMinor(raw, currencyCode);
-            break;
-          case TemplateFieldType.balance:
-            balanceAfterMinor = _parseAmountMinor(raw, currencyCode);
-            break;
-          case TemplateFieldType.code:
-            code = raw.trim();
-            break;
-          case TemplateFieldType.date:
-            occurredAt = _parseDate(raw.trim());
-            break;
-          case TemplateFieldType.person:
-            counterparty = raw.trim();
-            break;
-        }
-      }
-
-      // A match with no amount isn't a usable transaction — keep trying
-      // other templates rather than returning a half-parsed result.
-      if (amountMinor == null) continue;
-
-      return ParseResult.matched(
-        template: template,
-        type: _resolveType(template.direction, message),
-        fields: ParsedFields(
-          amountMinor: amountMinor,
-          feeMinor: feeMinor,
-          balanceAfterMinor: balanceAfterMinor,
-          code: code,
-          occurredAt: occurredAt,
-          counterparty: counterparty,
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Reading Rules'),
+      ),
+      body: SafeArea(
+        child: unitsAsync.when(
+          loading: () => const Center(child: CircularProgressIndicator.adaptive(),),
+          error: (e, st) => Center(
+            child: Text(
+              'Something went wrong: $e'
+            ),
+          ),
+          data: (units) {
+            final unit = units.where((u) => u.id == unitId).firstOrNull;
+            if (unit == null) {
+              return Center(
+                child: Text(
+                  "This unit's gone.",
+                  style:
+                  AppTypography.bodyMd.copyWith(color: c.onSurfaceVariant),
+                ),
+              );
+            }
+            return RulesBody(unit: unit);
+          }
         ),
-      );
+      ),
+    );
+  }
+}
+</file>
+
+<file path="lib/ui/screens/rule_builder_screen.dart">
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:fuata/ui/providers/app_providers.dart';
+import 'package:fuata/ui/theme/app_colors.dart';
+
+import '../../data/constants/rule_builder_constants.dart';
+import '../../domain/logic/parser.dart';
+import '../../domain/models/template.dart';
+import '../../domain/models/unit.dart';
+import '../../widgets/app_chips.dart';
+import '../../widgets/rule_builder/field_palette.dart';
+import '../../widgets/rule_builder/found_card.dart';
+import '../../widgets/rule_builder/hint_card.dart';
+import '../../widgets/rule_builder/pattern_preview_card.dart';
+import '../../widgets/rule_builder/step_label.dart';
+import '../theme/app_spacing.dart';
+import '../theme/app_typography.dart';
+
+/// Rule builder (issue #20, ui-design-brief.md 7.7): paste a sample
+/// message, tap (or long-press then tap) word chips to label spans as
+/// Amount / Code / When / Payee / Balance / Fee, watch a live preview of
+/// what the rule extracts, test it against a second message, then save
+/// it as a named rule for a unit.
+///
+/// The rule itself is pure domain work: labels become [LabeledSpan]s and
+/// [CaptureTemplate.fromLabeledSample] turns them into the regex (ADR-007),
+/// and [Parser] runs both the preview and the test — this screen owns no
+/// parsing logic of its own, it only feeds the domain pieces.
+///
+/// Deferred, flagged rather than silently dropped: "This part changes"
+/// wildcards (ui-design-brief.md 7.7's palette has it; the template model
+/// only turns *labeled* spans into capture groups today, so a varying
+/// word outside a label becomes fixed literal text and will break the
+/// rule — worth a model addition in a follow-up).
+
+class RuleBuilderScreen extends ConsumerStatefulWidget {
+  final String? unitId;
+  final CaptureTemplate? existing;
+  const RuleBuilderScreen({super.key, this.unitId, this.existing});
+
+  @override
+  ConsumerState<RuleBuilderScreen> createState() => _RuleBuilderScreenState();
+}
+
+class _RuleBuilderScreenState extends ConsumerState<RuleBuilderScreen> {
+  final _sampleController = TextEditingController();
+  final _testController = TextEditingController();
+  final _nameController = TextEditingController();
+
+  /// Sorted by start; non-overlapping by construction — labeling a range
+  /// first removes any spans that overlap it (the rule builder enforces
+  /// what CaptureTemplate.fromLabeledSample only asserts).
+  List<LabeledSpan> _labels = [];
+
+  /// Long-press on a word starts phrase mode; the next word tapped
+  /// becomes the other end of the range.
+  int? _rangeAnchor;
+  int? _rangeFocus;
+
+  TemplateDirection _direction = TemplateDirection.either;
+  String? _unitId;
+  bool _saving = false;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    final existing = widget.existing;
+    if (existing != null) {
+      _unitId = existing.unitId;
+      _direction = existing.direction;
+      _nameController.text = existing.name;
+      // Setting .text before the listener is attached means the
+      // clear-labels-on-change listener below won't fire on seed.
+      _sampleController.text = existing.sampleText;
+      _labels = _labelsFromTemplate(existing);
+    } else {
+      _unitId = widget.unitId;
     }
-    return const ParseResult.noMatch();
+    // Rebuild the chips on every keystroke, and — important — drop all
+    // labels when the sample itself changes, since their offsets point
+    // into the old text.
+    _sampleController.addListener(() {
+      setState(() {
+        _labels = [];
+        _rangeAnchor = null;
+        _rangeFocus = null;
+      });
+    });
+    _testController.addListener(() => setState(() {}));
+    _nameController.addListener(() => setState(() {}));
   }
 
-  static TxType _resolveType(TemplateDirection direction, String message) {
-    switch (direction) {
-      case TemplateDirection.spent:
-        return TxType.spent;
-      case TemplateDirection.got:
-        return TxType.got;
-      case TemplateDirection.either:
-        final lower = message.toLowerCase();
-        const gotWords = ['received', 'credited', 'deposit'];
-        return gotWords.any(lower.contains) ? TxType.got : TxType.spent;
-    }
+  @override
+  void dispose() {
+    _sampleController.dispose();
+    _testController.dispose();
+    _nameController.dispose();
+    super.dispose();
   }
 
-  /// Strips an optional currency-letter prefix ("Ksh", "KES ") the amount
-  /// field pattern allows, then reuses `Money.parseMajor` for the actual
-  /// minor-unit math (ADR-003: integer minor units, no floats).
-  static int _parseAmountMinor(String raw, String currencyCode) {
-    final stripped = raw
-        .replaceFirst(RegExp(r'^[A-Za-z]{2,5}\.?\s*'), '')
-        .trim();
-    return Money.parseMajor(stripped, currencyCode).minor;
-  }
+  String get _sampleText => _sampleController.text;
 
-  /// testing.md P-09: "21/9/26 at 1:12 PM" and ISO both need to parse to
-  /// the correct timestamp. `DateTime.tryParse` covers ISO 8601 (with a
-  /// "T" or a space separator); a short list of `intl` patterns covers the
-  /// common bank/mobile-money shapes. Returns null rather than throwing —
-  /// a message that otherwise matched shouldn't be discarded over a date
-  /// the app doesn't yet know how to read.
-  static DateTime? _parseDate(String raw) {
-    final iso = DateTime.tryParse(raw);
-    if (iso != null) return iso;
+  /// Rebuilds the labeled spans from a saved template. The template doesn't
+  /// store label offsets, but the compiled [pattern] was generated *from*
+  /// them, so re-matching the pattern against the original sample and
+  /// reading each named group's [RegExpMatch.start]/[RegExpMatch.end]
+  /// recovers exactly the same spans. Returns empty if the pattern no
+  /// longer matches its own sample (hand-edited or corrupted template) —
+  /// the person can just re-label in that case.
+  List<LabeledSpan> _labelsFromTemplate(CaptureTemplate t) {
+    try {
+      final match = t.compiled.firstMatch(t.sampleText);
+      if (match == null) return const [];
 
-    const patterns = [
-      "d/M/yy 'at' h:mm a",
-      "d/M/yyyy 'at' h:mm a",
-      'd/M/yy HH:mm',
-      'd/M/yyyy HH:mm',
-      'd/M/yy',
-      'd/M/yyyy',
-    ];
-    for (final p in patterns) {
-      try {
-        return DateFormat(p).parse(raw);
-      } on FormatException {
-        continue;
+      // Dart's RegExpMatch exposes whole-match bounds as the `start`/`end`
+      // properties, and per-group strings via `namedGroup(name)`, but has
+      // no start(group)/end(group) accessor. So recover each group's
+      // offset by locating its string inside the match range, advancing a
+      // cursor past each hit so a later group can never re-match text
+      // already claimed by an earlier one. `groupNames` yields names in
+      // pattern order, which is label order, which is sample order — the
+      // same order the cursor walks in.
+      final spans = <LabeledSpan>[];
+      var cursor = match.start;
+      for (final name in match.groupNames) {
+        final type = t.fieldMap[name];
+        if (type == null) continue;
+        final value = match.namedGroup(name);
+        if (value == null || value.isEmpty) continue;
+        final at = t.sampleText.indexOf(value, cursor);
+        if (at < 0) continue;
+        final end = at + value.length;
+        spans.add(LabeledSpan(start: at, end: end, type: type));
+        cursor = end;
       }
+      spans.sort((a, b) => a.start.compareTo(b.start));
+      return spans;
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  List<WordToken> get _tokens {
+    final out = <WordToken>[];
+    for (final m in RegExp(r'\S+').allMatches(_sampleText)) {
+      var text = m[0]!;
+      var end = m.end;
+      // Sentence-ending punctuation belongs to the sentence, not to the
+      // field. Peeling it off here means a labelled span for "Ksh0.00."
+      // covers only "Ksh0.00", and the period becomes plain literal text
+      // in the generated regex — which is exactly what we want, because
+      // money/date/code patterns never include a trailing period.
+      final trailing = RegExp(r'[.,;:!?]+$').firstMatch(text);
+      if (trailing != null) {
+        final cut = trailing.end - trailing.start;
+        text = text.substring(0, text.length - cut);
+        end -= cut;
+      }
+      if (text.isEmpty) continue;
+      out.add(WordToken(m.start, end, text));
+    }
+    return out;
+  }
+
+  bool get _canSave =>
+      !_saving &&
+          _sampleText.trim().isNotEmpty &&
+          _labels.any((l) => l.type == TemplateFieldType.amount) &&
+          _unitId != null &&
+          _nameController.text.trim().isNotEmpty;
+
+  (int, int)? get _selection {
+    final a = _rangeAnchor;
+    if (a == null) return null;
+    final b = _rangeFocus ?? a;
+    return a <= b ? (a, b) : (b, a);
+  }
+
+  TemplateFieldType? _typeAt(int tokenIndex) {
+    final t = _tokens[tokenIndex];
+    for (final s in _labels) {
+      if (s.start <= t.start && t.end <= s.end) return s.type;
     }
     return null;
   }
+
+  void _labelRange(int first, int last, TemplateFieldType type) {
+    final tokens = _tokens;
+    final start = tokens[first].start;
+    final end = tokens[last].end;
+    setState(() {
+      _labels.removeWhere((s) => s.start < end && s.end > start);
+      _labels.add(LabeledSpan(start: start, end: end, type: type));
+      _labels.sort((a, b) => a.start.compareTo(b.start));
+      _rangeAnchor = null;
+      _rangeFocus = null;
+    });
+  }
+
+  void _removeAt(int tokenIndex) {
+    final t = _tokens[tokenIndex];
+    setState(() => _labels.removeWhere((s) => s.start <= t.start && t.end <= s.end));
+  }
+
+  void _onWordTap(int i) {
+    final anchor = _rangeAnchor;
+    if (anchor != null) {
+      setState(() => _rangeFocus = i);
+      return;
+    }
+    final existing = _typeAt(i);
+    if (existing != null) {
+      _removeAt(i);
+    } else {
+      _openPalette(i, i);
+    }
+  }
+
+  Future<void> _openPalette(int first, int last) async {
+    final tokens = _tokens;
+    final text = _sampleText.substring(tokens[first].start, tokens[last].end);
+    final type = await showModalBottomSheet<TemplateFieldType>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (sheetContext) => FieldPalette(selectionText: text),
+    );
+    if (type != null) _labelRange(first, last, type);
+  }
+
+  Future<void> _pasteSample() async {
+    final data = await Clipboard.getData(Clipboard.kTextPlain);
+    final text = data?.text;
+    if (text == null || text.trim().isEmpty) return;
+    _sampleController.text = text.trim();
+  }
+
+  /// The rule as it stands right now, id/name disposable — used for the
+  /// live preview and the "try another message" test.
+  CaptureTemplate? get _previewTemplate {
+    if (_sampleText.trim().isEmpty || _labels.isEmpty) return null;
+    final unitId = _unitId;
+    try {
+      return CaptureTemplate.fromLabeledSample(
+        id: 'preview',
+        unitId: unitId ?? 'preview',
+        name: 'preview',
+        direction: _direction,
+        sampleText: _sampleText,
+        labels: List.of(_labels),
+      );
+    } catch (_) {
+      return null; // overlapping labels — unreachable by construction, but don't crash on it
+    }
+  }
+
+  Future<void> _save(MoneyUnit unit) async {
+    setState(() {
+      _saving = true;
+      _error = null;
+    });
+    final now = DateTime.now();
+    final existing = widget.existing;
+    final template = CaptureTemplate.fromLabeledSample(
+      id: existing?.id ?? 'tpl_${now.microsecondsSinceEpoch}',
+      unitId: unit.id,
+      captureSourceId: existing?.captureSourceId,
+      name: _nameController.text.trim(),
+      direction: _direction,
+      sampleText: _sampleText,
+      labels: List.of(_labels),
+    );
+    try {
+      // insertOnConflictUpdate in the repository means the same id
+      // overwrites — that's what makes this an update rather than a
+      // duplicate save.
+      await ref.read(templateRepositoryProvider).saveTemplate(template);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            existing == null
+                ? 'Saved "${template.name}" for ${unit.name}.'
+                : 'Updated "${template.name}".',
+          ),
+        ),
+      );
+      Navigator.of(context).pop();
+    } catch (e) {
+      setState(() {
+        _saving = false;
+        _error = 'Could not save: $e';
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c= context.colors;
+    final unitsAsync = ref.watch(unitsProvider);
+
+    return Scaffold(
+        appBar: AppBar(
+          title: Text(widget.existing == null ? 'Teach a message' : 'Edit rule'),
+        ),
+      body: SafeArea(
+        child: unitsAsync.when(
+            loading: () => const Center(
+              child: CircularProgressIndicator.adaptive(),
+            ),
+            error: (e, st) => Center(
+              child: Text('Something went wrong: $e'),
+            ),
+            data: (units) {
+              if (units.isEmpty) {
+                return Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(AppSpacing.xl),
+                    child: Text(
+                      'Add some money first — rules belong to a unit.',
+                      style: AppTypography.bodyMd.copyWith(color: c.onSurfaceVariant),
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
+                );
+              }
+
+              _unitId ??= units.first.id;
+              final unit = units.firstWhere((u) => u.id == _unitId);
+              final currencyCode = unit.currencyCode;
+
+              return ListView(
+                padding: const EdgeInsets.fromLTRB(
+                  AppSpacing.margin, AppSpacing.sm, AppSpacing.margin, AppSpacing.xl,
+                ),
+                children: [
+                  StepLabel('1 · Paste a sample message'),
+                  const SizedBox(height: AppSpacing.sm),
+                  TextField(
+                    controller: _sampleController,
+                    maxLines: 6,
+                    minLines: 3,
+                    decoration: const InputDecoration(
+                      hintText: 'Paste one real message from your bank or mobile money',
+                    ),
+                    style: AppTypography.bodyMd.copyWith(color: c.onSurface),
+                  ),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton.icon(
+                      onPressed: _pasteSample,
+                      icon: const Icon(Icons.content_paste_rounded, size: 18),
+                      label: const Text('Paste from clipboard'),
+                    ),
+                  ),
+                  if (_sampleText.trim().isNotEmpty) ...[
+                    const SizedBox(height: AppSpacing.sm),
+                    StepLabel('2 · Tap words to say what they are'),
+                    const SizedBox(height: AppSpacing.xs),
+                    Text(
+                      'Tap a word to label it. Long-press, then tap another word, to label a whole phrase. Tap a coloured word to remove its label.',
+                      style: AppTypography.bodySm.copyWith(color: c.onSurfaceVariant),
+                    ),
+                    const SizedBox(height: AppSpacing.sm),
+                    _buildWordChips(c),
+                    if (_rangeAnchor != null) ...[
+                      const SizedBox(height: AppSpacing.sm),
+                      _buildRangeBar(c),
+                    ],
+                    const SizedBox(height: AppSpacing.lg),
+                    StepLabel("3 · Here's what I found"),
+                    const SizedBox(height: AppSpacing.sm),
+                    _buildPreviewCard(c, currencyCode),
+                    const SizedBox(height: AppSpacing.sm),
+                    _buildPatternPreview(c),
+                    const SizedBox(height: AppSpacing.lg,),
+                    StepLabel('4 · Try another message'),
+                    const SizedBox(height: AppSpacing.sm),
+                    _buildTester(c, currencyCode),
+                    const SizedBox(height: AppSpacing.lg),
+                    StepLabel('5 · Save this rule'),
+                    const SizedBox(height: AppSpacing.sm),
+                    _buildRuleDetails(c, units),
+                    if (_error != null) ...[
+                      const SizedBox(height: AppSpacing.sm),
+                      Text(
+                        _error!,
+                        style: AppTypography.bodySm.copyWith(color: c.statusDanger),
+                      ),
+                    ],
+                    const SizedBox(height: AppSpacing.lg),
+                    SizedBox(
+                      width: double.infinity,
+                      child: FilledButton(
+                        onPressed: _canSave ? () => _save(unit) : null,
+                        child: _saving
+                            ? const SizedBox(
+                          height: 18,
+                          width: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                            : Text(widget.existing == null ? 'Save rule' : 'Save changes'),
+                      ),
+                    )
+                  ]
+                ],
+              );
+            }
+        ),
+      )
+    );
+  }
+
+  Widget _buildWordChips(AppColors c) {
+    final tokens = _tokens;
+    final selection = _selection;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(AppSpacing.md),
+      decoration: BoxDecoration(
+        color: c.surfaceContainer,
+        borderRadius: BorderRadius.circular(AppSpacing.unitTileRadius),
+      ),
+      child: Wrap(
+        spacing: AppSpacing.xs,
+        runSpacing: AppSpacing.xs,
+        children: [
+          for (var i = 0; i < tokens.length; i++)
+            WordLabelChip(
+              key: ValueKey('tok_$i'),
+              word: tokens[i].text,
+              assignedField: _typeAt(i) == null ? null : fieldName(_typeAt(i)!),
+              highlighted: selection != null && i >= selection.$1 && i <= selection.$2,
+              onTap: () => _onWordTap(i),
+              onLongPress: () => setState(() {
+                _rangeAnchor = i;
+                _rangeFocus = i;
+              }),
+            ),
+        ],
+      ),
+    );
+  }
+
+  /// Shown while a phrase is selected: the field palette, applied to the
+  /// whole range on tap.
+  Widget _buildRangeBar(AppColors c) {
+    final selection = _selection!;
+    final tokens = _tokens;
+    final text = _sampleText.substring(
+      tokens[selection.$1].start,
+      tokens[selection.$2].end,
+    );
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(AppSpacing.md),
+      decoration: BoxDecoration(
+        color: c.surface,
+        border: Border.all(color: c.primary.withValues(alpha: 0.45)),
+        borderRadius: BorderRadius.circular(AppSpacing.unitTileRadius),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Labeling “$text”',
+            style: AppTypography.bodySm.copyWith(color: c.onSurfaceVariant),
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          Wrap(
+            spacing: AppSpacing.sm,
+            runSpacing: AppSpacing.sm,
+            children: [
+              for (final (type, name, _) in palette)
+                AppChoiceChip(
+                  label: name,
+                  selected: false,
+                  onTap: () => _labelRange(selection.$1, selection.$2, type),
+                ),
+            ],
+          ),
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton(
+              onPressed: () => setState(() {
+                _rangeAnchor = null;
+                _rangeFocus = null;
+              }),
+              child: const Text('Cancel'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPreviewCard(AppColors c, String currencyCode) {
+    final template = _previewTemplate;
+    if (_labels.isEmpty || template == null) {
+      return HintCard(
+        c: c,
+        message: 'Tap a word above and pick what it is — start with the amount.',
+      );
+    }
+    try {
+      final result =
+      Parser.parse(_sampleText, [template], currencyCode: currencyCode);
+      final fields = result.fields;
+      if (!result.matched || fields == null || fields.amountMinor == null) {
+        return HintCard(
+          c: c,
+          message:
+          'Every rule needs an Amount — tap the amount in the message and label it.',
+        );
+      }
+      return FoundCard(fields: fields, currencyCode: currencyCode);
+    } catch (e) {
+      return HintCard(
+        c: c,
+        message: "Couldn't build the preview: $e",
+      );
+    }
+  }
+
+  Widget _buildPatternPreview(AppColors c) {
+    if (_labels.isEmpty) return const SizedBox.shrink();
+    return PatternPreviewCard(
+      description: describePattern(
+        sampleText: _sampleText,
+        labels: _labels,
+      ),
+    );
+  }
+
+  Widget _buildTester(AppColors c, String currencyCode) {
+    final template = _previewTemplate;
+    final input = _testController.text;
+    Widget? resultCard;
+    if (input.trim().isNotEmpty) {
+
+
+      if (template == null) {
+        resultCard = HintCard(c: c, message: 'Label the sample above first.');
+      } else {
+        try {
+          final result = Parser.parse(input, [template], currencyCode: currencyCode);
+          final fields = result.fields;
+          if (!result.matched || fields == null || fields.amountMinor == null) {
+            resultCard =  HintCard(
+              c: c,
+              message:
+              "Couldn't read this one yet. That's normal while you're still labeling — or this message is shaped differently.",
+            );
+          } else {
+            resultCard = FoundCard(fields: fields, currencyCode: currencyCode);
+          }
+        } catch (e) {
+          return HintCard(
+            c: c,
+            message: "Couldn't build the preview: $e",
+          );
+        }
+      }
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        TextField(
+          controller: _testController,
+          maxLines: 4,
+          minLines: 2,
+          decoration: const InputDecoration(
+            hintText: 'Paste a different message of the same kind',
+          ),
+          style: AppTypography.bodyMd.copyWith(color: c.onSurface),
+        ),
+        if (resultCard != null) ...[
+          const SizedBox(height: AppSpacing.sm),
+          resultCard,
+        ],
+      ],
+    );
+  }
+
+  Widget _buildRuleDetails(AppColors c, List<MoneyUnit> units) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        TextField(
+          controller: _nameController,
+          decoration: const InputDecoration(hintText: 'Name it, e.g. "M-Pesa · money out"'),
+          style: AppTypography.bodyLg.copyWith(color: c.onSurface),
+        ),
+        const SizedBox(height: AppSpacing.md),
+        Text('For', style: AppTypography.labelMd.copyWith(color: c.onSurfaceVariant)),
+        const SizedBox(height: AppSpacing.xs),
+        Wrap(
+          spacing: AppSpacing.sm,
+          runSpacing: AppSpacing.sm,
+          children: units.map((u) {
+            return AppChoiceChip(
+              label: '${u.iconEmoji} ${u.name}',
+              selected: u.id == _unitId,
+              onTap: () => setState(() => _unitId = u.id),
+            );
+          }).toList(),
+        ),
+        const SizedBox(height: AppSpacing.md),
+        Text('This message means', style: AppTypography.labelMd.copyWith(color: c.onSurfaceVariant)),
+        const SizedBox(height: AppSpacing.xs),
+        Wrap(
+          spacing: AppSpacing.sm,
+          runSpacing: AppSpacing.sm,
+          children: [
+            AppChoiceChip(
+              label: 'Spent',
+              selected: _direction == TemplateDirection.spent,
+              onTap: () => setState(() => _direction = TemplateDirection.spent),
+            ),
+            AppChoiceChip(
+              label: 'Got',
+              selected: _direction == TemplateDirection.got,
+              onTap: () => setState(() => _direction = TemplateDirection.got),
+            ),
+            AppChoiceChip(
+              label: 'Let the message decide',
+              selected: _direction == TemplateDirection.either,
+              onTap: () => setState(() => _direction = TemplateDirection.either),
+            ),
+          ],
+        ),
+        const SizedBox(height: AppSpacing.xs),
+        Text(
+          switch (_direction) {
+            TemplateDirection.spent => 'Every match counts as money out.',
+            TemplateDirection.got   => 'Every match counts as money in.',
+            TemplateDirection.either =>
+            'Decided per message: looks for "received", "credited" or '
+                '"deposit" to call it money in, otherwise money out.',
+          },
+          style: AppTypography.bodySm.copyWith(color: c.onSurfaceVariant),
+        ),
+      ],
+    );
+  }
 }
 </file>
 
-<file path="lib/domain/models/template.dart">
-/// design.md TEMPLATE / ADR-007: the user pastes a sample message and
-/// labels spans of it (amount, code, date, person, balance, fee); the app
-/// turns that into a regex with one named group per labeled field. This
-/// file is the template model plus the generator; matching a message
-/// against a list of templates is `Parser` (logic/parser.dart).
-library;
+<file path="lib/widgets/rule_builder/field_palette.dart">
+import 'package:flutter/material.dart';
+import 'package:fuata/ui/theme/app_colors.dart';
 
-/// The kinds of field a user can label a span as (US-08). `ignore` isn't
-/// listed in requirements.md's label set but is kept internal-only, not
-/// exposed here, since v0.1's rule builder only offers the six above.
-enum TemplateFieldType { amount, code, date, person, balance, fee }
+import '../../data/constants/rule_builder_constants.dart';
+import '../../ui/theme/app_spacing.dart';
+import '../../ui/theme/app_typography.dart';
+import '../app_chips.dart';
 
-/// `direction` on a Template: which way the transaction goes. `either`
-/// lets the message decide at parse time (ui-design-brief.md 7.7 step 4)
-/// — see `Parser._resolveType`.
-enum TemplateDirection { spent, got, either }
+class FieldPalette extends StatelessWidget {
+  final String selectionText;
+  const FieldPalette({super.key, required this.selectionText});
 
-/// One labeled span over `sampleText`, as produced by the rule builder UI
-/// (#20). `end` is exclusive. The factory that consumes these assumes
-/// they're already non-overlapping — the rule builder enforces that by
-/// construction (tap-to-label chips can't cover the same character twice).
-class LabeledSpan {
-  final int start;
-  final int end;
-  final TemplateFieldType type;
-
-  const LabeledSpan({
-    required this.start,
-    required this.end,
-    required this.type,
-  });
-}
-
-/// design.md TEMPLATE. `pattern` is a regex source string with one named
-/// group per labeled field (`(?<amount>...)`, and `(?<amount2>...)` etc.
-/// if a field type repeats, e.g. amount + fee are both money but distinct
-/// groups); `fieldMap` maps each group name back to its [TemplateFieldType]
-/// — this is tables.dart's `fieldMapJson` column, decoded.
-class CaptureTemplate {
-  final String id;
-  final String unitId;
-  final String? captureSourceId;
-  final String name;
-  final TemplateDirection direction;
-  final String pattern;
-  final Map<String, TemplateFieldType> fieldMap;
-  final String sampleText;
-  final int version;
-  final bool enabled;
-
-  const CaptureTemplate({
-    required this.id,
-    required this.unitId,
-    required this.name,
-    required this.direction,
-    required this.pattern,
-    required this.fieldMap,
-    required this.sampleText,
-    this.captureSourceId,
-    this.version = 1,
-    this.enabled = true,
-  });
-
-  /// Compiled on demand rather than cached, since a Template is an
-  /// immutable value object handed around freely (Parser compiles it once
-  /// per parse attempt); `dotAll` so a `date`/`person` group's `[\s\S]+?`
-  /// isn't the only thing standing between us and a multi-line message
-  /// silently failing to match.
-  RegExp get compiled => RegExp(pattern, dotAll: true);
-
-  /// ADR-007: builds a regex from a pasted sample plus the spans the user
-  /// labeled over it. Literal text between, before and after the labels is
-  /// regex-escaped, so punctuation in the sample (".", "(", "+", "$", ...)
-  /// is matched literally rather than as regex syntax (testing.md P-04).
-  /// Different names/numbers/amounts in a *future* message still match,
-  /// because only the labeled spans became capture groups — everything
-  /// else in the sample is now fixed literal text (testing.md P-03).
-  factory CaptureTemplate.fromLabeledSample({
-    required String id,
-    required String unitId,
-    String? captureSourceId,
-    required String name,
-    required TemplateDirection direction,
-    required String sampleText,
-    required List<LabeledSpan> labels,
-    int version = 1,
-    bool enabled = true,
-  }) {
-    final sorted = [...labels]..sort((a, b) => a.start.compareTo(b.start));
-    for (var i = 1; i < sorted.length; i++) {
-      assert(
-        sorted[i].start >= sorted[i - 1].end,
-        'Labeled spans must not overlap',
-      );
-    }
-
-    final buffer = StringBuffer();
-    final fieldMap = <String, TemplateFieldType>{};
-    final usedCounts = <TemplateFieldType, int>{};
-    var cursor = 0;
-
-    for (final span in sorted) {
-      buffer.write(_escapeLiteral(sampleText.substring(cursor, span.start)));
-      final groupName = _nextGroupName(span.type, usedCounts);
-      buffer.write('(?<$groupName>${_fieldPattern(span.type)})');
-      fieldMap[groupName] = span.type;
-      cursor = span.end;
-    }
-    buffer.write(_escapeLiteral(sampleText.substring(cursor)));
-    return CaptureTemplate(
-      id: id,
-      unitId: unitId,
-      captureSourceId: captureSourceId,
-      name: name,
-      direction: direction,
-      pattern: buffer.toString(),
-      fieldMap: fieldMap,
-      sampleText: sampleText,
-      version: version,
-      enabled: enabled,
-    );
-  }
-
-  CaptureTemplate copyWith({bool? enabled, String? name, int? version}) {
-    return CaptureTemplate(
-      id: id,
-      unitId: unitId,
-      captureSourceId: captureSourceId,
-      name: name ?? this.name,
-      direction: direction,
-      pattern: pattern,
-      fieldMap: fieldMap,
-      sampleText: sampleText,
-      version: version ?? this.version,
-      enabled: enabled ?? this.enabled,
-    );
-  }
-
-  /// testing.md P-11: round-trips through the same shape tables.dart's
-  /// `fieldMapJson` column stores (group name -> field type name), so a
-  /// repository just needs to `jsonEncode`/`jsonDecode` this map.
-  Map<String, dynamic> toJson() => {
-    'id': id,
-    'unitId': unitId,
-    'captureSourceId': captureSourceId,
-    'name': name,
-    'direction': direction.name,
-    'pattern': pattern,
-    'fieldMap': fieldMap.map(
-      (groupName, type) => MapEntry(groupName, type.name),
-    ),
-    'sampleText': sampleText,
-    'version': version,
-    'enabled': enabled,
-  };
-
-  factory CaptureTemplate.fromJson(Map<String, dynamic> json) {
-    final rawFieldMap = json['fieldMap'] as Map<String, dynamic>;
-    return CaptureTemplate(
-      id: json['id'] as String,
-      unitId: json['unitId'] as String,
-      captureSourceId: json['captureSourceId'] as String?,
-      name: json['name'] as String,
-      direction: TemplateDirection.values.byName(json['direction'] as String),
-      pattern: json['pattern'] as String,
-      fieldMap: rawFieldMap.map(
-        (groupName, typeName) => MapEntry(
-          groupName,
-          TemplateFieldType.values.byName(typeName as String),
+  @override
+  Widget build(BuildContext context) {
+    final c= context.colors;
+    return SafeArea(
+      child: Container(
+        decoration: BoxDecoration(
+          color: c.surface,
+          borderRadius: const BorderRadius.vertical(
+            top: Radius.circular(AppSpacing.cardRadiusHero),
+          ),
+        ),
+        padding: const EdgeInsets.fromLTRB(
+          AppSpacing.lg, AppSpacing.md, AppSpacing.lg, AppSpacing.lg,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Center(
+              child: Container(
+                width: 40,
+                height: 4,
+                margin: const EdgeInsets.only(bottom: AppSpacing.md),
+                decoration: BoxDecoration(
+                  color: c.outlineVariant,
+                  borderRadius: BorderRadius.circular(AppSpacing.pill),
+                ),
+              ),
+            ),
+            Text(
+              'What is “$selectionText”?',
+              style: AppTypography.headlineSm.copyWith(color: c.onSurface),
+            ),
+            const SizedBox(height: AppSpacing.md),
+            Wrap(
+spacing: AppSpacing.sm,
+              runSpacing: AppSpacing.sm,
+              children: [
+                for (final (type, name, desc) in palette)
+                  Material(
+                    color: Colors.transparent,
+                    child: InkWell(
+                      onTap: () => Navigator.of(context).pop(type),
+                      borderRadius: BorderRadius.circular(AppSpacing.pill),
+                      child: Ink(
+                        decoration: BoxDecoration(
+                          color: WordLabelChip.fieldTint(name, c).withValues(alpha: 0.15),
+                          borderRadius: BorderRadius.circular(AppSpacing.pill),
+                          border: Border.all(
+                            color: WordLabelChip.fieldTint(name, c).withValues(alpha: 0.5),
+                          ),
+                        ),
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              name,
+                              style: AppTypography.labelMd.copyWith(
+                                color: WordLabelChip.fieldTint(name, c),
+                              ),
+                            ),
+                            const SizedBox(width: 6),
+                            Text(
+                              desc,
+                              style: AppTypography.bodySm.copyWith(
+                                color: c.onSurfaceVariant,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  )
+              ],
+            )
+          ],
         ),
       ),
-      sampleText: json['sampleText'] as String,
-      version: json['version'] as int? ?? 1,
-      enabled: json['enabled'] as bool? ?? true,
     );
-  }
-
-  static String _nextGroupName(
-    TemplateFieldType type,
-    Map<TemplateFieldType, int> used,
-  ) {
-    final count = (used[type] ?? 0) + 1;
-    used[type] = count;
-    // Dart named-group names must start with a letter and be alphanumeric —
-    // `type.name` (e.g. "amount") already is; appending the count for a
-    // repeat keeps that true ("amount2").
-    return count == 1 ? type.name : '${type.name}$count';
-  }
-
-  /// Escapes regex metacharacters so literal text from the sample is
-  /// matched as itself. Dart's RegExp has no built-in escape helper.
-  static String _escapeLiteral(String s) {
-    return s.replaceAllMapped(
-      RegExp(r'[.*+?^${}()|[\]\\]'),
-      (m) => '\\${m[0]}',
-    );
-  }
-
-  /// The regex each field type matches against in a *future* message —
-  /// deliberately more permissive than any one sample, since the amount,
-  /// code, date etc. will differ every time (testing.md P-02/P-03).
-  static String _fieldPattern(TemplateFieldType type) {
-    switch (type) {
-      case TemplateFieldType.amount:
-      case TemplateFieldType.balance:
-      case TemplateFieldType.fee:
-        // Optional currency label/prefix, digits with optional thousands
-        // separators, optional decimal part — "Ksh350.00", "KES 1,250",
-        // "350" all match (testing.md P-02).
-        return r'(?:[A-Za-z]{2,5}\.?\s*)?[\d,]+(?:\.\d+)?';
-      case TemplateFieldType.code:
-        return r'[A-Za-z0-9]+';
-      case TemplateFieldType.date:
-      case TemplateFieldType.person:
-        // Non-greedy so it stops at the next literal chunk once compiled,
-        // rather than swallowing the rest of the message.
-        return r'[\s\S]+?';
-    }
   }
 }
 </file>
 
-<file path="test/domain/parser_test.dart">
-import 'package:flutter_test/flutter_test.dart';
+<file path="lib/widgets/rule_builder/found_card.dart">
+import 'package:flutter/material.dart';
 import 'package:fuata/domain/logic/parser.dart';
-import 'package:fuata/domain/models/template.dart';
-import 'package:fuata/domain/models/transaction.dart';
+import 'package:intl/intl.dart';
 
-void main() {
-  // Fake messages only (testing.md's rule for the parser plan) — none of
-  // these are copied from a real provider's wording.
+import '../../domain/models/money.dart';
+import '../../ui/theme/app_colors.dart';
+import '../../ui/theme/app_spacing.dart';
+import '../../ui/theme/app_typography.dart';
+import '../app_chips.dart';
 
-  const paidSample =
-      'Confirmed. Ksh350.00 paid to JAVA HOUSE (Nairobi) on 21/9/26 at 1:12 PM. '
-      'Code QW12ABC3. Fee Ksh5.00 charged (VAT incl.). New balance is Ksh4,500.00.';
+/// "Here's what I found": the extracted fields as a mini transaction
+/// card. Fields the template doesn't label are shown as empty dashed
+/// chips (ui-design-brief.md 7.7 step 3), so the person can see at a
+/// glance what's still missing.
+class FoundCard extends StatelessWidget {
+  final ParsedFields fields;
+  final String currencyCode;
+  const FoundCard({super.key, required this.fields, required this.currencyCode});
 
-  CaptureTemplate paidTemplate({String id = 't-paid'}) {
-    int at(String needle) => paidSample.indexOf(needle);
-    LabeledSpan span(String needle, TemplateFieldType type) =>
-        LabeledSpan(start: at(needle), end: at(needle) + needle.length, type: type);
-
-    return CaptureTemplate.fromLabeledSample(
-      id: id,
-      unitId: 'u-mpesa',
-      name: 'M-Pesa paid to',
-      direction: TemplateDirection.spent,
-      sampleText: paidSample,
-      labels: [
-        span('Ksh350.00', TemplateFieldType.amount),
-        span('JAVA HOUSE', TemplateFieldType.person),
-        span('21/9/26 at 1:12 PM', TemplateFieldType.date),
-        span('QW12ABC3', TemplateFieldType.code),
-        span('Ksh5.00', TemplateFieldType.fee),
-        span('Ksh4,500.00', TemplateFieldType.balance),
-      ],
-    );
-  }
-
-  const receivedSample =
-      'You have received Ksh5,000.00 from JOHN DOE 0712345678 on 22/9/26 at 9:00 AM. '
-      'New balance is Ksh9,500.00. Transaction ID AB34CD5E.';
-
-  CaptureTemplate receivedTemplate({String id = 't-received'}) {
-    int at(String needle) => receivedSample.indexOf(needle);
-    LabeledSpan span(String needle, TemplateFieldType type) =>
-        LabeledSpan(start: at(needle), end: at(needle) + needle.length, type: type);
-
-    return CaptureTemplate.fromLabeledSample(
-      id: id,
-      unitId: 'u-mpesa',
-      name: 'M-Pesa received',
-      direction: TemplateDirection.got,
-      sampleText: receivedSample,
-      labels: [
-        span('Ksh5,000.00', TemplateFieldType.amount),
-        span('JOHN DOE 0712345678', TemplateFieldType.person),
-        span('22/9/26 at 9:00 AM', TemplateFieldType.date),
-        span('Ksh9,500.00', TemplateFieldType.balance),
-        span('AB34CD5E', TemplateFieldType.code),
-      ],
-    );
-  }
-
-  const withdrawSample =
-      'Withdraw of Ksh2,000.00 from ATM 00219 on 20/9/26 at 4:30 PM. '
-      'Code WX55YZ9. New balance is Ksh100.00.';
-
-  CaptureTemplate withdrawTemplate({String id = 't-withdraw'}) {
-    int at(String needle) => withdrawSample.indexOf(needle);
-    LabeledSpan span(String needle, TemplateFieldType type) =>
-        LabeledSpan(start: at(needle), end: at(needle) + needle.length, type: type);
-
-    return CaptureTemplate.fromLabeledSample(
-      id: id,
-      unitId: 'u-mpesa',
-      name: 'M-Pesa withdraw',
-      direction: TemplateDirection.spent,
-      sampleText: withdrawSample,
-      labels: [
-        span('Ksh2,000.00', TemplateFieldType.amount),
-        span('ATM 00219', TemplateFieldType.person),
-        span('20/9/26 at 4:30 PM', TemplateFieldType.date),
-        span('WX55YZ9', TemplateFieldType.code),
-        span('Ksh100.00', TemplateFieldType.balance),
-      ],
-    );
-  }
-
-  group('P-01 labeled sample -> all fields, correct types', () {
-    test('extracts amount, code, date, person, fee, balance', () {
-      final result = Parser.parse(paidSample, [paidTemplate()], currencyCode: 'KES');
-
-      expect(result.matched, isTrue);
-      expect(result.type, TxType.spent);
-      expect(result.fields!.amountMinor, 35000);
-      expect(result.fields!.feeMinor, 500);
-      expect(result.fields!.balanceAfterMinor, 450000);
-      expect(result.fields!.code, 'QW12ABC3');
-      expect(result.fields!.counterparty, 'JAVA HOUSE');
-      expect(result.fields!.occurredAt, isNotNull);
-      expect(result.fields!.occurredAt!.year, 2026);
-      expect(result.fields!.occurredAt!.month, 9);
-      expect(result.fields!.occurredAt!.day, 21);
-      expect(result.fields!.occurredAt!.hour, 13); // 1:12 PM -> 13:12
-      expect(result.fields!.occurredAt!.minute, 12);
-    });
-  });
-
-  group('P-02 amount formats', () {
-    final template = paidTemplate();
-
-    test('"Ksh350.00" -> 35000 minor', () {
-      final r = Parser.parse(paidSample, [template], currencyCode: 'KES');
-      expect(r.fields!.amountMinor, 35000);
-    });
-
-    test('"KES 1,250" style balance -> correct minor units', () {
-      final r = Parser.parse(paidSample, [template], currencyCode: 'KES');
-      // "Ksh4,500.00" balance in the sample -> 450000 minor.
-      expect(r.fields!.balanceAfterMinor, 450000);
-    });
-
-    test('bare "350" (no currency prefix) still parses', () {
-      const bare = 'Sent 350 to PETER on 1/1/26. Code ZZ1.';
-      final t = CaptureTemplate.fromLabeledSample(
-        id: 't-bare',
-        unitId: 'u1',
-        name: 'bare',
-        direction: TemplateDirection.spent,
-        sampleText: bare,
-        labels: [
-          LabeledSpan(start: bare.indexOf('350'), end: bare.indexOf('350') + 3, type: TemplateFieldType.amount),
-          LabeledSpan(
-            start: bare.indexOf('PETER'),
-            end: bare.indexOf('PETER') + 5,
-            type: TemplateFieldType.person,
+  @override
+  Widget build(BuildContext context) {
+    final c= context.colors;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(AppSpacing.md),
+      decoration: BoxDecoration(
+        color: c.surface,
+        borderRadius: BorderRadius.circular(AppSpacing.unitTileRadius),
+        border: Border.all(color: c.outlineVariant.withValues(alpha: 0.35)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _fieldRow(c, 'Amount', Money(fields.amountMinor!, currencyCode).format(),
+              WordLabelChip.fieldTint('Amount', c)),
+          _fieldRow(c, 'Payee', fields.counterparty,
+              WordLabelChip.fieldTint('Payee', c)),
+          _fieldRow(
+            c,
+            'When',
+            fields.occurredAt == null
+                ? null
+                : DateFormat('d MMM yyyy, h:mm a').format(fields.occurredAt!),
+            WordLabelChip.fieldTint('When', c),
           ),
-          LabeledSpan(start: bare.indexOf('ZZ1'), end: bare.indexOf('ZZ1') + 3, type: TemplateFieldType.code),
-        ],
-      );
-      final r = Parser.parse(bare, [t], currencyCode: 'KES');
-      expect(r.matched, isTrue);
-      expect(r.fields!.amountMinor, 35000);
-    });
-  });
-
-  test('P-03 different names/numbers in the varying part still match', () {
-    const other =
-        'Confirmed. Ksh1,250.50 paid to CARREFOUR (Nairobi) on 5/1/27 at 6:45 AM. '
-        'Code ZZ99XYZ1. Fee Ksh10.00 charged (VAT incl.). New balance is Ksh900.00.';
-
-    final result = Parser.parse(other, [paidTemplate()], currencyCode: 'KES');
-
-    expect(result.matched, isTrue);
-    expect(result.fields!.amountMinor, 125050);
-    expect(result.fields!.counterparty, 'CARREFOUR');
-    expect(result.fields!.code, 'ZZ99XYZ1');
-    expect(result.fields!.balanceAfterMinor, 90000);
-  });
-
-  test('P-04 regex special characters in the sample are escaped, not matched as syntax', () {
-    // The sample itself contains '.', '(', ')' outside the labeled spans
-    // (see paidSample: "(Nairobi)", "(VAT incl.)"). Building the template
-    // and re-matching the exact sample must not throw and must match.
-    expect(() => paidTemplate(), returnsNormally);
-    final result = Parser.parse(paidSample, [paidTemplate()], currencyCode: 'KES');
-    expect(result.matched, isTrue);
-
-    // A message with different literal punctuation in the same spots
-    // must NOT be mistaken for a match against the escaped literals.
-    const differentPunctuation =
-        'Confirmed. Ksh350.00 paid to JAVA HOUSE [Nairobi] on 21/9/26 at 1:12 PM. '
-        'Code QW12ABC3. Fee Ksh5.00 charged [VAT incl]. New balance is Ksh4,500.00.';
-    final noMatch = Parser.parse(differentPunctuation, [paidTemplate()], currencyCode: 'KES');
-    expect(noMatch.matched, isFalse);
-  });
-
-  test('P-05 a message matching no template returns no match', () {
-    const unrelated = 'Your OTP is 445566. Do not share it with anyone.';
-    final result = Parser.parse(
-      unrelated,
-      [paidTemplate(), receivedTemplate(), withdrawTemplate()],
-      currencyCode: 'KES',
-    );
-    expect(result.matched, isFalse);
-    expect(result.template, isNull);
-    expect(result.fields, isNull);
-  });
-
-  group('P-06 multiple templates on one unit: correct template and direction chosen', () {
-    final templates = [paidTemplate(), receivedTemplate(), withdrawTemplate()];
-
-    test('received message matches the received template, type got', () {
-      final r = Parser.parse(receivedSample, templates, currencyCode: 'KES');
-      expect(r.matched, isTrue);
-      expect(r.template!.id, 't-received');
-      expect(r.type, TxType.got);
-    });
-
-    test('withdraw message matches the withdraw template, type spent', () {
-      final r = Parser.parse(withdrawSample, templates, currencyCode: 'KES');
-      expect(r.matched, isTrue);
-      expect(r.template!.id, 't-withdraw');
-      expect(r.type, TxType.spent);
-    });
-
-    test('paid message matches the paid template, type spent', () {
-      final r = Parser.parse(paidSample, templates, currencyCode: 'KES');
-      expect(r.matched, isTrue);
-      expect(r.template!.id, 't-paid');
-      expect(r.type, TxType.spent);
-    });
-  });
-
-  // P-07 (same code deduped) and P-08 (deduped by unit+amount+2-minute
-  // window when there's no code) both need to compare a parsed result
-  // against already-stored transactions, which means repository access.
-  // That's out of scope for the parser itself (design.md's ER diagram
-  // has no dedupe table) — those cases are covered where the dedupe
-  // check actually runs, in #21 (share/paste) and #22 (listener).
-
-  group('P-09 date formats parse to the correct timestamp', () {
-    test('"21/9/26 at 1:12 PM" style', () {
-      final r = Parser.parse(paidSample, [paidTemplate()], currencyCode: 'KES');
-      final d = r.fields!.occurredAt!;
-      expect(DateTime(d.year, d.month, d.day, d.hour, d.minute), DateTime(2026, 9, 21, 13, 12));
-    });
-
-    test('ISO 8601 style', () {
-      const isoSample = 'TXN on 2026-09-21T13:12:00 for Ksh100.00. Code ISO1.';
-      final t = CaptureTemplate.fromLabeledSample(
-        id: 't-iso',
-        unitId: 'u1',
-        name: 'iso',
-        direction: TemplateDirection.spent,
-        sampleText: isoSample,
-        labels: [
-          LabeledSpan(
-            start: isoSample.indexOf('2026-09-21T13:12:00'),
-            end: isoSample.indexOf('2026-09-21T13:12:00') + '2026-09-21T13:12:00'.length,
-            type: TemplateFieldType.date,
+          _fieldRow(c, 'Code', fields.code, WordLabelChip.fieldTint('Code', c)),
+          _fieldRow(
+            c,
+            'Fee',
+            fields.feeMinor == null ? null : Money(fields.feeMinor!, currencyCode).format(),
+            WordLabelChip.fieldTint('Fee', c),
           ),
-          LabeledSpan(
-            start: isoSample.indexOf('Ksh100.00'),
-            end: isoSample.indexOf('Ksh100.00') + 'Ksh100.00'.length,
-            type: TemplateFieldType.amount,
-          ),
-          LabeledSpan(
-            start: isoSample.indexOf('ISO1'),
-            end: isoSample.indexOf('ISO1') + 4,
-            type: TemplateFieldType.code,
+          _fieldRow(
+            c,
+            'Balance',
+            fields.balanceAfterMinor == null
+                ? null
+                : Money(fields.balanceAfterMinor!, currencyCode).format(),
+            WordLabelChip.fieldTint('Balance', c),
           ),
         ],
-      );
-      final r = Parser.parse(isoSample, [t], currencyCode: 'KES');
-      expect(r.matched, isTrue);
-      final d = r.fields!.occurredAt!;
-      expect(DateTime(d.year, d.month, d.day, d.hour, d.minute), DateTime(2026, 9, 21, 13, 12));
-    });
-  });
+      ),
+    );
+  }
 
-  test('P-10 balance quoted in the message is extracted for reconciliation', () {
-    // Comparing it against the computed balance and flagging the unit is
-    // ledger/reconciliation logic (design.md section 3), not the
-    // parser's job — the parser's contract is just to surface the value.
-    final r = Parser.parse(paidSample, [paidTemplate()], currencyCode: 'KES');
-    expect(r.fields!.balanceAfterMinor, 450000);
-  });
+  Widget _fieldRow(AppColors c, String name, String? value, Color tint) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 76,
+            child: Text(
+              name,
+              style: AppTypography.labelSm.copyWith(color: tint),
+            ),
+          ),
+          Expanded(
+            child: value == null
+                ? Container(
+              padding: const EdgeInsets.symmetric(
+                horizontal: AppSpacing.sm, vertical: 2,
+              ),
+              decoration: BoxDecoration(
+                border: Border.all(
+                  color: c.outlineVariant.withValues(alpha: 0.5),
+                ),
+                borderRadius: BorderRadius.circular(AppSpacing.sm),
+              ),
+              child: Text(
+                'not labeled',
+                style: AppTypography.bodySm.copyWith(color: c.onSurfaceTertiary),
+              ),
+            )
+                : Text(
+              value,
+              style: AppTypography.bodyMd.copyWith(color: c.onSurface),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+</file>
 
-  test('P-11 template round-trips through JSON with identical parse behaviour', () {
-    final original = paidTemplate();
-    final restored = CaptureTemplate.fromJson(original.toJson());
+<file path="lib/widgets/rule_builder/hint_card.dart">
+import 'package:flutter/material.dart';
 
-    expect(restored.pattern, original.pattern);
-    expect(restored.fieldMap, original.fieldMap);
-    expect(restored.direction, original.direction);
+import '../../ui/theme/app_colors.dart';
+import '../../ui/theme/app_spacing.dart';
+import '../../ui/theme/app_typography.dart';
 
-    final before = Parser.parse(paidSample, [original], currencyCode: 'KES');
-    final after = Parser.parse(paidSample, [restored], currencyCode: 'KES');
+class HintCard extends StatelessWidget {
+  final AppColors c;
+  final String message;
+  const HintCard({super.key, required this.c, required this.message});
 
-    expect(after.matched, before.matched);
-    expect(after.fields!.amountMinor, before.fields!.amountMinor);
-    expect(after.fields!.code, before.fields!.code);
-    expect(after.fields!.counterparty, before.fields!.counterparty);
-    expect(after.fields!.balanceAfterMinor, before.fields!.balanceAfterMinor);
-  });
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(AppSpacing.md),
+      decoration: BoxDecoration(
+        color: c.surfaceContainer,
+        borderRadius: BorderRadius.circular(AppSpacing.unitTileRadius),
+      ),
+      child: Text(
+        message,
+        style: AppTypography.bodySm.copyWith(color: c.onSurfaceVariant),
+      ),
+    );
+  }
+}
+</file>
 
-  group('P-12 very long or empty message does not crash', () {
-    final templates = [paidTemplate(), receivedTemplate(), withdrawTemplate()];
+<file path="lib/widgets/rule_builder/pattern_preview_card.dart">
+import 'package:flutter/material.dart';
 
-    test('empty message', () {
-      expect(() => Parser.parse('', templates, currencyCode: 'KES'), returnsNormally);
-      expect(Parser.parse('', templates, currencyCode: 'KES').matched, isFalse);
-    });
+import '../../ui/theme/app_colors.dart';
+import '../../ui/theme/app_spacing.dart';
+import '../../ui/theme/app_typography.dart';
 
-    test('very long message', () {
-      final long = 'Random noise. ' * 5000;
-      expect(() => Parser.parse(long, templates, currencyCode: 'KES'), returnsNormally);
-      expect(Parser.parse(long, templates, currencyCode: 'KES').matched, isFalse);
-    });
+/// "A message will match if it looks like this": shows the person the
+/// shape of message the rule they just built will accept — the sample
+/// with each labeled span replaced by `xxxx(FieldName)`, and anything
+/// after the last label dropped (see [describePattern]).
+///
+/// Sits directly under "Here's what I found" in the rule builder, so the
+/// two read as one answer: this is what we'd extract from *this* sample,
+/// and this is what a *future* message needs to look like for us to try.
+class PatternPreviewCard extends StatelessWidget {
+  final String description;
+  const PatternPreviewCard({super.key, required this.description});
 
-    test('very long message that still contains a real match', () {
-      final long = '${'Random noise. ' * 2000}$paidSample${' more noise' * 2000}';
-      final r = Parser.parse(long, templates, currencyCode: 'KES');
-      expect(r.matched, isTrue);
-      expect(r.fields!.amountMinor, 35000);
-    });
-  });
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(AppSpacing.md),
+      decoration: BoxDecoration(
+        color: c.surfaceContainer,
+        borderRadius: BorderRadius.circular(AppSpacing.unitTileRadius),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'A message will match if it looks like this',
+            style: AppTypography.labelSm.copyWith(color: c.onSurfaceVariant),
+          ),
+          const SizedBox(height: AppSpacing.xs),
+          Text(
+            description,
+            style: AppTypography.bodySm.copyWith(color: c.onSurface),
+          ),
+          const SizedBox(height: AppSpacing.xs),
+          Text(
+            'Only the parts shown here matter — anything after the last '
+                'xxxx(...) is ignored.',
+            style: AppTypography.labelSm.copyWith(color: c.onSurfaceTertiary),
+          ),
+        ],
+      ),
+    );
+  }
+}
+</file>
+
+<file path="lib/widgets/rule_builder/rule_card.dart">
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../../domain/models/template.dart';
+import '../../ui/providers/app_providers.dart';
+import '../../ui/screens/rule_builder_screen.dart';
+import '../../ui/theme/app_colors.dart';
+import '../../ui/theme/app_spacing.dart';
+import '../../ui/theme/app_typography.dart';
+
+enum _RuleAction { edit, delete }
+
+class RuleCard extends ConsumerWidget {
+  final CaptureTemplate template;
+  const RuleCard({super.key, required this.template});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final c = context.colors;
+    final titleColor =
+    template.enabled ? c.onSurface : c.onSurfaceVariant;
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: () => _openEditor(context),
+        borderRadius: BorderRadius.circular(AppSpacing.unitTileRadius),
+        child: Ink(
+          decoration: BoxDecoration(
+            color: c.surface,
+            borderRadius: BorderRadius.circular(AppSpacing.unitTileRadius),
+            border:
+            Border.all(color: c.outlineVariant.withValues(alpha: 0.35)),
+          ),
+          padding: const EdgeInsets.fromLTRB(
+            AppSpacing.md,
+            AppSpacing.sm,
+            AppSpacing.xs,
+            AppSpacing.sm,
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      template.name,
+                      style: AppTypography.bodyLg.copyWith(color: titleColor),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      _directionLabel(template.direction),
+                      style: AppTypography.bodySm
+                          .copyWith(color: c.onSurfaceVariant),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+              Switch.adaptive(
+                value: template.enabled,
+                onChanged: (v) => ref
+                    .read(templateRepositoryProvider)
+                    .saveTemplate(template.copyWith(enabled: v)),
+              ),
+              PopupMenuButton<_RuleAction>(
+                tooltip: 'More',
+                icon: Icon(
+                  Icons.more_vert_rounded,
+                  color: c.onSurfaceVariant,
+                ),
+                onSelected: (a) => _onAction(context, ref, a),
+                itemBuilder: (_) => const [
+                  PopupMenuItem(
+                    value: _RuleAction.edit,
+                    child: Row(
+                      children: [
+                        Icon(Icons.edit_outlined, size: 18),
+                        SizedBox(width: AppSpacing.sm),
+                        Text('Edit'),
+                      ],
+                    ),
+                  ),
+                  PopupMenuItem(
+                    value: _RuleAction.delete,
+                    child: Row(
+                      children: [
+                        Icon(Icons.delete_outline_rounded, size: 18),
+                        SizedBox(width: AppSpacing.sm),
+                        Text('Delete'),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  String _directionLabel(TemplateDirection d) => switch (d) {
+    TemplateDirection.spent => 'Counts as money out',
+    TemplateDirection.got => 'Counts as money in',
+    TemplateDirection.either => 'Decides per message',
+  };
+
+  void _onAction(BuildContext context, WidgetRef ref, _RuleAction action) {
+    switch (action) {
+      case _RuleAction.edit:
+        _openEditor(context);
+      case _RuleAction.delete:
+        _confirmDelete(context, ref);
+    }
+  }
+
+  void _openEditor(BuildContext context) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => RuleBuilderScreen(existing: template),
+      ),
+    );
+  }
+
+  Future<void> _confirmDelete(BuildContext context, WidgetRef ref) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text('Delete "${template.name}"?'),
+        content: const Text(
+          "Future messages of this shape won't be read automatically. "
+              'You can always teach it again.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    await ref.read(templateRepositoryProvider).deleteTemplate(template.id);
+  }
+}
+</file>
+
+<file path="lib/widgets/rule_builder/rules_body.dart">
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:fuata/widgets/rule_builder/rule_card.dart';
+
+import '../../domain/models/unit.dart';
+import '../../ui/providers/app_providers.dart';
+import '../../ui/screens/rule_builder_screen.dart';
+import '../../ui/theme/app_colors.dart';
+import '../../ui/theme/app_spacing.dart';
+import '../../ui/theme/app_typography.dart';
+import '../personalization/action_row.dart';
+
+class RulesBody extends ConsumerWidget {
+  final MoneyUnit unit;
+  const RulesBody({super.key, required this.unit});
+
+  /// Push (not replace) so the builder's "Saved..." pop returns here and
+  /// the new rule shows up in the list immediately, via the stream.
+  void _openBuilder(BuildContext context) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => RuleBuilderScreen(unitId: unit.id),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final c = context.colors;
+    final templatesAsync = ref.watch(unitTemplatesProvider(unit.id));
+
+    return templatesAsync.when(
+      loading: () => const Center(child: CircularProgressIndicator.adaptive()),
+      error: (e, st) => Center(child: Text('Something went wrong: $e')),
+      data: (templates) {
+        if (templates.isEmpty) {
+          return Padding(
+            padding: const EdgeInsets.all(AppSpacing.xl),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Text(
+                  'No rules yet for ${unit.name}.',
+                  style:
+                  AppTypography.bodyMd.copyWith(color: c.onSurfaceVariant),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: AppSpacing.lg),
+                FilledButton(
+                  onPressed: () => _openBuilder(context),
+                  child: const Text('Teach a message'),
+                ),
+              ],
+            ),
+          );
+        }
+
+        return ListView(
+          padding: const EdgeInsets.fromLTRB(
+            AppSpacing.margin,
+            AppSpacing.sm,
+            AppSpacing.margin,
+            AppSpacing.xl,
+          ),
+          children: [
+            Text(
+              'Rules for ${unit.name}',
+              style: AppTypography.bodySm.copyWith(color: c.onSurfaceVariant),
+            ),
+            const SizedBox(height: AppSpacing.md),
+            for (final t in templates) ...[
+              RuleCard(template: t),
+              const SizedBox(height: AppSpacing.sm),
+            ],
+            const SizedBox(height: AppSpacing.md),
+            ActionRow(
+              icon: Icons.add_rounded,
+              title: 'Teach another message',
+              subtitle: 'Add a new reading rule for ${unit.name}',
+              onTap: () => _openBuilder(context),
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+</file>
+
+<file path="lib/widgets/rule_builder/step_label.dart">
+import 'package:flutter/material.dart';
+
+import '../../ui/theme/app_colors.dart';
+import '../../ui/theme/app_typography.dart';
+
+class StepLabel extends StatelessWidget {
+  const StepLabel(this.text, {super.key});
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      text,
+      style: AppTypography.headlineSm.copyWith(color: context.colors.onSurface),
+    );
+  }
 }
 </file>
 
@@ -1053,6 +1679,75 @@ One branch per issue: `feat/<short-name>`, `fix/<short-name>`, `docs/<short-name
 - Opt-in redacted diagnostics copy button `v1.1`
 - iOS manual/share-sheet edition `v1.1`
 - Open-source licence review and contribution guide `v1.1`
+- Rule builder: "This part changes" wildcard `area: capture` `area: ui` `v1.1`
+- Rule builder: user-defined custom fields `area: capture` `area: ui` `v1.1`
+
+## Post-#20 follow-ups
+
+Two enhancements from ui-design-brief.md 7.7's palette that #20 deliberately
+did not build (both need a domain-model addition, so are out of scope for #20):
+
+55. **feat(capture): "This part changes" wildcard** `type: feature` `area: capture` `area: ui` `v1.1`
+    A span labeled as a wildcard compiles to a non-capturing `[\s\S]+?` —
+    "this word varies between messages". Today any unlabeled word becomes
+    fixed literal text and breaks the rule on the next differently-worded
+    message.
+
+56. **feat(capture): user-defined custom fields** `type: feature` `area: capture` `area: ui` `v1.1`
+    7.7's palette has "Add my own field". Today only the six built-in
+    `TemplateFieldType` values are labelable. Needs a template-owned
+    custom field type, `ParsedFields.custom` (a `Map<String, String>`),
+    and UI in `FieldPalette` to name one.
+</file>
+
+<file path="docs/issue-status.md">
+# Issue status (generated 2026-09-26T21:18Z)
+
+Source of truth: GitHub. Regenerate with `scripts/refresh-issue-status.sh`.
+
+| # | State | Milestone | Title |
+|---|---|---|---|
+| #56 | OPEN | v1.1 Backlog | feat(capture): user-defined custom fields in rule builder |
+| #55 | OPEN | v1.1 Backlog | feat(capture): "This part changes" wildcard in rule builder |
+| #39 | OPEN | v1.1 Backlog | feat: Open-source licence review and contribution guide |
+| #38 | OPEN | v1.1 Backlog | feat: iOS manual/share-sheet edition |
+| #37 | OPEN | v1.1 Backlog | feat: Opt-in redacted diagnostics copy button |
+| #36 | OPEN | v1.1 Backlog | feat: Listener-inactive detection and manufacturer keep-alive guides |
+| #35 | OPEN | v1.1 Backlog | feat: Scheduled encrypted export to a user-chosen folder |
+| #34 | OPEN | v1.1 Backlog | feat: Template packs: export/import/share by file or QR, bundled presets |
+| #33 | OPEN | v1.1 Backlog | feat: Recurring bills and expected income |
+| #32 | OPEN | v1.1 Backlog | feat: Recipient to category rules |
+| #31 | OPEN | v1.1 Backlog | feat: Scheduled daily/weekly/monthly summary notifications |
+| #30 | OPEN | v1.1 Backlog | feat: Outing mode (temporary budget with its own banner) |
+| #29 | OPEN | v1.1 Backlog | feat: Home screen widget |
+| #28 | OPEN | v1.1 Backlog | feat: SQLCipher encryption with Android Keystore and app lock |
+| #27 | OPEN | v0.1 MVP | chore(release): v0.1.0 |
+| #26 | OPEN | v0.1 MVP | test: manual device test pass |
+| #25 | OPEN | v0.1 MVP | chore(privacy): remove INTERNET permission and disable backup |
+| #24 | OPEN | v0.1 MVP | feat(data): JSON export/import |
+| #23 | OPEN | v0.1 MVP | feat(insight): Today/Week/Month summaries |
+| #22 | OPEN | v0.1 MVP | feat(capture): notification listener with app allow-list and dedupe |
+| #21 | OPEN | v0.1 MVP | feat(capture): share/paste to review inbox |
+| #20 | OPEN | v0.1 MVP | feat(capture): rule builder UI |
+| #19 | CLOSED | v0.1 MVP | feat(capture): template model and parser |
+| #18 | CLOSED | v0.1 MVP | spike: notification listener with app closed |
+| #17 | OPEN | v0.1 MVP | feat(banner): banner setup screen with live preview |
+| #16 | OPEN | v0.1 MVP | feat(banner): ongoing notification banner |
+| #15 | OPEN | v0.1 MVP | feat(limits): limit engine and status |
+| #14 | OPEN | v0.1 MVP | feat(ledger): computed balances, transfers, fees |
+| #13 | CLOSED | v0.1 MVP | feat(data): local database and repositories |
+| #12 | CLOSED | v0.1 MVP | feat(ui): Me and personalisation settings |
+| #11 | CLOSED | v0.1 MVP | feat(ui): My money and unit pages |
+| #10 | CLOSED | v0.1 MVP | feat(ui): Activity screen and transaction detail |
+| #9 | OPEN | v0.1 MVP | feat(ui): add-transaction sheet |
+| #8 | CLOSED | v0.1 MVP | feat(ui): Home (Today) screen |
+| #7 | OPEN | v0.1 MVP | feat(ui): onboarding flow |
+| #6 | CLOSED | v0.1 MVP | feat(ui): app theme, tokens and personalisation shell |
+| #5 | CLOSED | v0.1 MVP | docs: devlog and testing checklist |
+| #4 | CLOSED | v0.1 MVP | docs: design doc (data model, architecture, decision records) |
+| #3 | CLOSED | v0.1 MVP | docs: UI design brief and design tokens |
+| #2 | CLOSED | v0.1 MVP | docs: requirements document |
+| #1 | CLOSED | v0.1 MVP | chore: initialise repo and Flutter project |
 </file>
 
 <file path="docs/testing.md">
@@ -1361,6 +2056,7 @@ import 'package:flutter/material.dart';
 
 import '../../domain/models/limit_rule.dart';
 import '../../domain/models/settings.dart';
+import '../../domain/models/template.dart';
 import '../../domain/models/transaction.dart';
 import '../../domain/models/unit.dart';
 import '../../domain/repositories/repositories.dart';
@@ -1578,6 +2274,36 @@ class DriftSettingsRepository implements SettingsRepository {
     );
   }
 }
+
+class DriftTemplateRepository implements TemplateRepository {
+  DriftTemplateRepository(this._db);
+  final AppDatabase _db;
+
+  @override
+  Stream<List<CaptureTemplate>> watchTemplates({String? unitId}) {
+    final query = _db.select(_db.templates)
+      ..orderBy([(t) => OrderingTerm.asc(t.name)]);
+    final wantedUnitId = unitId;
+    if (wantedUnitId != null) {
+      query.where((t) => t.unitId.equals(wantedUnitId));
+    }
+    return query.watch().map((rows) => rows.map(templateFromRow).toList());
+  }
+
+  @override
+  Future<void> saveTemplate(CaptureTemplate template) {
+    return _db
+        .into(_db.templates)
+        .insertOnConflictUpdate(templateToCompanion(template));
+  }
+
+  @override
+  Future<void> deleteTemplate(String templateId) {
+    return (_db.delete(
+      _db.templates,
+    )..where((t) => t.id.equals(templateId))).go();
+  }
+}
 </file>
 
 <file path="lib/data/db/mappers.dart">
@@ -1593,9 +2319,11 @@ class DriftSettingsRepository implements SettingsRepository {
 
 // --- enum <-> text -----------------------------------------------------
 
+import 'dart:convert';
 import 'dart:ui';
 
 import 'package:drift/drift.dart';
+import 'package:fuata/domain/models/template.dart';
 
 import '../../domain/models/limit_rule.dart';
 import '../../domain/models/transaction.dart';
@@ -1738,6 +2466,43 @@ LimitRulesCompanion limitRuleToCompanion(LimitRule l) {
     warnAt: Value(l.warnAt),
     dangerAt: Value(l.dangerAt),
     enabled: Value(l.enabled),
+  );
+}
+
+// --- Template ------------------------------------------------------------
+
+/// The row carries exactly the keys [CaptureTemplate.fromJson] expects —
+/// only `fieldMap` is stored on disk as JSON text (tables.dart's
+/// `fieldMapJson` column), so decode that one before handing over.
+CaptureTemplate templateFromRow(TemplateRow row) {
+  return CaptureTemplate.fromJson({
+    'id': row.id,
+    'unitId': row.unitId,
+    'captureSourceId': row.captureSourceId,
+    'name': row.name,
+    'direction': row.direction,
+    'pattern': row.pattern,
+    'fieldMap': jsonDecode(row.fieldMapJson),
+    'sampleText': row.sampleText,
+    'version': row.version,
+    'enabled': row.enabled,
+  });
+}
+
+TemplatesCompanion templateToCompanion(CaptureTemplate t) {
+  return TemplatesCompanion.insert(
+    id: t.id,
+    unitId: t.unitId,
+    captureSourceId: Value(t.captureSourceId),
+    name: t.name,
+    direction: Value(t.direction.name),
+    pattern: t.pattern,
+    fieldMapJson: jsonEncode(
+      t.fieldMap.map((groupName, type) => MapEntry(groupName, type.name)),
+    ),
+    sampleText: t.sampleText,
+    version: Value(t.version),
+    enabled: Value(t.enabled),
   );
 }
 </file>
@@ -1993,6 +2758,202 @@ class Ledger {
 }
 </file>
 
+<file path="lib/domain/logic/parser.dart">
+import 'package:intl/intl.dart';
+
+import '../models/money.dart';
+import '../models/template.dart';
+import '../models/transaction.dart';
+
+/// The typed fields recovered from a message, in the vocabulary
+/// requirements.md US-08 asks the rule builder to let the user label:
+/// amount, code, date, person, balance, fee. All-optional because not
+/// every template labels every field (e.g. a template with no fee).
+class ParsedFields {
+  final int? amountMinor;
+  final int? feeMinor;
+  final int? balanceAfterMinor;
+  final String? code;
+  final DateTime? occurredAt;
+  final String? counterparty;
+
+  const ParsedFields({
+    this.amountMinor,
+    this.feeMinor,
+    this.balanceAfterMinor,
+    this.code,
+    this.occurredAt,
+    this.counterparty,
+  });
+
+  @override
+  String toString() =>
+      'ParsedFields(amount: $amountMinor, fee: $feeMinor, balanceAfter: $balanceAfterMinor, '
+      'code: $code, occurredAt: $occurredAt, counterparty: $counterparty)';
+}
+
+/// The outcome of `Parser.parse`. A non-match (testing.md P-05) is a
+/// normal, expected result — callers route it to the "couldn't read this"
+/// list (design.md's capture flow), not an error.
+class ParseResult {
+  final CaptureTemplate? template;
+  final TxType? type;
+  final ParsedFields? fields;
+
+  const ParseResult._({this.template, this.type, this.fields});
+
+  const ParseResult.noMatch() : this._();
+
+  const ParseResult.matched({
+    required CaptureTemplate template,
+    required TxType type,
+    required ParsedFields fields,
+  }) : this._(template: template, type: type, fields: fields);
+
+  bool get matched => template != null;
+}
+
+/// Pure functions only — no Flutter, no I/O (design.md section 1) — so
+/// this is unit-testable against fake messages without a device
+/// (testing.md's Parser plan, P-01 to P-12). Dedupe against already-stored
+/// transactions needs repository access and is out of scope here; it's
+/// built alongside the review inbox and listener (#21/#22).
+class Parser {
+  const Parser._();
+
+  /// Tries each enabled template in order (a unit can have several — one
+  /// per message shape, testing.md P-06) and returns the first match.
+  /// [currencyCode] is the unit's currency, used to turn a captured amount
+  /// string into minor units via [Money.parseMajor].
+  static ParseResult parse(
+    String message,
+    List<CaptureTemplate> templates, {
+    required String currencyCode,
+  }) {
+    for (final template in templates.where((t) => t.enabled)) {
+      final match = template.compiled.firstMatch(message);
+      if (match == null) continue;
+
+      int? amountMinor;
+      int? feeMinor;
+      int? balanceAfterMinor;
+      String? code;
+      DateTime? occurredAt;
+      String? counterparty;
+
+      for (final entry in template.fieldMap.entries) {
+        final raw = match.namedGroup(entry.key);
+        if (raw == null) continue;
+        switch (entry.value) {
+          case TemplateFieldType.amount:
+            amountMinor = _parseAmountMinor(raw, currencyCode);
+            break;
+          case TemplateFieldType.fee:
+            feeMinor = _parseAmountMinor(raw, currencyCode);
+            break;
+          case TemplateFieldType.balance:
+            balanceAfterMinor = _parseAmountMinor(raw, currencyCode);
+            break;
+          case TemplateFieldType.code:
+            code = raw.trim();
+            break;
+          case TemplateFieldType.date:
+            occurredAt = _parseDate(raw.trim());
+            break;
+          case TemplateFieldType.person:
+            counterparty = raw.trim();
+            break;
+        }
+      }
+
+      // A match with no amount isn't a usable transaction — keep trying
+      // other templates rather than returning a half-parsed result.
+      if (amountMinor == null) continue;
+
+      return ParseResult.matched(
+        template: template,
+        type: _resolveType(template.direction, message),
+        fields: ParsedFields(
+          amountMinor: amountMinor,
+          feeMinor: feeMinor,
+          balanceAfterMinor: balanceAfterMinor,
+          code: code,
+          occurredAt: occurredAt,
+          counterparty: counterparty,
+        ),
+      );
+    }
+    return const ParseResult.noMatch();
+  }
+
+  static TxType _resolveType(TemplateDirection direction, String message) {
+    switch (direction) {
+      case TemplateDirection.spent:
+        return TxType.spent;
+      case TemplateDirection.got:
+        return TxType.got;
+      case TemplateDirection.either:
+        final lower = message.toLowerCase();
+        const gotWords = ['received', 'credited', 'deposit'];
+        return gotWords.any(lower.contains) ? TxType.got : TxType.spent;
+    }
+  }
+
+  ///#20 Parses one labeled money capture. Returns null instead of throwing —
+  /// a labeled field that we can't parse should be reported as "not found"
+  /// for that field, never abort the whole parse. (Amount's null is then
+  /// treated as "no match" by the caller; fee/balance's null just means
+  /// those rows show as "not labeled".)
+  static int? _parseAmountMinor(String raw, String currencyCode) {
+    final stripped = raw
+        .replaceFirst(RegExp(r'^[A-Za-z]{2,5}\.?\s*'), '')
+        .replaceAll(RegExp(r'[.,;:!?]+$'), '')
+        .trim();
+    if (stripped.isEmpty) return null;
+    try {
+      return Money.parseMajor(stripped, currencyCode).minor;
+    } on FormatException {
+      return null;
+    }
+  }
+
+  /// testing.md P-09: "21/9/26 at 1:12 PM" and ISO both need to parse to
+  /// the correct timestamp. `DateTime.tryParse` covers ISO 8601 (with a
+  /// "T" or a space separator); a short list of `intl` patterns covers the
+  /// common bank/mobile-money shapes. Returns null rather than throwing —
+  /// a message that otherwise matched shouldn't be discarded over a date
+  /// the app doesn't yet know how to read.
+  static DateTime? _parseDate(String raw) {
+    final cleaned = raw.replaceAll(RegExp(r'[.,;:!?]+$'), '').trim();
+    if (cleaned.isEmpty) return null;
+
+    final iso = DateTime.tryParse(cleaned);
+    if (iso != null) return iso;
+
+    const patterns = [
+      "d/M/yy 'at' h:mm a",
+      "d/M/yyyy 'at' h:mm a",
+      'd/M/yy HH:mm',
+      'd/M/yyyy HH:mm',
+      'd/M/yy',
+      'd/M/yyyy',
+    ];
+    for (final p in patterns) {
+      try {
+        //#20
+        // Pin the locale: without it DateFormat uses the device locale,
+        // which may not have a 12-hour AM/PM pattern defined and can fail
+        // to parse "10:19 AM" on some devices.
+        return DateFormat(p, 'en_US').parse(cleaned);
+      } on FormatException {
+        continue;
+      }
+    }
+    return null;
+  }
+}
+</file>
+
 <file path="lib/domain/models/limit_rule.dart">
 enum LimitScope { overall, unit }
 
@@ -2236,6 +3197,237 @@ class AppSettings {
           redactedLockScreenBanner ?? this.redactedLockScreenBanner,
     );
   }
+}
+</file>
+
+<file path="lib/domain/models/template.dart">
+/// design.md TEMPLATE / ADR-007: the user pastes a sample message and
+/// labels spans of it (amount, code, date, person, balance, fee); the app
+/// turns that into a regex with one named group per labeled field. This
+/// file is the template model plus the generator; matching a message
+/// against a list of templates is `Parser` (logic/parser.dart).
+library;
+
+/// The kinds of field a user can label a span as (US-08). `ignore` isn't
+/// listed in requirements.md's label set but is kept internal-only, not
+/// exposed here, since v0.1's rule builder only offers the six above.
+enum TemplateFieldType { amount, code, date, person, balance, fee }
+
+/// `direction` on a Template: which way the transaction goes. `either`
+/// lets the message decide at parse time (ui-design-brief.md 7.7 step 4)
+/// — see `Parser._resolveType`.
+enum TemplateDirection { spent, got, either }
+
+/// One labeled span over `sampleText`, as produced by the rule builder UI
+/// (#20). `end` is exclusive. The factory that consumes these assumes
+/// they're already non-overlapping — the rule builder enforces that by
+/// construction (tap-to-label chips can't cover the same character twice).
+class LabeledSpan {
+  final int start;
+  final int end;
+  final TemplateFieldType type;
+
+  const LabeledSpan({
+    required this.start,
+    required this.end,
+    required this.type,
+  });
+}
+
+/// design.md TEMPLATE. `pattern` is a regex source string with one named
+/// group per labeled field (`(?<amount>...)`, and `(?<amount2>...)` etc.
+/// if a field type repeats, e.g. amount + fee are both money but distinct
+/// groups); `fieldMap` maps each group name back to its [TemplateFieldType]
+/// — this is tables.dart's `fieldMapJson` column, decoded.
+class CaptureTemplate {
+  final String id;
+  final String unitId;
+  final String? captureSourceId;
+  final String name;
+  final TemplateDirection direction;
+  final String pattern;
+  final Map<String, TemplateFieldType> fieldMap;
+  final String sampleText;
+  final int version;
+  final bool enabled;
+
+  const CaptureTemplate({
+    required this.id,
+    required this.unitId,
+    required this.name,
+    required this.direction,
+    required this.pattern,
+    required this.fieldMap,
+    required this.sampleText,
+    this.captureSourceId,
+    this.version = 1,
+    this.enabled = true,
+  });
+
+  /// Compiled on demand rather than cached, since a Template is an
+  /// immutable value object handed around freely (Parser compiles it once
+  /// per parse attempt); `dotAll` so a `date`/`person` group's `[\s\S]+?`
+  /// isn't the only thing standing between us and a multi-line message
+  /// silently failing to match.
+  RegExp get compiled => RegExp(pattern, dotAll: true);
+
+  /// ADR-007: builds a regex from a pasted sample plus the spans the user
+  /// labeled over it. Literal text between, before and after the labels is
+  /// regex-escaped, so punctuation in the sample (".", "(", "+", "$", ...)
+  /// is matched literally rather than as regex syntax (testing.md P-04).
+  /// Different names/numbers/amounts in a *future* message still match,
+  /// because only the labeled spans became capture groups — everything
+  /// else in the sample is now fixed literal text (testing.md P-03).
+  factory CaptureTemplate.fromLabeledSample({
+    required String id,
+    required String unitId,
+    String? captureSourceId,
+    required String name,
+    required TemplateDirection direction,
+    required String sampleText,
+    required List<LabeledSpan> labels,
+    int version = 1,
+    bool enabled = true,
+  }) {
+    final sorted = [...labels]..sort((a, b) => a.start.compareTo(b.start));
+    for (var i = 1; i < sorted.length; i++) {
+      assert(
+        sorted[i].start >= sorted[i - 1].end,
+        'Labeled spans must not overlap',
+      );
+    }
+
+    final buffer = StringBuffer();
+    final fieldMap = <String, TemplateFieldType>{};
+    final usedCounts = <TemplateFieldType, int>{};
+    var cursor = 0;
+
+    for (final span in sorted) {
+      buffer.write(_escapeLiteral(sampleText.substring(cursor, span.start)));
+      final groupName = _nextGroupName(span.type, usedCounts);
+      buffer.write('(?<$groupName>${_fieldPattern(span.type)})');
+      fieldMap[groupName] = span.type;
+      cursor = span.end;
+    }
+
+    // #20 Intentionally no trailing literal: the pattern ends where the last
+// labeled field ends. Real messages have variable tails (URLs, "see all
+// your balances", counters, per-message limits) that we don't want to
+// require on every future message. Leading literals before the first
+// label are still kept — a header like "Confirmed." pins the rule to
+// the right kind of message.
+//     buffer.write(_escapeLiteral(sampleText.substring(cursor)));
+    return CaptureTemplate(
+      id: id,
+      unitId: unitId,
+      captureSourceId: captureSourceId,
+      name: name,
+      direction: direction,
+      pattern: buffer.toString(),
+      fieldMap: fieldMap,
+      sampleText: sampleText,
+      version: version,
+      enabled: enabled,
+    );
+  }
+
+  CaptureTemplate copyWith({bool? enabled, String? name, int? version}) {
+    return CaptureTemplate(
+      id: id,
+      unitId: unitId,
+      captureSourceId: captureSourceId,
+      name: name ?? this.name,
+      direction: direction,
+      pattern: pattern,
+      fieldMap: fieldMap,
+      sampleText: sampleText,
+      version: version ?? this.version,
+      enabled: enabled ?? this.enabled,
+    );
+  }
+
+  /// testing.md P-11: round-trips through the same shape tables.dart's
+  /// `fieldMapJson` column stores (group name -> field type name), so a
+  /// repository just needs to `jsonEncode`/`jsonDecode` this map.
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'unitId': unitId,
+    'captureSourceId': captureSourceId,
+    'name': name,
+    'direction': direction.name,
+    'pattern': pattern,
+    'fieldMap': fieldMap.map(
+      (groupName, type) => MapEntry(groupName, type.name),
+    ),
+    'sampleText': sampleText,
+    'version': version,
+    'enabled': enabled,
+  };
+
+  factory CaptureTemplate.fromJson(Map<String, dynamic> json) {
+    final rawFieldMap = json['fieldMap'] as Map<String, dynamic>;
+    return CaptureTemplate(
+      id: json['id'] as String,
+      unitId: json['unitId'] as String,
+      captureSourceId: json['captureSourceId'] as String?,
+      name: json['name'] as String,
+      direction: TemplateDirection.values.byName(json['direction'] as String),
+      pattern: json['pattern'] as String,
+      fieldMap: rawFieldMap.map(
+        (groupName, typeName) => MapEntry(
+          groupName,
+          TemplateFieldType.values.byName(typeName as String),
+        ),
+      ),
+      sampleText: json['sampleText'] as String,
+      version: json['version'] as int? ?? 1,
+      enabled: json['enabled'] as bool? ?? true,
+    );
+  }
+
+  static String _nextGroupName(
+    TemplateFieldType type,
+    Map<TemplateFieldType, int> used,
+  ) {
+    final count = (used[type] ?? 0) + 1;
+    used[type] = count;
+    // Dart named-group names must start with a letter and be alphanumeric —
+    // `type.name` (e.g. "amount") already is; appending the count for a
+    // repeat keeps that true ("amount2").
+    return count == 1 ? type.name : '${type.name}$count';
+  }
+
+  /// Escapes regex metacharacters so literal text from the sample is
+  /// matched as itself. Dart's RegExp has no built-in escape helper.
+  static String _escapeLiteral(String s) {
+    return s.replaceAllMapped(
+      RegExp(r'[.*+?^${}()|[\]\\]'),
+      (m) => '\\${m[0]}',
+    );
+  }
+
+  /// The regex each field type matches against in a *future* message —
+  /// deliberately more permissive than any one sample, since the amount,
+  /// code, date etc. will differ every time (testing.md P-02/P-03).
+  static String _fieldPattern(TemplateFieldType type) {
+    switch (type) {
+      case TemplateFieldType.amount:
+      case TemplateFieldType.balance:
+      case TemplateFieldType.fee:
+        // Optional currency label/prefix, digits with optional thousands
+        // separators, optional decimal part — "Ksh350.00", "KES 1,250",
+        // "350" all match (testing.md P-02).
+      return r'(?:[A-Za-z]{2,5}\.?\s*)?[\d,]+(?:\.\d+)?[.,;:!?]?';
+      case TemplateFieldType.code:
+        return r'[A-Za-z0-9]+';
+      case TemplateFieldType.date:
+      case TemplateFieldType.person:
+        // Non-greedy so it stops at the next literal chunk once compiled,
+        // rather than swallowing the rest of the message.
+        return r'[\s\S]+?';
+    }
+  }
+
 }
 </file>
 
@@ -4296,13 +5488,17 @@ class AppChoiceChip extends StatelessWidget {
   }
 }
 
-/// Word-label chip used in the SMS rule-builder (raw text exploded into tokens).
+/// Word-label chip used in the rule builder (raw text exploded into
+/// tokens; issue #20). Long-press starts phrase-selection; [highlighted]
+/// marks the in-progress selection.
 class WordLabelChip extends StatelessWidget {
   const WordLabelChip({
     super.key,
     required this.word,
     this.assignedField,
     this.onTap,
+    this.onLongPress,
+    this.highlighted = false,
   });
 
   final String word;
@@ -4310,6 +5506,10 @@ class WordLabelChip extends StatelessWidget {
   /// When non-null, chip is "assigned" and takes a pastel tinted fill.
   final String? assignedField;
   final VoidCallback? onTap;
+  final VoidCallback? onLongPress;
+
+  /// True while this word sits inside a phrase being selected.
+  final bool highlighted;
 
   @override
   Widget build(BuildContext context) {
@@ -4321,14 +5521,21 @@ class WordLabelChip extends StatelessWidget {
       color: Colors.transparent,
       child: InkWell(
         onTap: onTap,
+        onLongPress: onLongPress,
         borderRadius: BorderRadius.circular(AppSpacing.pill),
         child: Ink(
           decoration: BoxDecoration(
-            color: assigned ? tint.withValues(alpha: 0.18) : c.surfaceContainer,
+            color: assigned
+                ? tint.withValues(alpha: 0.18)
+                : highlighted
+                ? c.primary.withValues(alpha: 0.15)
+                : c.surfaceContainer,
             borderRadius: BorderRadius.circular(AppSpacing.pill),
             border: Border.all(
               color: assigned
                   ? tint.withValues(alpha: 0.5)
+                  : highlighted
+                  ? c.primary.withValues(alpha: 0.5)
                   : c.outlineVariant.withValues(alpha: 0.4),
             ),
           ),
@@ -4339,7 +5546,11 @@ class WordLabelChip extends StatelessWidget {
               Text(
                 word,
                 style: AppTypography.labelMd.copyWith(
-                  color: assigned ? tint : c.onSurface,
+                  color: assigned
+                      ? tint
+                      : highlighted
+                      ? c.primary
+                      : c.onSurface,
                 ),
               ),
               if (assigned) ...[
@@ -4359,7 +5570,13 @@ class WordLabelChip extends StatelessWidget {
     );
   }
 
-  static Color _tintFor(String? field, AppColors c) {
+  static Color _tintFor(String? field, AppColors c) =>
+      field == null ? c.primary : fieldTint(field, c);
+
+  /// Tint per labeled-field display name, shared with the rule builder's
+  /// palette and preview card (lib/ui/screens/rule_builder_screen.dart)
+  /// so a field keeps one colour everywhere.
+  static Color fieldTint(String field, AppColors c) {
     switch (field) {
       case 'Amount':
         return c.statusSafe;
@@ -4369,6 +5586,10 @@ class WordLabelChip extends StatelessWidget {
         return c.unitBank;
       case 'Payee':
         return c.unitCard;
+      case 'When':
+        return c.unitMobileMoney;
+      case 'Balance':
+        return c.secondary;
       default:
         return c.primary;
     }
@@ -4632,6 +5853,31 @@ class UnitListTile extends StatelessWidget {
 }
 </file>
 
+<file path="scripts/pack.sh">
+#!/usr/bin/env bash
+set -euo pipefail
+scripts/refresh-issue-status.sh
+repomix
+</file>
+
+<file path="scripts/refresh-issue-status.sh">
+#!/usr/bin/env bash
+set -euo pipefail
+out="docs/issue-status.md"
+{
+  echo "# Issue status (generated $(date -u +%Y-%m-%dT%H:%MZ))"
+  echo
+  echo "Source of truth: GitHub. Regenerate with \`scripts/refresh-issue-status.sh\`."
+  echo
+  echo "| # | State | Milestone | Title |"
+  echo "|---|---|---|---|"
+  gh issue list --state all --limit 500 \
+    --json number,title,state,milestone \
+    --jq '.[] | "| #\(.number) | \(.state) | \(.milestone.title // "—") | \(.title) |"'
+} > "$out"
+echo "wrote $out"
+</file>
+
 <file path="scripts/setup-github.sh">
 #!/usr/bin/env bash
 # Creates labels, milestones and issues for the project from the terminal.
@@ -4753,156 +5999,6 @@ done
 echo "Done."
 </file>
 
-<file path="test/data/db/app_database_test.dart">
-// Round-trip tests for the drift schema and repositories: every value
-// that goes in through a repository's write method should come back out
-// unchanged through its stream, including enums, nullable fields and
-// signed amounts. Run against an in-memory database, never a real file.
-//
-// Needs code generation first: dart run build_runner build
-
-import 'package:drift/native.dart';
-import 'package:flutter/material.dart';
-import 'package:flutter_test/flutter_test.dart';
-import 'package:fuata/data/db/app_database.dart';
-import 'package:fuata/data/db/drift_repositories.dart';
-import 'package:fuata/domain/models/limit_rule.dart';
-import 'package:fuata/domain/models/settings.dart';
-import 'package:fuata/domain/models/transaction.dart';
-import 'package:fuata/domain/models/unit.dart';
-
-void main() {
-  late AppDatabase db;
-
-  setUp(() {
-    db = AppDatabase(NativeDatabase.memory());
-  });
-
-  tearDown(() => db.close());
-
-  test('unit round-trips through DriftUnitRepository', () async {
-    final repo = DriftUnitRepository(db);
-    final unit = MoneyUnit(
-      id: 'u1',
-      name: 'Cash',
-      kind: UnitKind.cash,
-      currencyCode: 'KES',
-      iconEmoji: '💵',
-      color: const Color(0xFF2E9E6B),
-      openingBalanceMinor: 76000,
-      sortOrder: 0,
-      createdAt: DateTime(2026, 9, 21, 8, 0),
-    );
-
-    await repo.addUnit(unit);
-    final units = await repo.watchUnits().first;
-
-    expect(units, hasLength(1));
-    expect(units.single.name, 'Cash');
-    expect(units.single.kind, UnitKind.cash);
-    expect(units.single.openingBalanceMinor, 76000);
-    expect(units.single.color.toARGB32(), const Color(0xFF2E9E6B).toARGB32());
-
-    await repo.archiveUnit('u1');
-    expect(await repo.watchUnits().first, isEmpty);
-    expect(await repo.watchUnits(includeArchived: true).first, hasLength(1));
-  });
-
-  test('transaction round-trips, including a moved pair', () async {
-    final units = DriftUnitRepository(db);
-    final txs = DriftTransactionRepository(db);
-
-    for (final id in ['u_cash', 'u_bank']) {
-      await units.addUnit(
-        MoneyUnit(
-          id: id,
-          name: id,
-          kind: UnitKind.cash,
-          currencyCode: 'KES',
-          iconEmoji: '💵',
-          color: const Color(0xFF000000),
-          openingBalanceMinor: 0,
-          sortOrder: 0,
-          createdAt: DateTime(2026, 9, 21),
-        ),
-      );
-    }
-
-    await txs.addTransaction(
-      MoneyTransaction(
-        id: 't_out',
-        unitId: 'u_bank',
-        type: TxType.moved,
-        amountMinor: -20000,
-        occurredAt: DateTime(2026, 9, 21, 12),
-        createdAt: DateTime(2026, 9, 21, 12),
-        transferGroupId: 'g1',
-      ),
-    );
-    await txs.addTransaction(
-      MoneyTransaction(
-        id: 't_in',
-        unitId: 'u_cash',
-        type: TxType.moved,
-        amountMinor: 20000,
-        occurredAt: DateTime(2026, 9, 21, 12),
-        createdAt: DateTime(2026, 9, 21, 12),
-        transferGroupId: 'g1',
-      ),
-    );
-
-    final all = await txs.watchTransactions().first;
-    expect(all, hasLength(2));
-    expect(all.every((t) => t.transferGroupId == 'g1'), isTrue);
-
-    final cashOnly = await txs.watchTransactions(unitId: 'u_cash').first;
-    expect(cashOnly, hasLength(1));
-    expect(cashOnly.single.id, 't_in');
-
-    await txs.deleteTransaction('t_out');
-    expect(await txs.watchTransactions().first, hasLength(1));
-  });
-
-  test('limit round-trips and setLimit upserts by id', () async {
-    final repo = DriftLimitRepository(db);
-    final daily = LimitRule(
-      id: 'l_daily',
-      scope: LimitScope.overall,
-      period: LimitPeriod.day,
-      amountMinor: 200000,
-      currencyCode: 'KES',
-    );
-
-    await repo.setLimit(daily);
-    await repo.setLimit(daily); // same id: should update, not duplicate
-
-    final limits = await repo.watchLimits().first;
-    expect(limits, hasLength(1));
-    expect(limits.single.amountMinor, 200000);
-    expect(limits.single.statusFor(150000), SpendStatus.safe);
-    expect(limits.single.statusFor(200000), SpendStatus.overdraft);
-  });
-
-  test('settings fall back to defaults, then round-trip after a save', () async {
-    final repo = DriftSettingsRepository(db);
-
-    expect((await repo.watchSettings().first).name, AppSettings.defaults.name);
-
-    final updated = AppSettings.defaults.copyWith(
-      name: 'Amina',
-      detailLevel: DetailLevel.detailed,
-      homeSections: {HomeSection.lately},
-    );
-    await repo.updateSettings(updated);
-
-    final saved = await repo.watchSettings().first;
-    expect(saved.name, 'Amina');
-    expect(saved.detailLevel, DetailLevel.detailed);
-    expect(saved.homeSections, {HomeSection.lately});
-  });
-}
-</file>
-
 <file path="test/domain/ledger_test.dart">
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -5013,6 +6109,315 @@ void main() {
     });
     test('T-06 ratio 1.00 -> overdraft', () {
       expect(limit.statusFor(100000), SpendStatus.overdraft);
+    });
+  });
+}
+</file>
+
+<file path="test/domain/parser_test.dart">
+import 'package:flutter_test/flutter_test.dart';
+import 'package:fuata/domain/logic/parser.dart';
+import 'package:fuata/domain/models/template.dart';
+import 'package:fuata/domain/models/transaction.dart';
+
+void main() {
+  // Fake messages only (testing.md's rule for the parser plan) — none of
+  // these are copied from a real provider's wording.
+
+  const paidSample =
+      'Confirmed. Ksh350.00 paid to JAVA HOUSE (Nairobi) on 21/9/26 at 1:12 PM. '
+      'Code QW12ABC3. Fee Ksh5.00 charged (VAT incl.). New balance is Ksh4,500.00.';
+
+  CaptureTemplate paidTemplate({String id = 't-paid'}) {
+    int at(String needle) => paidSample.indexOf(needle);
+    LabeledSpan span(String needle, TemplateFieldType type) =>
+        LabeledSpan(start: at(needle), end: at(needle) + needle.length, type: type);
+
+    return CaptureTemplate.fromLabeledSample(
+      id: id,
+      unitId: 'u-mpesa',
+      name: 'M-Pesa paid to',
+      direction: TemplateDirection.spent,
+      sampleText: paidSample,
+      labels: [
+        span('Ksh350.00', TemplateFieldType.amount),
+        span('JAVA HOUSE', TemplateFieldType.person),
+        span('21/9/26 at 1:12 PM', TemplateFieldType.date),
+        span('QW12ABC3', TemplateFieldType.code),
+        span('Ksh5.00', TemplateFieldType.fee),
+        span('Ksh4,500.00', TemplateFieldType.balance),
+      ],
+    );
+  }
+
+  const receivedSample =
+      'You have received Ksh5,000.00 from JOHN DOE 0712345678 on 22/9/26 at 9:00 AM. '
+      'New balance is Ksh9,500.00. Transaction ID AB34CD5E.';
+
+  CaptureTemplate receivedTemplate({String id = 't-received'}) {
+    int at(String needle) => receivedSample.indexOf(needle);
+    LabeledSpan span(String needle, TemplateFieldType type) =>
+        LabeledSpan(start: at(needle), end: at(needle) + needle.length, type: type);
+
+    return CaptureTemplate.fromLabeledSample(
+      id: id,
+      unitId: 'u-mpesa',
+      name: 'M-Pesa received',
+      direction: TemplateDirection.got,
+      sampleText: receivedSample,
+      labels: [
+        span('Ksh5,000.00', TemplateFieldType.amount),
+        span('JOHN DOE 0712345678', TemplateFieldType.person),
+        span('22/9/26 at 9:00 AM', TemplateFieldType.date),
+        span('Ksh9,500.00', TemplateFieldType.balance),
+        span('AB34CD5E', TemplateFieldType.code),
+      ],
+    );
+  }
+
+  const withdrawSample =
+      'Withdraw of Ksh2,000.00 from ATM 00219 on 20/9/26 at 4:30 PM. '
+      'Code WX55YZ9. New balance is Ksh100.00.';
+
+  CaptureTemplate withdrawTemplate({String id = 't-withdraw'}) {
+    int at(String needle) => withdrawSample.indexOf(needle);
+    LabeledSpan span(String needle, TemplateFieldType type) =>
+        LabeledSpan(start: at(needle), end: at(needle) + needle.length, type: type);
+
+    return CaptureTemplate.fromLabeledSample(
+      id: id,
+      unitId: 'u-mpesa',
+      name: 'M-Pesa withdraw',
+      direction: TemplateDirection.spent,
+      sampleText: withdrawSample,
+      labels: [
+        span('Ksh2,000.00', TemplateFieldType.amount),
+        span('ATM 00219', TemplateFieldType.person),
+        span('20/9/26 at 4:30 PM', TemplateFieldType.date),
+        span('WX55YZ9', TemplateFieldType.code),
+        span('Ksh100.00', TemplateFieldType.balance),
+      ],
+    );
+  }
+
+  group('P-01 labeled sample -> all fields, correct types', () {
+    test('extracts amount, code, date, person, fee, balance', () {
+      final result = Parser.parse(paidSample, [paidTemplate()], currencyCode: 'KES');
+
+      expect(result.matched, isTrue);
+      expect(result.type, TxType.spent);
+      expect(result.fields!.amountMinor, 35000);
+      expect(result.fields!.feeMinor, 500);
+      expect(result.fields!.balanceAfterMinor, 450000);
+      expect(result.fields!.code, 'QW12ABC3');
+      expect(result.fields!.counterparty, 'JAVA HOUSE');
+      expect(result.fields!.occurredAt, isNotNull);
+      expect(result.fields!.occurredAt!.year, 2026);
+      expect(result.fields!.occurredAt!.month, 9);
+      expect(result.fields!.occurredAt!.day, 21);
+      expect(result.fields!.occurredAt!.hour, 13); // 1:12 PM -> 13:12
+      expect(result.fields!.occurredAt!.minute, 12);
+    });
+  });
+
+  group('P-02 amount formats', () {
+    final template = paidTemplate();
+
+    test('"Ksh350.00" -> 35000 minor', () {
+      final r = Parser.parse(paidSample, [template], currencyCode: 'KES');
+      expect(r.fields!.amountMinor, 35000);
+    });
+
+    test('"KES 1,250" style balance -> correct minor units', () {
+      final r = Parser.parse(paidSample, [template], currencyCode: 'KES');
+      // "Ksh4,500.00" balance in the sample -> 450000 minor.
+      expect(r.fields!.balanceAfterMinor, 450000);
+    });
+
+    test('bare "350" (no currency prefix) still parses', () {
+      const bare = 'Sent 350 to PETER on 1/1/26. Code ZZ1.';
+      final t = CaptureTemplate.fromLabeledSample(
+        id: 't-bare',
+        unitId: 'u1',
+        name: 'bare',
+        direction: TemplateDirection.spent,
+        sampleText: bare,
+        labels: [
+          LabeledSpan(start: bare.indexOf('350'), end: bare.indexOf('350') + 3, type: TemplateFieldType.amount),
+          LabeledSpan(
+            start: bare.indexOf('PETER'),
+            end: bare.indexOf('PETER') + 5,
+            type: TemplateFieldType.person,
+          ),
+          LabeledSpan(start: bare.indexOf('ZZ1'), end: bare.indexOf('ZZ1') + 3, type: TemplateFieldType.code),
+        ],
+      );
+      final r = Parser.parse(bare, [t], currencyCode: 'KES');
+      expect(r.matched, isTrue);
+      expect(r.fields!.amountMinor, 35000);
+    });
+  });
+
+  test('P-03 different names/numbers in the varying part still match', () {
+    const other =
+        'Confirmed. Ksh1,250.50 paid to CARREFOUR (Nairobi) on 5/1/27 at 6:45 AM. '
+        'Code ZZ99XYZ1. Fee Ksh10.00 charged (VAT incl.). New balance is Ksh900.00.';
+
+    final result = Parser.parse(other, [paidTemplate()], currencyCode: 'KES');
+
+    expect(result.matched, isTrue);
+    expect(result.fields!.amountMinor, 125050);
+    expect(result.fields!.counterparty, 'CARREFOUR');
+    expect(result.fields!.code, 'ZZ99XYZ1');
+    expect(result.fields!.balanceAfterMinor, 90000);
+  });
+
+  test('P-04 regex special characters in the sample are escaped, not matched as syntax', () {
+    // The sample itself contains '.', '(', ')' outside the labeled spans
+    // (see paidSample: "(Nairobi)", "(VAT incl.)"). Building the template
+    // and re-matching the exact sample must not throw and must match.
+    expect(() => paidTemplate(), returnsNormally);
+    final result = Parser.parse(paidSample, [paidTemplate()], currencyCode: 'KES');
+    expect(result.matched, isTrue);
+
+    // A message with different literal punctuation in the same spots
+    // must NOT be mistaken for a match against the escaped literals.
+    const differentPunctuation =
+        'Confirmed. Ksh350.00 paid to JAVA HOUSE [Nairobi] on 21/9/26 at 1:12 PM. '
+        'Code QW12ABC3. Fee Ksh5.00 charged [VAT incl]. New balance is Ksh4,500.00.';
+    final noMatch = Parser.parse(differentPunctuation, [paidTemplate()], currencyCode: 'KES');
+    expect(noMatch.matched, isFalse);
+  });
+
+  test('P-05 a message matching no template returns no match', () {
+    const unrelated = 'Your OTP is 445566. Do not share it with anyone.';
+    final result = Parser.parse(
+      unrelated,
+      [paidTemplate(), receivedTemplate(), withdrawTemplate()],
+      currencyCode: 'KES',
+    );
+    expect(result.matched, isFalse);
+    expect(result.template, isNull);
+    expect(result.fields, isNull);
+  });
+
+  group('P-06 multiple templates on one unit: correct template and direction chosen', () {
+    final templates = [paidTemplate(), receivedTemplate(), withdrawTemplate()];
+
+    test('received message matches the received template, type got', () {
+      final r = Parser.parse(receivedSample, templates, currencyCode: 'KES');
+      expect(r.matched, isTrue);
+      expect(r.template!.id, 't-received');
+      expect(r.type, TxType.got);
+    });
+
+    test('withdraw message matches the withdraw template, type spent', () {
+      final r = Parser.parse(withdrawSample, templates, currencyCode: 'KES');
+      expect(r.matched, isTrue);
+      expect(r.template!.id, 't-withdraw');
+      expect(r.type, TxType.spent);
+    });
+
+    test('paid message matches the paid template, type spent', () {
+      final r = Parser.parse(paidSample, templates, currencyCode: 'KES');
+      expect(r.matched, isTrue);
+      expect(r.template!.id, 't-paid');
+      expect(r.type, TxType.spent);
+    });
+  });
+
+  // P-07 (same code deduped) and P-08 (deduped by unit+amount+2-minute
+  // window when there's no code) both need to compare a parsed result
+  // against already-stored transactions, which means repository access.
+  // That's out of scope for the parser itself (design.md's ER diagram
+  // has no dedupe table) — those cases are covered where the dedupe
+  // check actually runs, in #21 (share/paste) and #22 (listener).
+
+  group('P-09 date formats parse to the correct timestamp', () {
+    test('"21/9/26 at 1:12 PM" style', () {
+      final r = Parser.parse(paidSample, [paidTemplate()], currencyCode: 'KES');
+      final d = r.fields!.occurredAt!;
+      expect(DateTime(d.year, d.month, d.day, d.hour, d.minute), DateTime(2026, 9, 21, 13, 12));
+    });
+
+    test('ISO 8601 style', () {
+      const isoSample = 'TXN on 2026-09-21T13:12:00 for Ksh100.00. Code ISO1.';
+      final t = CaptureTemplate.fromLabeledSample(
+        id: 't-iso',
+        unitId: 'u1',
+        name: 'iso',
+        direction: TemplateDirection.spent,
+        sampleText: isoSample,
+        labels: [
+          LabeledSpan(
+            start: isoSample.indexOf('2026-09-21T13:12:00'),
+            end: isoSample.indexOf('2026-09-21T13:12:00') + '2026-09-21T13:12:00'.length,
+            type: TemplateFieldType.date,
+          ),
+          LabeledSpan(
+            start: isoSample.indexOf('Ksh100.00'),
+            end: isoSample.indexOf('Ksh100.00') + 'Ksh100.00'.length,
+            type: TemplateFieldType.amount,
+          ),
+          LabeledSpan(
+            start: isoSample.indexOf('ISO1'),
+            end: isoSample.indexOf('ISO1') + 4,
+            type: TemplateFieldType.code,
+          ),
+        ],
+      );
+      final r = Parser.parse(isoSample, [t], currencyCode: 'KES');
+      expect(r.matched, isTrue);
+      final d = r.fields!.occurredAt!;
+      expect(DateTime(d.year, d.month, d.day, d.hour, d.minute), DateTime(2026, 9, 21, 13, 12));
+    });
+  });
+
+  test('P-10 balance quoted in the message is extracted for reconciliation', () {
+    // Comparing it against the computed balance and flagging the unit is
+    // ledger/reconciliation logic (design.md section 3), not the
+    // parser's job — the parser's contract is just to surface the value.
+    final r = Parser.parse(paidSample, [paidTemplate()], currencyCode: 'KES');
+    expect(r.fields!.balanceAfterMinor, 450000);
+  });
+
+  test('P-11 template round-trips through JSON with identical parse behaviour', () {
+    final original = paidTemplate();
+    final restored = CaptureTemplate.fromJson(original.toJson());
+
+    expect(restored.pattern, original.pattern);
+    expect(restored.fieldMap, original.fieldMap);
+    expect(restored.direction, original.direction);
+
+    final before = Parser.parse(paidSample, [original], currencyCode: 'KES');
+    final after = Parser.parse(paidSample, [restored], currencyCode: 'KES');
+
+    expect(after.matched, before.matched);
+    expect(after.fields!.amountMinor, before.fields!.amountMinor);
+    expect(after.fields!.code, before.fields!.code);
+    expect(after.fields!.counterparty, before.fields!.counterparty);
+    expect(after.fields!.balanceAfterMinor, before.fields!.balanceAfterMinor);
+  });
+
+  group('P-12 very long or empty message does not crash', () {
+    final templates = [paidTemplate(), receivedTemplate(), withdrawTemplate()];
+
+    test('empty message', () {
+      expect(() => Parser.parse('', templates, currencyCode: 'KES'), returnsNormally);
+      expect(Parser.parse('', templates, currencyCode: 'KES').matched, isFalse);
+    });
+
+    test('very long message', () {
+      final long = 'Random noise. ' * 5000;
+      expect(() => Parser.parse(long, templates, currencyCode: 'KES'), returnsNormally);
+      expect(Parser.parse(long, templates, currencyCode: 'KES').matched, isFalse);
+    });
+
+    test('very long message that still contains a real match', () {
+      final long = '${'Random noise. ' * 2000}$paidSample${' more noise' * 2000}';
+      final r = Parser.parse(long, templates, currencyCode: 'KES');
+      expect(r.matched, isTrue);
+      expect(r.fields!.amountMinor, 35000);
     });
   });
 }
@@ -5840,6 +7245,7 @@ void _backgroundDispatcher() {
 <file path="lib/ui/screens/me_screen.dart">
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:fuata/ui/screens/rule_builder_screen.dart';
 
 import '../../domain/models/settings.dart';
 import '../../platform/listener_spike.dart';
@@ -5964,10 +7370,13 @@ class MeScreen extends ConsumerWidget {
                   onTap: openNotificationAccessSettings,
                 ),
                 const SizedBox(height: AppSpacing.sm),
-                const ComingSoonRow(
+                ActionRow(
                   icon: Icons.mark_email_read_outlined,
                   title: 'Message reading rules',
-                  subtitle: 'Rules and allowed apps for auto-catch — coming in #19–#22',
+                  subtitle: 'Teach Fuata to read a bank or mobile-money message',
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const RuleBuilderScreen()),
+                  ),
                 ),
                 const SizedBox(height: AppSpacing.sm),
                 ComingSoonRow(
@@ -6027,27 +7436,30 @@ class MeScreen extends ConsumerWidget {
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:fuata/domain/logic/ledger.dart';
+import 'package:fuata/ui/screens/rule_builder_screen.dart';
 import 'package:intl/intl.dart';
 
 import '../../domain/models/money.dart';
 import '../../widgets/activity/empty_activity.dart';
 import '../../widgets/activity/grouped_list.dart';
 import '../../widgets/coming_soon_row.dart';
+import '../../widgets/personalization/action_row.dart';
 import '../../widgets/sheets/edit_unit_sheet.dart';
 import '../../widgets/sheets/update_balance_sheet.dart';
 import '../providers/app_providers.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_spacing.dart';
 import '../theme/app_typography.dart';
+import 'manage_rules_screen.dart';
 
 /// Unit page (ui-design-brief.md section 7.5): balance, "Update balance",
 /// edit name/icon/colour, archive, and that unit's recent activity —
 /// reusing GroupedList/showTransactionDetail from the Activity screen
 /// rather than a second implementation.
 ///
-/// Per-unit limit and message-reading-rule rows are shown as "coming
-/// soon" placeholders: those are #15/#17 (limits UI) and #19/#20
-/// (capture) work, not built yet, flagged rather than silently omitted.
+/// The per-unit limit row is still a "coming soon" placeholder (#15/#17);
+/// the message-reading row is live as of #20 — it opens the rule builder
+/// pre-set to this unit and shows how many rules the unit already has.
 
 class UnitDetailScreen extends ConsumerWidget {
   final String unitId;
@@ -6180,10 +7592,23 @@ class UnitDetailScreen extends ConsumerWidget {
                           subtitle: 'Set a spending limit just for this one — coming in #15/#17',
                         ),
                         const SizedBox(height: AppSpacing.sm),
-                        const ComingSoonRow(
-                          icon: Icons.mark_email_read_outlined,
-                          title: 'Reading messages',
-                          subtitle: 'Teach the app to catch transactions here — coming in #19/#20',
+                        Builder(
+                          builder: (context) {
+                            final templates =
+                                ref.watch(unitTemplatesProvider(unit.id)).value ?? [];
+                            return ActionRow(
+                              icon: Icons.mark_email_read_outlined,
+                              title: 'Reading messages',
+                              subtitle: templates.isEmpty
+                                  ? 'Teach the app to read messages for this unit'
+                                  : '${templates.length} rule${templates.length == 1 ? '' : 's'} · add or review',
+                              onTap: () => Navigator.of(context).push(
+                                MaterialPageRoute(
+                                  builder: (_) => ManageRulesScreen(unitId: unit.id),
+                                ),
+                              ),
+                            );
+                          },
                         ),
                         const SizedBox(height: AppSpacing.lg),
                         Text('Recent activity', style: AppTypography.headlineSm.copyWith(color: c.onSurface)),
@@ -7546,6 +8971,156 @@ class UnitCard extends StatelessWidget {
 }
 </file>
 
+<file path="test/data/db/app_database_test.dart">
+// Round-trip tests for the drift schema and repositories: every value
+// that goes in through a repository's write method should come back out
+// unchanged through its stream, including enums, nullable fields and
+// signed amounts. Run against an in-memory database, never a real file.
+//
+// Needs code generation first: dart run build_runner build
+
+import 'package:drift/native.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:fuata/data/db/app_database.dart';
+import 'package:fuata/data/db/drift_repositories.dart';
+import 'package:fuata/domain/models/limit_rule.dart';
+import 'package:fuata/domain/models/settings.dart';
+import 'package:fuata/domain/models/transaction.dart';
+import 'package:fuata/domain/models/unit.dart';
+
+void main() {
+  late AppDatabase db;
+
+  setUp(() {
+    db = AppDatabase(NativeDatabase.memory());
+  });
+
+  tearDown(() => db.close());
+
+  test('unit round-trips through DriftUnitRepository', () async {
+    final repo = DriftUnitRepository(db);
+    final unit = MoneyUnit(
+      id: 'u1',
+      name: 'Cash',
+      kind: UnitKind.cash,
+      currencyCode: 'KES',
+      iconEmoji: '💵',
+      color: const Color(0xFF2E9E6B),
+      openingBalanceMinor: 76000,
+      sortOrder: 0,
+      createdAt: DateTime(2026, 9, 21, 8, 0),
+    );
+
+    await repo.addUnit(unit);
+    final units = await repo.watchUnits().first;
+
+    expect(units, hasLength(1));
+    expect(units.single.name, 'Cash');
+    expect(units.single.kind, UnitKind.cash);
+    expect(units.single.openingBalanceMinor, 76000);
+    expect(units.single.color.toARGB32(), const Color(0xFF2E9E6B).toARGB32());
+
+    await repo.archiveUnit('u1');
+    expect(await repo.watchUnits().first, isEmpty);
+    expect(await repo.watchUnits(includeArchived: true).first, hasLength(1));
+  });
+
+  test('transaction round-trips, including a moved pair', () async {
+    final units = DriftUnitRepository(db);
+    final txs = DriftTransactionRepository(db);
+
+    for (final id in ['u_cash', 'u_bank']) {
+      await units.addUnit(
+        MoneyUnit(
+          id: id,
+          name: id,
+          kind: UnitKind.cash,
+          currencyCode: 'KES',
+          iconEmoji: '💵',
+          color: const Color(0xFF000000),
+          openingBalanceMinor: 0,
+          sortOrder: 0,
+          createdAt: DateTime(2026, 9, 21),
+        ),
+      );
+    }
+
+    await txs.addTransaction(
+      MoneyTransaction(
+        id: 't_out',
+        unitId: 'u_bank',
+        type: TxType.moved,
+        amountMinor: -20000,
+        occurredAt: DateTime(2026, 9, 21, 12),
+        createdAt: DateTime(2026, 9, 21, 12),
+        transferGroupId: 'g1',
+      ),
+    );
+    await txs.addTransaction(
+      MoneyTransaction(
+        id: 't_in',
+        unitId: 'u_cash',
+        type: TxType.moved,
+        amountMinor: 20000,
+        occurredAt: DateTime(2026, 9, 21, 12),
+        createdAt: DateTime(2026, 9, 21, 12),
+        transferGroupId: 'g1',
+      ),
+    );
+
+    final all = await txs.watchTransactions().first;
+    expect(all, hasLength(2));
+    expect(all.every((t) => t.transferGroupId == 'g1'), isTrue);
+
+    final cashOnly = await txs.watchTransactions(unitId: 'u_cash').first;
+    expect(cashOnly, hasLength(1));
+    expect(cashOnly.single.id, 't_in');
+
+    await txs.deleteTransaction('t_out');
+    expect(await txs.watchTransactions().first, hasLength(1));
+  });
+
+  test('limit round-trips and setLimit upserts by id', () async {
+    final repo = DriftLimitRepository(db);
+    final daily = LimitRule(
+      id: 'l_daily',
+      scope: LimitScope.overall,
+      period: LimitPeriod.day,
+      amountMinor: 200000,
+      currencyCode: 'KES',
+    );
+
+    await repo.setLimit(daily);
+    await repo.setLimit(daily); // same id: should update, not duplicate
+
+    final limits = await repo.watchLimits().first;
+    expect(limits, hasLength(1));
+    expect(limits.single.amountMinor, 200000);
+    expect(limits.single.statusFor(100000), SpendStatus.safe);      // ratio 0.50
+    expect(limits.single.statusFor(200000), SpendStatus.overdraft); // ratio 1.00
+  });
+
+  test('settings fall back to defaults, then round-trip after a save', () async {
+    final repo = DriftSettingsRepository(db);
+
+    expect((await repo.watchSettings().first).name, AppSettings.defaults.name);
+
+    final updated = AppSettings.defaults.copyWith(
+      name: 'Amina',
+      detailLevel: DetailLevel.detailed,
+      homeSections: {HomeSection.lately},
+    );
+    await repo.updateSettings(updated);
+
+    final saved = await repo.watchSettings().first;
+    expect(saved.name, 'Amina');
+    expect(saved.detailLevel, DetailLevel.detailed);
+    expect(saved.homeSections, {HomeSection.lately});
+  });
+}
+</file>
+
 <file path="README.md">
 # Fuata
 
@@ -7850,6 +9425,7 @@ import 'package:flutter/material.dart';
 
 import '../../domain/models/limit_rule.dart';
 import '../../domain/models/settings.dart';
+import '../../domain/models/template.dart';
 import '../../domain/models/transaction.dart';
 import '../../domain/models/unit.dart';
 import '../../domain/repositories/repositories.dart';
@@ -8106,11 +9682,31 @@ class MockSettingsRepository implements SettingsRepository {
   Future<void> updateSettings(AppSettings settings) async =>
       _store.update((_) => true, (_) => settings);
 }
+
+class MockTemplateRepository implements TemplateRepository {
+  final _store = _Store<CaptureTemplate>([]);
+
+  @override
+  Stream<List<CaptureTemplate>> watchTemplates({String? unitId}) {
+    return _store.watch().map(
+          (list) => list.where((t) => unitId == null || t.unitId == unitId).toList(),
+    );
+  }
+
+  @override
+  Future<void> saveTemplate(CaptureTemplate template) async =>
+      _store.upsert((t) => t.id == template.id, template);
+
+  @override
+  Future<void> deleteTemplate(String templateId) async =>
+      _store.removeWhere((t) => t.id == templateId);
+}
 </file>
 
 <file path="lib/domain/repositories/repositories.dart">
 import '../models/limit_rule.dart';
 import '../models/settings.dart';
+import '../models/template.dart';
 import '../models/transaction.dart';
 import '../models/unit.dart';
 
@@ -8144,6 +9740,17 @@ abstract class LimitRepository {
 abstract class SettingsRepository {
   Stream<AppSettings> watchSettings();
   Future<void> updateSettings(AppSettings settings);
+}
+
+/// Capture templates (design.md TEMPLATE, ADR-007): built by the rule
+/// builder (#20) from a pasted sample plus user-labeled spans, consumed
+/// by the parser whenever a message is matched (#21/#22). The Templates
+/// drift table has existed since #13; this interface is the seam the
+/// rule builder talks through so it never learns that drift exists.
+abstract class TemplateRepository {
+  Stream<List<CaptureTemplate>> watchTemplates({String? unitId});
+  Future<void> saveTemplate(CaptureTemplate template);
+  Future<void> deleteTemplate(String templateId);
 }
 </file>
 
@@ -8210,6 +9817,7 @@ import '../../data/db/drift_repositories.dart';
 import '../../domain/logic/ledger.dart';
 import '../../domain/models/limit_rule.dart';
 import '../../domain/models/settings.dart';
+import '../../domain/models/template.dart';
 import '../../domain/models/transaction.dart';
 import '../../domain/models/unit.dart';
 import '../../domain/repositories/repositories.dart';
@@ -8242,6 +9850,23 @@ final limitRepositoryProvider = Provider<LimitRepository>((ref) {
 
 final settingsRepositoryProvider = Provider<SettingsRepository>((ref) {
   return DriftSettingsRepository(ref.watch(appDatabaseProvider));
+});
+
+/// Issue #20: templates built by the rule builder, persisted in the
+/// Templates drift table that #13 created.
+final templateRepositoryProvider = Provider<TemplateRepository>((ref) {
+  return DriftTemplateRepository(ref.watch(appDatabaseProvider));
+});
+
+final templatesProvider = StreamProvider<List<CaptureTemplate>>((ref) {
+  return ref.watch(templateRepositoryProvider).watchTemplates();
+});
+
+/// Templates for one unit — used by the unit page to show how many
+/// reading rules a unit already has.
+final unitTemplatesProvider =
+StreamProvider.family<List<CaptureTemplate>, String>((ref, unitId) {
+  return ref.watch(templateRepositoryProvider).watchTemplates(unitId: unitId);
 });
 
 final unitsProvider = StreamProvider<List<MoneyUnit>>((ref) {

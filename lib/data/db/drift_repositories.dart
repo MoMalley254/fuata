@@ -12,6 +12,7 @@ import 'package:flutter/material.dart';
 
 import '../../domain/models/limit_rule.dart';
 import '../../domain/models/settings.dart';
+import '../../domain/models/template.dart';
 import '../../domain/models/transaction.dart';
 import '../../domain/models/unit.dart';
 import '../../domain/repositories/repositories.dart';
@@ -227,5 +228,35 @@ class DriftSettingsRepository implements SettingsRepository {
         defaults.redactedLockScreenBanner,
       ),
     );
+  }
+}
+
+class DriftTemplateRepository implements TemplateRepository {
+  DriftTemplateRepository(this._db);
+  final AppDatabase _db;
+
+  @override
+  Stream<List<CaptureTemplate>> watchTemplates({String? unitId}) {
+    final query = _db.select(_db.templates)
+      ..orderBy([(t) => OrderingTerm.asc(t.name)]);
+    final wantedUnitId = unitId;
+    if (wantedUnitId != null) {
+      query.where((t) => t.unitId.equals(wantedUnitId));
+    }
+    return query.watch().map((rows) => rows.map(templateFromRow).toList());
+  }
+
+  @override
+  Future<void> saveTemplate(CaptureTemplate template) {
+    return _db
+        .into(_db.templates)
+        .insertOnConflictUpdate(templateToCompanion(template));
+  }
+
+  @override
+  Future<void> deleteTemplate(String templateId) {
+    return (_db.delete(
+      _db.templates,
+    )..where((t) => t.id.equals(templateId))).go();
   }
 }
