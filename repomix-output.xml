@@ -86,10 +86,12 @@ lib/
   domain/
     logic/
       ledger.dart
+      parser.dart
     models/
       limit_rule.dart
       money.dart
       settings.dart
+      template.dart
       transaction.dart
       unit.dart
     repositories/
@@ -118,6 +120,7 @@ lib/
       empty_activity.dart
       grouped_list.dart
     personalization/
+      action_row.dart
       detail_level_example.dart
       label.dart
       privayc_card.dart
@@ -145,6 +148,7 @@ test/
       app_database_test.dart
   domain/
     ledger_test.dart
+    parser_test.dart
 analysis_options.yaml
 pubspec.yaml
 README.md
@@ -153,202 +157,716 @@ README.md
 <files>
 This section contains the contents of the repository's files.
 
-<file path="android/app/src/main/kotlin/com/kinyuanexus/fuata/fuata/NotificationListener.kt">
-package com.kinyuanexus.fuata.fuata
+<file path="lib/domain/logic/parser.dart">
+import 'package:intl/intl.dart';
 
-import android.app.Notification
-import android.content.Context
-import android.content.SharedPreferences
-import android.os.Handler
-import android.os.Looper
-import android.service.notification.NotificationListenerService
-import android.service.notification.StatusBarNotification
-import android.util.Log
-import io.flutter.embedding.engine.FlutterEngine
-import io.flutter.embedding.engine.dart.DartExecutor
-import io.flutter.embedding.engine.loader.FlutterLoader
-import io.flutter.plugin.common.MethodChannel
-import io.flutter.view.FlutterCallbackInformation
+import '../models/money.dart';
+import '../models/template.dart';
+import '../models/transaction.dart';
 
-/**
- * Issue #18 — SPIKE, throwaway, time-boxed to 2 hours.
- *
- * On *every* notification (no allow-list yet — that's #22), spins up a
- * headless FlutterEngine, runs the Dart entry point registered by
- * MainActivity, and asks it to write one row to fuata.sqlite. This proves
- * (or disproves) that a background isolate can safely touch the same
- * database file the UI isolate might have open at the same moment.
- *
- * Findings go in docs/design.md section 5, not here. This class is
- * replaced by the real listener in #22.
- */
-class NotificationListener: NotificationListenerService() {
+/// The typed fields recovered from a message, in the vocabulary
+/// requirements.md US-08 asks the rule builder to let the user label:
+/// amount, code, date, person, balance, fee. All-optional because not
+/// every template labels every field (e.g. a template with no fee).
+class ParsedFields {
+  final int? amountMinor;
+  final int? feeMinor;
+  final int? balanceAfterMinor;
+  final String? code;
+  final DateTime? occurredAt;
+  final String? counterparty;
 
-    override fun onNotificationPosted(sbn: StatusBarNotification) {
-        val handle = readCallbackHandle(applicationContext)
-        if (handle == null) {
-            Log.w(TAG, "No callback handle registered — open the app once first.")
-            return
+  const ParsedFields({
+    this.amountMinor,
+    this.feeMinor,
+    this.balanceAfterMinor,
+    this.code,
+    this.occurredAt,
+    this.counterparty,
+  });
+
+  @override
+  String toString() =>
+      'ParsedFields(amount: $amountMinor, fee: $feeMinor, balanceAfter: $balanceAfterMinor, '
+      'code: $code, occurredAt: $occurredAt, counterparty: $counterparty)';
+}
+
+/// The outcome of `Parser.parse`. A non-match (testing.md P-05) is a
+/// normal, expected result — callers route it to the "couldn't read this"
+/// list (design.md's capture flow), not an error.
+class ParseResult {
+  final CaptureTemplate? template;
+  final TxType? type;
+  final ParsedFields? fields;
+
+  const ParseResult._({this.template, this.type, this.fields});
+
+  const ParseResult.noMatch() : this._();
+
+  const ParseResult.matched({
+    required CaptureTemplate template,
+    required TxType type,
+    required ParsedFields fields,
+  }) : this._(template: template, type: type, fields: fields);
+
+  bool get matched => template != null;
+}
+
+/// Pure functions only — no Flutter, no I/O (design.md section 1) — so
+/// this is unit-testable against fake messages without a device
+/// (testing.md's Parser plan, P-01 to P-12). Dedupe against already-stored
+/// transactions needs repository access and is out of scope here; it's
+/// built alongside the review inbox and listener (#21/#22).
+class Parser {
+  const Parser._();
+
+  /// Tries each enabled template in order (a unit can have several — one
+  /// per message shape, testing.md P-06) and returns the first match.
+  /// [currencyCode] is the unit's currency, used to turn a captured amount
+  /// string into minor units via [Money.parseMajor].
+  static ParseResult parse(
+    String message,
+    List<CaptureTemplate> templates, {
+    required String currencyCode,
+  }) {
+    for (final template in templates.where((t) => t.enabled)) {
+      final match = template.compiled.firstMatch(message);
+      if (match == null) continue;
+
+      int? amountMinor;
+      int? feeMinor;
+      int? balanceAfterMinor;
+      String? code;
+      DateTime? occurredAt;
+      String? counterparty;
+
+      for (final entry in template.fieldMap.entries) {
+        final raw = match.namedGroup(entry.key);
+        if (raw == null) continue;
+        switch (entry.value) {
+          case TemplateFieldType.amount:
+            amountMinor = _parseAmountMinor(raw, currencyCode);
+            break;
+          case TemplateFieldType.fee:
+            feeMinor = _parseAmountMinor(raw, currencyCode);
+            break;
+          case TemplateFieldType.balance:
+            balanceAfterMinor = _parseAmountMinor(raw, currencyCode);
+            break;
+          case TemplateFieldType.code:
+            code = raw.trim();
+            break;
+          case TemplateFieldType.date:
+            occurredAt = _parseDate(raw.trim());
+            break;
+          case TemplateFieldType.person:
+            counterparty = raw.trim();
+            break;
         }
+      }
 
-        val packageName = sbn.packageName
-        val extras = sbn.notification.extras
-        val text = extras?.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString()
-            ?: extras?.getCharSequence(Notification.EXTRA_TEXT)?.toString()
-            ?: ""
+      // A match with no amount isn't a usable transaction — keep trying
+      // other templates rather than returning a half-parsed result.
+      if (amountMinor == null) continue;
 
-        val loader = FlutterLoader()
-        loader.startInitialization(applicationContext)
-        loader.ensureInitializationCompleteAsync(
-            applicationContext,
-            null,
-            Handler(Looper.getMainLooper()),
-        ) {
-            val callbackInfo = FlutterCallbackInformation.lookupCallbackInformation(handle)
-            if (callbackInfo == null) {
-                Log.e(TAG, "Callback lookup failed for handle $handle")
-                return@ensureInitializationCompleteAsync
-            }
-
-            val engine = FlutterEngine(applicationContext)
-            val dartCallback = DartExecutor.DartCallback(
-                applicationContext.assets,
-                loader.findAppBundlePath(),
-                callbackInfo,
-            )
-            engine.dartExecutor.executeDartCallback(dartCallback)
-
-            val bgChannel = MethodChannel(
-                engine.dartExecutor.binaryMessenger,
-                "fuata/listener_spike_bg",
-            )
-
-            bgChannel.setMethodCallHandler { call, result ->
-                if (call.method == "backgroundIsolateReady") {
-                    bgChannel.invokeMethod(
-                        "onNotification",
-                        mapOf("packageName" to packageName, "text" to text),
-                    )
-                    result.success(null)
-                    // Spike, not a long-lived worker — give the write a
-                    // moment then tear the engine down.
-                    Handler(Looper.getMainLooper()).postDelayed({ engine.destroy() }, 3000)
-                } else {
-                    result.notImplemented()
-                }
-            }
-        }
+      return ParseResult.matched(
+        template: template,
+        type: _resolveType(template.direction, message),
+        fields: ParsedFields(
+          amountMinor: amountMinor,
+          feeMinor: feeMinor,
+          balanceAfterMinor: balanceAfterMinor,
+          code: code,
+          occurredAt: occurredAt,
+          counterparty: counterparty,
+        ),
+      );
     }
+    return const ParseResult.noMatch();
+  }
 
-    companion object {
-        private const val TAG = "listener_spike"
-        private const val PREFS = "fuata_listener_spike"
-        private const val KEY_HANDLE = "callback_handle"
-
-        fun writeCallbackHandle(context: Context, handle: Long) {
-            prefs(context).edit().putLong(KEY_HANDLE, handle).apply()
-        }
-
-        private fun readCallbackHandle(context: Context): Long? {
-            val v = prefs(context).getLong(KEY_HANDLE, -1L)
-            return if (v == -1L) null else v
-        }
-
-        private fun prefs(context: Context): SharedPreferences =
-            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+  static TxType _resolveType(TemplateDirection direction, String message) {
+    switch (direction) {
+      case TemplateDirection.spent:
+        return TxType.spent;
+      case TemplateDirection.got:
+        return TxType.got;
+      case TemplateDirection.either:
+        final lower = message.toLowerCase();
+        const gotWords = ['received', 'credited', 'deposit'];
+        return gotWords.any(lower.contains) ? TxType.got : TxType.spent;
     }
+  }
+
+  /// Strips an optional currency-letter prefix ("Ksh", "KES ") the amount
+  /// field pattern allows, then reuses `Money.parseMajor` for the actual
+  /// minor-unit math (ADR-003: integer minor units, no floats).
+  static int _parseAmountMinor(String raw, String currencyCode) {
+    final stripped = raw
+        .replaceFirst(RegExp(r'^[A-Za-z]{2,5}\.?\s*'), '')
+        .trim();
+    return Money.parseMajor(stripped, currencyCode).minor;
+  }
+
+  /// testing.md P-09: "21/9/26 at 1:12 PM" and ISO both need to parse to
+  /// the correct timestamp. `DateTime.tryParse` covers ISO 8601 (with a
+  /// "T" or a space separator); a short list of `intl` patterns covers the
+  /// common bank/mobile-money shapes. Returns null rather than throwing —
+  /// a message that otherwise matched shouldn't be discarded over a date
+  /// the app doesn't yet know how to read.
+  static DateTime? _parseDate(String raw) {
+    final iso = DateTime.tryParse(raw);
+    if (iso != null) return iso;
+
+    const patterns = [
+      "d/M/yy 'at' h:mm a",
+      "d/M/yyyy 'at' h:mm a",
+      'd/M/yy HH:mm',
+      'd/M/yyyy HH:mm',
+      'd/M/yy',
+      'd/M/yyyy',
+    ];
+    for (final p in patterns) {
+      try {
+        return DateFormat(p).parse(raw);
+      } on FormatException {
+        continue;
+      }
+    }
+    return null;
+  }
 }
 </file>
 
-<file path="lib/platform/listener_spike.dart">
-// ---------------------------------------------------------------------------
-// Issue #18 — SPIKE, throwaway. Time-boxed to 2 hours.
-//
-// Goal (design.md section 5, "top project risk"): prove that a background
-// isolate, started by Android when the app is fully closed, can open the
-// *same* fuata.sqlite file the UI isolate has open and write a row safely.
-//
-// Deliberately minimal: no allow-list (#22), no template matching (#19),
-// no dedupe. It logs exactly one UnparsedCaptures row per notification so
-// the write path can be inspected afterwards. This file is replaced
-// entirely by the real listener in #22 — do not build on top of it.
-// ---------------------------------------------------------------------------
-import 'dart:ui';
+<file path="lib/domain/models/template.dart">
+/// design.md TEMPLATE / ADR-007: the user pastes a sample message and
+/// labels spans of it (amount, code, date, person, balance, fee); the app
+/// turns that into a regex with one named group per labeled field. This
+/// file is the template model plus the generator; matching a message
+/// against a list of templates is `Parser` (logic/parser.dart).
+library;
 
-import 'package:flutter/cupertino.dart';
-import 'package:flutter/services.dart';
+/// The kinds of field a user can label a span as (US-08). `ignore` isn't
+/// listed in requirements.md's label set but is kept internal-only, not
+/// exposed here, since v0.1's rule builder only offers the six above.
+enum TemplateFieldType { amount, code, date, person, balance, fee }
 
-import '../data/db/app_database.dart';
+/// `direction` on a Template: which way the transaction goes. `either`
+/// lets the message decide at parse time (ui-design-brief.md 7.7 step 4)
+/// — see `Parser._resolveType`.
+enum TemplateDirection { spent, got, either }
 
-const _spikeChannel = MethodChannel('fuata/listener_spike');
+/// One labeled span over `sampleText`, as produced by the rule builder UI
+/// (#20). `end` is exclusive. The factory that consumes these assumes
+/// they're already non-overlapping — the rule builder enforces that by
+/// construction (tap-to-label chips can't cover the same character twice).
+class LabeledSpan {
+  final int start;
+  final int end;
+  final TemplateFieldType type;
 
-/// Call once from `main()` on every app start (UI isolate). Registers the
-/// Dart entry point below with Android so the native side can find it
-/// again later, from a process that never ran Dart's `main()` — i.e. when
-/// Android starts the listener service after the app has been swiped away.
-Future<void> registerListenerSpikeCallback() async {
-  final handle = PluginUtilities.getCallbackHandle(_backgroundDispatcher);
-  if (handle == null) {
-    // Only happens if _backgroundDispatcher loses its @pragma below or is
-    // torn out by tree-shaking — fail loud during the spike, not silently.
-    print('[listener_spike] could not obtain a callback handle');
-    return;
-  }
-  await _spikeChannel.invokeMethod('setCallbackHandle', handle.toRawHandle());
+  const LabeledSpan({
+    required this.start,
+    required this.end,
+    required this.type,
+  });
 }
 
-/// Opens Android's notification-access settings so the user can grant this
-/// app special access. No permission_handler-style plugin for the spike —
-/// just an implicit intent from the native side.
-Future<void> openNotificationAccessSettings() async {
-  _spikeChannel.invokeMethod('openNotificationAccessSettings');
-}
+/// design.md TEMPLATE. `pattern` is a regex source string with one named
+/// group per labeled field (`(?<amount>...)`, and `(?<amount2>...)` etc.
+/// if a field type repeats, e.g. amount + fee are both money but distinct
+/// groups); `fieldMap` maps each group name back to its [TemplateFieldType]
+/// — this is tables.dart's `fieldMapJson` column, decoded.
+class CaptureTemplate {
+  final String id;
+  final String unitId;
+  final String? captureSourceId;
+  final String name;
+  final TemplateDirection direction;
+  final String pattern;
+  final Map<String, TemplateFieldType> fieldMap;
+  final String sampleText;
+  final int version;
+  final bool enabled;
 
-/// The background entry point. Runs in its own isolate, in its own
-/// FlutterEngine, started by NotificationListener.kt — this is NOT the UI
-/// isolate. `vm:entry-point` stops the AOT compiler tree-shaking a
-/// function that's only ever reached from native code.
-@pragma('vm:entry-point')
-void _backgroundDispatcher() {
-  WidgetsFlutterBinding.ensureInitialized();
-  const channel = MethodChannel('fuata/listener_spike_bg');
-
-  channel.setMethodCallHandler((call) async {
-    if (call.method != 'onNotification') return null;
-    final args = (call.arguments as Map).cast<String, Object?>();
-    final packageName = args['packageName'] as String? ?? 'unknown';
-    final text = args['text'] as String? ?? '';
-
-    final stopwatch = Stopwatch()..start();
-    // A *second* connection to the same file the UI isolate has open —
-    // exactly the scenario design.md flags as the top risk: two isolates,
-    // two AppDatabase instances, one fuata.sqlite.
-    final db = AppDatabase();
-    try {
-      await db
-          .into(db.unparsedCaptures)
-          .insert(
-        UnparsedCapturesCompanion.insert(
-          id: 'spike-${DateTime.now().microsecondsSinceEpoch}',
-          receivedAt: DateTime.now().toUtc(),
-          sourcePackage: packageName,
-          rawText: text,
-        ),
-      );
-      print(
-        '[listener_spike] wrote 1 row from $packageName '
-            'in ${stopwatch.elapsedMilliseconds}ms',
-      );
-    } catch (e, st) {
-      print('[listener_spike] FAILED to write: $e\n$st');
-    } finally {
-      await db.close();
-    }
-    return null;
+  const CaptureTemplate({
+    required this.id,
+    required this.unitId,
+    required this.name,
+    required this.direction,
+    required this.pattern,
+    required this.fieldMap,
+    required this.sampleText,
+    this.captureSourceId,
+    this.version = 1,
+    this.enabled = true,
   });
 
-  // Tell the native side this isolate is alive and ready for onNotification.
-  channel.invokeMethod('backgroundIsolateReady');
+  /// Compiled on demand rather than cached, since a Template is an
+  /// immutable value object handed around freely (Parser compiles it once
+  /// per parse attempt); `dotAll` so a `date`/`person` group's `[\s\S]+?`
+  /// isn't the only thing standing between us and a multi-line message
+  /// silently failing to match.
+  RegExp get compiled => RegExp(pattern, dotAll: true);
+
+  /// ADR-007: builds a regex from a pasted sample plus the spans the user
+  /// labeled over it. Literal text between, before and after the labels is
+  /// regex-escaped, so punctuation in the sample (".", "(", "+", "$", ...)
+  /// is matched literally rather than as regex syntax (testing.md P-04).
+  /// Different names/numbers/amounts in a *future* message still match,
+  /// because only the labeled spans became capture groups — everything
+  /// else in the sample is now fixed literal text (testing.md P-03).
+  factory CaptureTemplate.fromLabeledSample({
+    required String id,
+    required String unitId,
+    String? captureSourceId,
+    required String name,
+    required TemplateDirection direction,
+    required String sampleText,
+    required List<LabeledSpan> labels,
+    int version = 1,
+    bool enabled = true,
+  }) {
+    final sorted = [...labels]..sort((a, b) => a.start.compareTo(b.start));
+    for (var i = 1; i < sorted.length; i++) {
+      assert(
+        sorted[i].start >= sorted[i - 1].end,
+        'Labeled spans must not overlap',
+      );
+    }
+
+    final buffer = StringBuffer();
+    final fieldMap = <String, TemplateFieldType>{};
+    final usedCounts = <TemplateFieldType, int>{};
+    var cursor = 0;
+
+    for (final span in sorted) {
+      buffer.write(_escapeLiteral(sampleText.substring(cursor, span.start)));
+      final groupName = _nextGroupName(span.type, usedCounts);
+      buffer.write('(?<$groupName>${_fieldPattern(span.type)})');
+      fieldMap[groupName] = span.type;
+      cursor = span.end;
+    }
+    buffer.write(_escapeLiteral(sampleText.substring(cursor)));
+    return CaptureTemplate(
+      id: id,
+      unitId: unitId,
+      captureSourceId: captureSourceId,
+      name: name,
+      direction: direction,
+      pattern: buffer.toString(),
+      fieldMap: fieldMap,
+      sampleText: sampleText,
+      version: version,
+      enabled: enabled,
+    );
+  }
+
+  CaptureTemplate copyWith({bool? enabled, String? name, int? version}) {
+    return CaptureTemplate(
+      id: id,
+      unitId: unitId,
+      captureSourceId: captureSourceId,
+      name: name ?? this.name,
+      direction: direction,
+      pattern: pattern,
+      fieldMap: fieldMap,
+      sampleText: sampleText,
+      version: version ?? this.version,
+      enabled: enabled ?? this.enabled,
+    );
+  }
+
+  /// testing.md P-11: round-trips through the same shape tables.dart's
+  /// `fieldMapJson` column stores (group name -> field type name), so a
+  /// repository just needs to `jsonEncode`/`jsonDecode` this map.
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'unitId': unitId,
+    'captureSourceId': captureSourceId,
+    'name': name,
+    'direction': direction.name,
+    'pattern': pattern,
+    'fieldMap': fieldMap.map(
+      (groupName, type) => MapEntry(groupName, type.name),
+    ),
+    'sampleText': sampleText,
+    'version': version,
+    'enabled': enabled,
+  };
+
+  factory CaptureTemplate.fromJson(Map<String, dynamic> json) {
+    final rawFieldMap = json['fieldMap'] as Map<String, dynamic>;
+    return CaptureTemplate(
+      id: json['id'] as String,
+      unitId: json['unitId'] as String,
+      captureSourceId: json['captureSourceId'] as String?,
+      name: json['name'] as String,
+      direction: TemplateDirection.values.byName(json['direction'] as String),
+      pattern: json['pattern'] as String,
+      fieldMap: rawFieldMap.map(
+        (groupName, typeName) => MapEntry(
+          groupName,
+          TemplateFieldType.values.byName(typeName as String),
+        ),
+      ),
+      sampleText: json['sampleText'] as String,
+      version: json['version'] as int? ?? 1,
+      enabled: json['enabled'] as bool? ?? true,
+    );
+  }
+
+  static String _nextGroupName(
+    TemplateFieldType type,
+    Map<TemplateFieldType, int> used,
+  ) {
+    final count = (used[type] ?? 0) + 1;
+    used[type] = count;
+    // Dart named-group names must start with a letter and be alphanumeric —
+    // `type.name` (e.g. "amount") already is; appending the count for a
+    // repeat keeps that true ("amount2").
+    return count == 1 ? type.name : '${type.name}$count';
+  }
+
+  /// Escapes regex metacharacters so literal text from the sample is
+  /// matched as itself. Dart's RegExp has no built-in escape helper.
+  static String _escapeLiteral(String s) {
+    return s.replaceAllMapped(
+      RegExp(r'[.*+?^${}()|[\]\\]'),
+      (m) => '\\${m[0]}',
+    );
+  }
+
+  /// The regex each field type matches against in a *future* message —
+  /// deliberately more permissive than any one sample, since the amount,
+  /// code, date etc. will differ every time (testing.md P-02/P-03).
+  static String _fieldPattern(TemplateFieldType type) {
+    switch (type) {
+      case TemplateFieldType.amount:
+      case TemplateFieldType.balance:
+      case TemplateFieldType.fee:
+        // Optional currency label/prefix, digits with optional thousands
+        // separators, optional decimal part — "Ksh350.00", "KES 1,250",
+        // "350" all match (testing.md P-02).
+        return r'(?:[A-Za-z]{2,5}\.?\s*)?[\d,]+(?:\.\d+)?';
+      case TemplateFieldType.code:
+        return r'[A-Za-z0-9]+';
+      case TemplateFieldType.date:
+      case TemplateFieldType.person:
+        // Non-greedy so it stops at the next literal chunk once compiled,
+        // rather than swallowing the rest of the message.
+        return r'[\s\S]+?';
+    }
+  }
+}
+</file>
+
+<file path="test/domain/parser_test.dart">
+import 'package:flutter_test/flutter_test.dart';
+import 'package:fuata/domain/logic/parser.dart';
+import 'package:fuata/domain/models/template.dart';
+import 'package:fuata/domain/models/transaction.dart';
+
+void main() {
+  // Fake messages only (testing.md's rule for the parser plan) — none of
+  // these are copied from a real provider's wording.
+
+  const paidSample =
+      'Confirmed. Ksh350.00 paid to JAVA HOUSE (Nairobi) on 21/9/26 at 1:12 PM. '
+      'Code QW12ABC3. Fee Ksh5.00 charged (VAT incl.). New balance is Ksh4,500.00.';
+
+  CaptureTemplate paidTemplate({String id = 't-paid'}) {
+    int at(String needle) => paidSample.indexOf(needle);
+    LabeledSpan span(String needle, TemplateFieldType type) =>
+        LabeledSpan(start: at(needle), end: at(needle) + needle.length, type: type);
+
+    return CaptureTemplate.fromLabeledSample(
+      id: id,
+      unitId: 'u-mpesa',
+      name: 'M-Pesa paid to',
+      direction: TemplateDirection.spent,
+      sampleText: paidSample,
+      labels: [
+        span('Ksh350.00', TemplateFieldType.amount),
+        span('JAVA HOUSE', TemplateFieldType.person),
+        span('21/9/26 at 1:12 PM', TemplateFieldType.date),
+        span('QW12ABC3', TemplateFieldType.code),
+        span('Ksh5.00', TemplateFieldType.fee),
+        span('Ksh4,500.00', TemplateFieldType.balance),
+      ],
+    );
+  }
+
+  const receivedSample =
+      'You have received Ksh5,000.00 from JOHN DOE 0712345678 on 22/9/26 at 9:00 AM. '
+      'New balance is Ksh9,500.00. Transaction ID AB34CD5E.';
+
+  CaptureTemplate receivedTemplate({String id = 't-received'}) {
+    int at(String needle) => receivedSample.indexOf(needle);
+    LabeledSpan span(String needle, TemplateFieldType type) =>
+        LabeledSpan(start: at(needle), end: at(needle) + needle.length, type: type);
+
+    return CaptureTemplate.fromLabeledSample(
+      id: id,
+      unitId: 'u-mpesa',
+      name: 'M-Pesa received',
+      direction: TemplateDirection.got,
+      sampleText: receivedSample,
+      labels: [
+        span('Ksh5,000.00', TemplateFieldType.amount),
+        span('JOHN DOE 0712345678', TemplateFieldType.person),
+        span('22/9/26 at 9:00 AM', TemplateFieldType.date),
+        span('Ksh9,500.00', TemplateFieldType.balance),
+        span('AB34CD5E', TemplateFieldType.code),
+      ],
+    );
+  }
+
+  const withdrawSample =
+      'Withdraw of Ksh2,000.00 from ATM 00219 on 20/9/26 at 4:30 PM. '
+      'Code WX55YZ9. New balance is Ksh100.00.';
+
+  CaptureTemplate withdrawTemplate({String id = 't-withdraw'}) {
+    int at(String needle) => withdrawSample.indexOf(needle);
+    LabeledSpan span(String needle, TemplateFieldType type) =>
+        LabeledSpan(start: at(needle), end: at(needle) + needle.length, type: type);
+
+    return CaptureTemplate.fromLabeledSample(
+      id: id,
+      unitId: 'u-mpesa',
+      name: 'M-Pesa withdraw',
+      direction: TemplateDirection.spent,
+      sampleText: withdrawSample,
+      labels: [
+        span('Ksh2,000.00', TemplateFieldType.amount),
+        span('ATM 00219', TemplateFieldType.person),
+        span('20/9/26 at 4:30 PM', TemplateFieldType.date),
+        span('WX55YZ9', TemplateFieldType.code),
+        span('Ksh100.00', TemplateFieldType.balance),
+      ],
+    );
+  }
+
+  group('P-01 labeled sample -> all fields, correct types', () {
+    test('extracts amount, code, date, person, fee, balance', () {
+      final result = Parser.parse(paidSample, [paidTemplate()], currencyCode: 'KES');
+
+      expect(result.matched, isTrue);
+      expect(result.type, TxType.spent);
+      expect(result.fields!.amountMinor, 35000);
+      expect(result.fields!.feeMinor, 500);
+      expect(result.fields!.balanceAfterMinor, 450000);
+      expect(result.fields!.code, 'QW12ABC3');
+      expect(result.fields!.counterparty, 'JAVA HOUSE');
+      expect(result.fields!.occurredAt, isNotNull);
+      expect(result.fields!.occurredAt!.year, 2026);
+      expect(result.fields!.occurredAt!.month, 9);
+      expect(result.fields!.occurredAt!.day, 21);
+      expect(result.fields!.occurredAt!.hour, 13); // 1:12 PM -> 13:12
+      expect(result.fields!.occurredAt!.minute, 12);
+    });
+  });
+
+  group('P-02 amount formats', () {
+    final template = paidTemplate();
+
+    test('"Ksh350.00" -> 35000 minor', () {
+      final r = Parser.parse(paidSample, [template], currencyCode: 'KES');
+      expect(r.fields!.amountMinor, 35000);
+    });
+
+    test('"KES 1,250" style balance -> correct minor units', () {
+      final r = Parser.parse(paidSample, [template], currencyCode: 'KES');
+      // "Ksh4,500.00" balance in the sample -> 450000 minor.
+      expect(r.fields!.balanceAfterMinor, 450000);
+    });
+
+    test('bare "350" (no currency prefix) still parses', () {
+      const bare = 'Sent 350 to PETER on 1/1/26. Code ZZ1.';
+      final t = CaptureTemplate.fromLabeledSample(
+        id: 't-bare',
+        unitId: 'u1',
+        name: 'bare',
+        direction: TemplateDirection.spent,
+        sampleText: bare,
+        labels: [
+          LabeledSpan(start: bare.indexOf('350'), end: bare.indexOf('350') + 3, type: TemplateFieldType.amount),
+          LabeledSpan(
+            start: bare.indexOf('PETER'),
+            end: bare.indexOf('PETER') + 5,
+            type: TemplateFieldType.person,
+          ),
+          LabeledSpan(start: bare.indexOf('ZZ1'), end: bare.indexOf('ZZ1') + 3, type: TemplateFieldType.code),
+        ],
+      );
+      final r = Parser.parse(bare, [t], currencyCode: 'KES');
+      expect(r.matched, isTrue);
+      expect(r.fields!.amountMinor, 35000);
+    });
+  });
+
+  test('P-03 different names/numbers in the varying part still match', () {
+    const other =
+        'Confirmed. Ksh1,250.50 paid to CARREFOUR (Nairobi) on 5/1/27 at 6:45 AM. '
+        'Code ZZ99XYZ1. Fee Ksh10.00 charged (VAT incl.). New balance is Ksh900.00.';
+
+    final result = Parser.parse(other, [paidTemplate()], currencyCode: 'KES');
+
+    expect(result.matched, isTrue);
+    expect(result.fields!.amountMinor, 125050);
+    expect(result.fields!.counterparty, 'CARREFOUR');
+    expect(result.fields!.code, 'ZZ99XYZ1');
+    expect(result.fields!.balanceAfterMinor, 90000);
+  });
+
+  test('P-04 regex special characters in the sample are escaped, not matched as syntax', () {
+    // The sample itself contains '.', '(', ')' outside the labeled spans
+    // (see paidSample: "(Nairobi)", "(VAT incl.)"). Building the template
+    // and re-matching the exact sample must not throw and must match.
+    expect(() => paidTemplate(), returnsNormally);
+    final result = Parser.parse(paidSample, [paidTemplate()], currencyCode: 'KES');
+    expect(result.matched, isTrue);
+
+    // A message with different literal punctuation in the same spots
+    // must NOT be mistaken for a match against the escaped literals.
+    const differentPunctuation =
+        'Confirmed. Ksh350.00 paid to JAVA HOUSE [Nairobi] on 21/9/26 at 1:12 PM. '
+        'Code QW12ABC3. Fee Ksh5.00 charged [VAT incl]. New balance is Ksh4,500.00.';
+    final noMatch = Parser.parse(differentPunctuation, [paidTemplate()], currencyCode: 'KES');
+    expect(noMatch.matched, isFalse);
+  });
+
+  test('P-05 a message matching no template returns no match', () {
+    const unrelated = 'Your OTP is 445566. Do not share it with anyone.';
+    final result = Parser.parse(
+      unrelated,
+      [paidTemplate(), receivedTemplate(), withdrawTemplate()],
+      currencyCode: 'KES',
+    );
+    expect(result.matched, isFalse);
+    expect(result.template, isNull);
+    expect(result.fields, isNull);
+  });
+
+  group('P-06 multiple templates on one unit: correct template and direction chosen', () {
+    final templates = [paidTemplate(), receivedTemplate(), withdrawTemplate()];
+
+    test('received message matches the received template, type got', () {
+      final r = Parser.parse(receivedSample, templates, currencyCode: 'KES');
+      expect(r.matched, isTrue);
+      expect(r.template!.id, 't-received');
+      expect(r.type, TxType.got);
+    });
+
+    test('withdraw message matches the withdraw template, type spent', () {
+      final r = Parser.parse(withdrawSample, templates, currencyCode: 'KES');
+      expect(r.matched, isTrue);
+      expect(r.template!.id, 't-withdraw');
+      expect(r.type, TxType.spent);
+    });
+
+    test('paid message matches the paid template, type spent', () {
+      final r = Parser.parse(paidSample, templates, currencyCode: 'KES');
+      expect(r.matched, isTrue);
+      expect(r.template!.id, 't-paid');
+      expect(r.type, TxType.spent);
+    });
+  });
+
+  // P-07 (same code deduped) and P-08 (deduped by unit+amount+2-minute
+  // window when there's no code) both need to compare a parsed result
+  // against already-stored transactions, which means repository access.
+  // That's out of scope for the parser itself (design.md's ER diagram
+  // has no dedupe table) — those cases are covered where the dedupe
+  // check actually runs, in #21 (share/paste) and #22 (listener).
+
+  group('P-09 date formats parse to the correct timestamp', () {
+    test('"21/9/26 at 1:12 PM" style', () {
+      final r = Parser.parse(paidSample, [paidTemplate()], currencyCode: 'KES');
+      final d = r.fields!.occurredAt!;
+      expect(DateTime(d.year, d.month, d.day, d.hour, d.minute), DateTime(2026, 9, 21, 13, 12));
+    });
+
+    test('ISO 8601 style', () {
+      const isoSample = 'TXN on 2026-09-21T13:12:00 for Ksh100.00. Code ISO1.';
+      final t = CaptureTemplate.fromLabeledSample(
+        id: 't-iso',
+        unitId: 'u1',
+        name: 'iso',
+        direction: TemplateDirection.spent,
+        sampleText: isoSample,
+        labels: [
+          LabeledSpan(
+            start: isoSample.indexOf('2026-09-21T13:12:00'),
+            end: isoSample.indexOf('2026-09-21T13:12:00') + '2026-09-21T13:12:00'.length,
+            type: TemplateFieldType.date,
+          ),
+          LabeledSpan(
+            start: isoSample.indexOf('Ksh100.00'),
+            end: isoSample.indexOf('Ksh100.00') + 'Ksh100.00'.length,
+            type: TemplateFieldType.amount,
+          ),
+          LabeledSpan(
+            start: isoSample.indexOf('ISO1'),
+            end: isoSample.indexOf('ISO1') + 4,
+            type: TemplateFieldType.code,
+          ),
+        ],
+      );
+      final r = Parser.parse(isoSample, [t], currencyCode: 'KES');
+      expect(r.matched, isTrue);
+      final d = r.fields!.occurredAt!;
+      expect(DateTime(d.year, d.month, d.day, d.hour, d.minute), DateTime(2026, 9, 21, 13, 12));
+    });
+  });
+
+  test('P-10 balance quoted in the message is extracted for reconciliation', () {
+    // Comparing it against the computed balance and flagging the unit is
+    // ledger/reconciliation logic (design.md section 3), not the
+    // parser's job — the parser's contract is just to surface the value.
+    final r = Parser.parse(paidSample, [paidTemplate()], currencyCode: 'KES');
+    expect(r.fields!.balanceAfterMinor, 450000);
+  });
+
+  test('P-11 template round-trips through JSON with identical parse behaviour', () {
+    final original = paidTemplate();
+    final restored = CaptureTemplate.fromJson(original.toJson());
+
+    expect(restored.pattern, original.pattern);
+    expect(restored.fieldMap, original.fieldMap);
+    expect(restored.direction, original.direction);
+
+    final before = Parser.parse(paidSample, [original], currencyCode: 'KES');
+    final after = Parser.parse(paidSample, [restored], currencyCode: 'KES');
+
+    expect(after.matched, before.matched);
+    expect(after.fields!.amountMinor, before.fields!.amountMinor);
+    expect(after.fields!.code, before.fields!.code);
+    expect(after.fields!.counterparty, before.fields!.counterparty);
+    expect(after.fields!.balanceAfterMinor, before.fields!.balanceAfterMinor);
+  });
+
+  group('P-12 very long or empty message does not crash', () {
+    final templates = [paidTemplate(), receivedTemplate(), withdrawTemplate()];
+
+    test('empty message', () {
+      expect(() => Parser.parse('', templates, currencyCode: 'KES'), returnsNormally);
+      expect(Parser.parse('', templates, currencyCode: 'KES').matched, isFalse);
+    });
+
+    test('very long message', () {
+      final long = 'Random noise. ' * 5000;
+      expect(() => Parser.parse(long, templates, currencyCode: 'KES'), returnsNormally);
+      expect(Parser.parse(long, templates, currencyCode: 'KES').matched, isFalse);
+    });
+
+    test('very long message that still contains a real match', () {
+      final long = '${'Random noise. ' * 2000}$paidSample${' more noise' * 2000}';
+      final r = Parser.parse(long, templates, currencyCode: 'KES');
+      expect(r.matched, isTrue);
+      expect(r.fields!.amountMinor, 35000);
+    });
+  });
 }
 </file>
 
@@ -360,43 +878,6 @@ void _backgroundDispatcher() {
     -->
     <uses-permission android:name="android.permission.INTERNET"/>
 </manifest>
-</file>
-
-<file path="android/app/src/main/kotlin/com/kinyuanexus/fuata/fuata/MainActivity.kt">
-package com.kinyuanexus.fuata.fuata
-
-import android.content.Intent
-import android.provider.Settings
-import io.flutter.embedding.android.FlutterActivity
-import io.flutter.embedding.engine.FlutterEngine
-import io.flutter.plugin.common.MethodChannel
-
-/**
- * `fuata/listener_spike` channel: issue #18 only. Stores the Dart callback
- * handle NotificationListener.kt needs, and opens Android's notification
- * access settings. Throwaway — removed or replaced by real plugin wiring
- * once #22 lands.
- */
-class MainActivity : FlutterActivity() {
-    override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
-        super.configureFlutterEngine(flutterEngine)
-        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "fuata/listener_spike")
-            .setMethodCallHandler { call, result ->
-                when (call.method) {
-                    "setCallbackHandle" -> {
-                        val handle = (call.arguments as Number).toLong()
-                        NotificationListener.writeCallbackHandle(applicationContext, handle)
-                        result.success(null)
-                    }
-                    "openNotificationAccessSettings" -> {
-                        startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
-                        result.success(null)
-                    }
-                    else -> result.notImplemented()
-                }
-            }
-    }
-}
 </file>
 
 <file path="android/app/src/main/res/drawable/launch_background.xml">
@@ -469,68 +950,6 @@ class MainActivity : FlutterActivity() {
         <item name="android:windowBackground">?android:colorBackground</item>
     </style>
 </resources>
-</file>
-
-<file path="android/app/src/main/AndroidManifest.xml">
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <application
-        android:label="fuata"
-        android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher">
-        <activity
-            android:name=".MainActivity"
-            android:exported="true"
-            android:launchMode="singleTop"
-            android:taskAffinity=""
-            android:theme="@style/LaunchTheme"
-            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
-            android:hardwareAccelerated="true"
-            android:windowSoftInputMode="adjustResize">
-            <!-- Specifies an Android theme to apply to this Activity as soon as
-                 the Android process has started. This theme is visible to the user
-                 while the Flutter UI initializes. After that, this theme continues
-                 to determine the Window background behind the Flutter UI. -->
-            <meta-data
-              android:name="io.flutter.embedding.android.NormalTheme"
-              android:resource="@style/NormalTheme"
-              />
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN"/>
-                <category android:name="android.intent.category.LAUNCHER"/>
-            </intent-filter>
-        </activity>
-        <!-- Don't delete the meta-data below.
-             This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
-        <meta-data
-            android:name="flutterEmbedding"
-            android:value="2" />
-
-        <!-- Issue #18 spike: throwaway notification listener, no allow-list
-             yet (#22). Requires the user to grant special access in
-             Settings > Notification access; MainActivity's
-             openNotificationAccessSettings() opens that screen directly. -->
-        <service
-            android:name=".NotificationListener"
-            android:label="Fuata capture (spike)"
-            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"
-            android:exported="false">
-            <intent-filter>
-                <action android:name="android.service.notification.NotificationListenerService" />
-            </intent-filter>
-        </service>
-    </application>
-    <!-- Required to query activities that can process text, see:
-         https://developer.android.com/training/package-visibility and
-         https://developer.android.com/reference/android/content/Intent#ACTION_PROCESS_TEXT.
-
-         In particular, this is used by the Flutter engine in io.flutter.plugin.text.ProcessTextPlugin. -->
-    <queries>
-        <intent>
-            <action android:name="android.intent.action.PROCESS_TEXT"/>
-            <data android:mimeType="text/plain"/>
-        </intent>
-    </queries>
-</manifest>
 </file>
 
 <file path="android/app/src/profile/AndroidManifest.xml">
@@ -2020,176 +2439,6 @@ class FilterBar extends StatelessWidget {
             onTap: () => onSelected(entry.value),
           );
         },
-      ),
-    );
-  }
-}
-</file>
-
-<file path="lib/ui/screens/me_screen.dart">
-import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
-
-import '../../domain/models/settings.dart';
-import '../../widgets/coming_soon_row.dart';
-import '../../widgets/personalization/detail_level_example.dart';
-import '../../widgets/personalization/label.dart';
-import '../../widgets/personalization/privayc_card.dart';
-import '../../widgets/personalization/profile_block.dart';
-import '../../widgets/personalization/section_card.dart';
-import '../../widgets/personalization/toggle_row.dart';
-import '../providers/app_providers.dart';
-import '../theme/app_colors.dart';
-import '../theme/app_spacing.dart';
-import '../theme/app_typography.dart';
-import '../../widgets/app_chips.dart';
-
-/// Me: settings and personalisation (ui-design-brief.md section 7.12,
-/// US-13/US-14/US-16). Every control here writes straight through
-/// `settingsRepositoryProvider` — same UI-first shape as the rest of the
-/// app (screens depend on the repository interface; today that's
-/// `MockSettingsRepository`, an in-memory store, same as units/
-/// transactions/limits until #13).
-///
-/// Limits & alerts, Banner, and Message reading each get their own
-/// dedicated screens in later issues (#15/#17, #16/#17, #19-#22) — shown
-/// here as `ComingSoonRow`s that link out, rather than half-built here.
-class MeScreen extends ConsumerWidget {
-  const MeScreen({super.key});
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final c = context.colors;
-    final settings = ref.watch(currentSettingsProvider);
-    final repo = ref.read(settingsRepositoryProvider);
-
-    void update(AppSettings Function(AppSettings) fn) {
-      repo.updateSettings(fn(settings));
-    }
-
-    return Scaffold(
-      appBar: AppBar(title: const Text('Me')),
-      body: SafeArea(
-        child: ListView(
-          padding: const EdgeInsets.fromLTRB(
-            AppSpacing.margin, AppSpacing.sm, AppSpacing.margin, AppSpacing.xl,
-          ),
-          children: [
-            ProfileBlock(settings: settings, onChanged: update),
-            const SizedBox(height: AppSpacing.lg),
-            SectionCard(
-              title: 'Home',
-              children: [
-                Label('Headline number'),
-                const SizedBox(height: AppSpacing.sm),
-                Wrap(
-                  spacing: AppSpacing.sm,
-                  runSpacing: AppSpacing.sm,
-                  children: HomeHeadline.values.map((h) {
-                    return AppChoiceChip(
-                      label: h.label,
-                      selected: settings.homeHeadline == h,
-                      onTap: () => update((s) => s.copyWith(homeHeadline: h)),
-                    );
-                  }).toList(),
-                ),
-                const SizedBox(height: AppSpacing.md),
-                Label('Sections'),
-                const SizedBox(height: AppSpacing.xs),
-                ...HomeSection.values.map((section) {
-                  final on = settings.homeSections.contains(section);
-                  return ToggleRow(
-                    title: section.label,
-                    subtitle: section.description,
-                    value: on,
-                    onChanged: (v) => update((s) {
-                      final next = Set<HomeSection>.from(s.homeSections);
-                      if (v) {
-                        next.add(section);
-                      } else {
-                        next.remove(section);
-                      }
-                      return s.copyWith(homeSections: next);
-                    }),
-                  );
-                }),
-              ],
-            ),
-            const SizedBox(height: AppSpacing.lg),
-            SectionCard(
-              title: 'Detail level',
-              children: [
-                Wrap(
-                  spacing: AppSpacing.sm,
-                  runSpacing: AppSpacing.sm,
-                  children: DetailLevel.values.map((lvl) {
-                    return AppChoiceChip(
-                      label: lvl.label,
-                      selected: settings.detailLevel == lvl,
-                      onTap: () => update((s) => s.copyWith(detailLevel: lvl)),
-                    );
-                  }).toList(),
-                ),
-                const SizedBox(height: AppSpacing.md),
-                Text(
-                  settings.detailLevel.description,
-                  style: AppTypography.bodySm.copyWith(color: c.onSurfaceVariant),
-                ),
-                const SizedBox(height: AppSpacing.sm),
-                DetailLevelExample(level: settings.detailLevel),
-              ],
-            ),
-            const SizedBox(height: AppSpacing.lg),
-            SectionCard(
-              title: 'Limits, banner and messages',
-              children: const [
-                ComingSoonRow(
-                  icon: Icons.speed_rounded,
-                  title: 'Limits & alerts',
-                  subtitle: 'Daily, weekly and monthly limits, plus nudges — coming in #15/#17',
-                ),
-                SizedBox(height: AppSpacing.sm),
-                ComingSoonRow(
-                  icon: Icons.notifications_active_outlined,
-                  title: 'Banner',
-                  subtitle: 'Choose what the notification banner shows — coming in #16/#17',
-                ),
-                SizedBox(height: AppSpacing.sm),
-                ComingSoonRow(
-                  icon: Icons.mark_email_read_outlined,
-                  title: 'Message reading',
-                  subtitle: 'Rules and allowed apps for auto-catch — coming in #19-#22',
-                ),
-                SizedBox(height: AppSpacing.sm),
-                ComingSoonRow(
-                  icon: Icons.sell_outlined,
-                  title: 'Categories',
-                  subtitle: 'Rename or add category names and icons — coming soon',
-                ),
-              ],
-            ),
-            const SizedBox(height: AppSpacing.lg),
-            SectionCard(
-              title: 'Appearance',
-              children: [
-                Wrap(
-                  spacing: AppSpacing.sm,
-                  runSpacing: AppSpacing.sm,
-                  children: AppThemeMode.values.map((mode) {
-                    return AppChoiceChip(
-                      label: mode.label,
-                      leading: Icon(mode.icon, size: 16, color: settings.themeMode == mode ? c.primary : c.onSurfaceVariant),
-                      selected: settings.themeMode == mode,
-                      onTap: () => update((s) => s.copyWith(themeMode: mode)),
-                    );
-                  }).toList(),
-                ),
-              ],
-            ),
-            const SizedBox(height: AppSpacing.lg),
-            PrivacyCard(settings: settings, onChanged: update),
-          ],
-        ),
       ),
     );
   }
@@ -4805,263 +5054,210 @@ linter:
 # https://dart.dev/guides/language/analysis-options
 </file>
 
-<file path="docs/design.md">
-# Design: Fuata
+<file path="android/app/src/main/kotlin/com/kinyuanexus/fuata/fuata/MainActivity.kt">
+package com.kinyuanexus.fuata.fuata
 
-**Version:** 0.1 · **Status:** Draft · **Related:** [requirements](requirements.md), [UI design brief](ui-design-brief.md)
+import android.content.Intent
+import android.provider.Settings
+import io.flutter.embedding.android.FlutterActivity
+import io.flutter.embedding.engine.FlutterEngine
+import io.flutter.plugin.common.MethodChannel
 
-This document records how Fuata is structured and why. It is deliberately short: diagrams first, then decision records (ADRs) for choices that would be costly to reverse.
+/**
+ * `fuata/listener_spike` channel: issue #18 only. Stores the Dart callback
+ * handle NotificationListener.kt needs, and opens Android's notification
+ * access settings. Throwaway — removed or replaced by real plugin wiring
+ * once #22 lands.
+ */
+class MainActivity : FlutterActivity() {
+    override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
+        super.configureFlutterEngine(flutterEngine)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "fuata/listener_spike")
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "setCallbackHandle" -> {
+                        val handle = (call.arguments as Number).toLong()
+                        NotificationListener.writeCallbackHandle(applicationContext, handle)
+                        result.success(null)
+                    }
+                    "openNotificationAccessSettings" -> {
+                        startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+                        result.success(null)
+                    }
+                    else -> result.notImplemented()
+                }
+            }
+    }
+}
+</file>
 
-## 1. Architecture
+<file path="android/app/src/main/kotlin/com/kinyuanexus/fuata/fuata/NotificationListener.kt">
+package com.kinyuanexus.fuata.fuata
 
-Three layers plus a thin Android platform layer. The **domain** layer is pure Dart (no Flutter imports) so the ledger, limit engine and parser can be unit-tested without a device.
+import android.app.Notification
+import android.content.Context
+import android.content.SharedPreferences
+import android.os.Handler
+import android.os.Looper
+import android.service.notification.NotificationListenerService
+import android.service.notification.StatusBarNotification
+import android.util.Log
+import io.flutter.embedding.engine.FlutterEngine
+import io.flutter.embedding.engine.dart.DartExecutor
+import io.flutter.embedding.engine.loader.FlutterLoader
+import io.flutter.plugin.common.MethodChannel
+import io.flutter.view.FlutterCallbackInformation
 
-```mermaid
-flowchart TB
-  subgraph UI["UI layer: Flutter widgets + Riverpod providers"]
-    Screens --> Providers
-  end
-  subgraph Domain["Domain layer: pure Dart"]
-    Models["Models"]
-    Ledger["Ledger: balances and totals"]
-    Limits["Limit engine: status"]
-    Parser["Template parser"]
-    Repos["Repository interfaces"]
-  end
-  subgraph Data["Data layer"]
-    Mock["In-memory repositories (UI-first)"]
-    Drift["drift / SQLite repositories"]
-  end
-  subgraph Platform["Android platform layer"]
-    Banner["Banner service: ongoing notification"]
-    Listener["NotificationListenerService"]
-    Share["Share / paste intake"]
-  end
-  Providers --> Ledger
-  Providers --> Limits
-  Providers --> Repos
-  Repos -.->|implemented by| Mock
-  Repos -.->|implemented by| Drift
-  Listener --> Parser
-  Share --> Parser
-  Parser --> Repos
-  Repos --> Banner
-```
+/**
+ * Issue #18 — SPIKE, throwaway, time-boxed to 2 hours.
+ *
+ * On *every* notification (no allow-list yet — that's #22), spins up a
+ * headless FlutterEngine, runs the Dart entry point registered by
+ * MainActivity, and asks it to write one row to fuata.sqlite. This proves
+ * (or disproves) that a background isolate can safely touch the same
+ * database file the UI isolate might have open at the same moment.
+ *
+ * Findings go in docs/design.md section 5, not here. This class is
+ * replaced by the real listener in #22.
+ */
+class NotificationListener: NotificationListenerService() {
 
-**Folder mapping**
+    override fun onNotificationPosted(sbn: StatusBarNotification) {
+        val handle = readCallbackHandle(applicationContext)
+        if (handle == null) {
+            Log.w(TAG, "No callback handle registered — open the app once first.")
+            return
+        }
 
-| Folder | Layer | Contents |
-|---|---|---|
-| `lib/ui/` | UI | `theme/`, `components/`, `screens/`, Riverpod providers |
-| `lib/domain/` | Domain | `models/`, `repositories/` (interfaces), ledger, limits, parser |
-| `lib/data/` | Data | `mock/` (in-memory), `db/` (drift) |
-| `lib/platform/` | Platform | Banner, listener entry point, share intake (added when needed) |
+        val packageName = sbn.packageName
+        val extras = sbn.notification.extras
+        val text = extras?.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString()
+            ?: extras?.getCharSequence(Notification.EXTRA_TEXT)?.toString()
+            ?: ""
 
-**UI-first approach.** Screens depend only on repository interfaces. Today they run on in-memory mocks; the drift implementations replace them in issue #13 without touching the screens (Riverpod provider overrides).
+        val loader = FlutterLoader()
+        loader.startInitialization(applicationContext)
+        loader.ensureInitializationCompleteAsync(
+            applicationContext,
+            null,
+            Handler(Looper.getMainLooper()),
+        ) {
+            val callbackInfo = FlutterCallbackInformation.lookupCallbackInformation(handle)
+            if (callbackInfo == null) {
+                Log.e(TAG, "Callback lookup failed for handle $handle")
+                return@ensureInitializationCompleteAsync
+            }
 
-### Capture flow
+            val engine = FlutterEngine(applicationContext)
+            val dartCallback = DartExecutor.DartCallback(
+                applicationContext.assets,
+                loader.findAppBundlePath(),
+                callbackInfo,
+            )
+            engine.dartExecutor.executeDartCallback(dartCallback)
 
-```mermaid
-sequenceDiagram
-  participant N as Android notification
-  participant L as Listener (background isolate)
-  participant P as Parser
-  participant DB as Local DB
-  participant B as Banner
-  N->>L: notification posted
-  L->>L: allow-listed app? if not, discard immediately
-  L->>P: match templates for that app
-  alt template matched
-    P->>DB: dedupe by code, insert transaction (pending or confirmed)
-    DB-->>B: data changed
-    B->>B: recompute status and update banner
-  else nothing matched
-    L->>DB: keep in "couldn't read" list (auto-purged)
-  end
-```
+            val bgChannel = MethodChannel(
+                engine.dartExecutor.binaryMessenger,
+                "fuata/listener_spike_bg",
+            )
 
-The listener runs in a background Flutter engine, separate from the UI isolate. Both open the same SQLite file, so the database must be safe for two isolates (drift isolate mode or WAL). This is the top project risk and gets a time-boxed spike (issue #18); findings are recorded in section 5.
+            bgChannel.setMethodCallHandler { call, result ->
+                if (call.method == "backgroundIsolateReady") {
+                    bgChannel.invokeMethod(
+                        "onNotification",
+                        mapOf("packageName" to packageName, "text" to text),
+                    )
+                    result.success(null)
+                    // Spike, not a long-lived worker — give the write a
+                    // moment then tear the engine down.
+                    Handler(Looper.getMainLooper()).postDelayed({ engine.destroy() }, 3000)
+                } else {
+                    result.notImplemented()
+                }
+            }
+        }
+    }
 
-## 2. Data model
+    companion object {
+        private const val TAG = "listener_spike"
+        private const val PREFS = "fuata_listener_spike"
+        private const val KEY_HANDLE = "callback_handle"
 
-```mermaid
-erDiagram
-  UNIT ||--o{ TRANSACTION : holds
-  CATEGORY |o--o{ TRANSACTION : labels
-  TEMPLATE |o--o{ TRANSACTION : created
-  UNIT ||--o{ TEMPLATE : "read by"
-  UNIT |o--o{ LIMIT_RULE : "may have"
-  TRANSACTION |o--o{ TRANSACTION : "fee of"
-  CAPTURE_SOURCE ||--o{ TEMPLATE : "matches messages from"
+        fun writeCallbackHandle(context: Context, handle: Long) {
+            prefs(context).edit().putLong(KEY_HANDLE, handle).apply()
+        }
 
-  UNIT {
-    text id PK
-    text name
-    text kind
-    text currency
-    text iconType
-    text iconValue
-    int colorValue
-    int openingBalanceMinor
-    int sortOrder
-    bool archived
-    int lastVerifiedAt
-    int createdAt
-  }
-  TRANSACTION {
-    text id PK
-    text unitId FK
-    text type
-    int amountMinor
-    text counterparty
-    text categoryId FK
-    text note
-    text code
-    int occurredAt
-    int createdAt
-    text source
-    text status
-    text transferGroupId
-    text parentId FK
-    text templateId FK
-    int balanceAfterMinor
-    text rawText
-  }
-  CATEGORY {
-    text id PK
-    text name
-    text emoji
-    int colorValue
-  }
-  LIMIT_RULE {
-    text id PK
-    text scope
-    text unitId FK
-    text period
-    int amountMinor
-    text currency
-    real warnAt
-    real dangerAt
-    bool enabled
-  }
-  TEMPLATE {
-    text id PK
-    text unitId FK
-    text captureSourceId FK
-    text name
-    text direction
-    text pattern
-    text fieldMapJson
-    text sampleText
-    int version
-    bool enabled
-  }
-  CAPTURE_SOURCE {
-    text id PK
-    text packageName
-    text displayName
-    bool enabled
-  }
-```
+        private fun readCallbackHandle(context: Context): Long? {
+            val v = prefs(context).getLong(KEY_HANDLE, -1L)
+            return if (v == -1L) null else v
+        }
 
-Supporting tables (not drawn): `unparsed_capture` (id, receivedAt, sourcePackage, text; auto-purged after 7 days) and `settings` (key/value: name, accent colour, detail level, Home headline and sections, banner options, theme).
+        private fun prefs(context: Context): SharedPreferences =
+            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+    }
+}
+</file>
 
-### Field rules
+<file path="android/app/src/main/AndroidManifest.xml">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application
+        android:label="fuata"
+        android:name="${applicationName}"
+        android:icon="@mipmap/ic_launcher">
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:taskAffinity=""
+            android:theme="@style/LaunchTheme"
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
+            android:hardwareAccelerated="true"
+            android:windowSoftInputMode="adjustResize">
+            <!-- Specifies an Android theme to apply to this Activity as soon as
+                 the Android process has started. This theme is visible to the user
+                 while the Flutter UI initializes. After that, this theme continues
+                 to determine the Window background behind the Flutter UI. -->
+            <meta-data
+              android:name="io.flutter.embedding.android.NormalTheme"
+              android:resource="@style/NormalTheme"
+              />
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity>
+        <!-- Don't delete the meta-data below.
+             This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
+        <meta-data
+            android:name="flutterEmbedding"
+            android:value="2" />
 
-| Field | Rule |
-|---|---|
-| `amountMinor` | **Signed effect on the unit's balance**, integer minor units (e.g. cents). Outflows are negative. |
-| `type` | `spent`, `got`, `moved`, `adjustment` |
-| `status` | `confirmed` or `pending`. **Pending rows are excluded from balances and limits** until confirmed; Home shows "N waiting to confirm". |
-| `source` | `manual`, `shared`, `notification` |
-| `transferGroupId` | Two `moved` rows (one negative, one positive) share a group id. Excluded from spending and income totals. |
-| `parentId` | A fee is its own `spent` row pointing at the transaction it belongs to, so fees count as spending automatically. |
-| `code` | Provider transaction code. Unique per unit when not null (dedupe). |
-| `occurredAt` | UTC epoch milliseconds; "today" is computed in the device's local time zone. |
-| `balanceAfterMinor` | Balance quoted in a message, used only for reconciliation checks. |
-| `rawText` | Original message, **null by default** (privacy); only kept if the user opts in. |
-| `LIMIT_RULE.scope` | `overall` or `unit`. Overall limits cover units in the limit's currency only (v0.1 is effectively single-currency). |
+        <!-- Issue #18 spike: throwaway notification listener, no allow-list
+             yet (#22). Requires the user to grant special access in
+             Settings > Notification access; MainActivity's
+             openNotificationAccessSettings() opens that screen directly. -->
+        <service
+            android:name=".NotificationListener"
+            android:label="Fuata capture (spike)"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+    </application>
+    <!-- Required to query activities that can process text, see:
+         https://developer.android.com/training/package-visibility and
+         https://developer.android.com/reference/android/content/Intent#ACTION_PROCESS_TEXT.
 
-### Derived values (never stored)
-
-- **Balance of a unit** = `openingBalanceMinor + SUM(amountMinor)` over its confirmed transactions.
-- **Spent in a period** = `-SUM(amountMinor)` where `type = 'spent'` and confirmed.
-- **Status** = ratio of spent to limit: below `warnAt` (0.7) Safe; below `dangerAt` (0.9) Warning; below 1.0 Danger; at or above 1.0, or any unit below zero, Overdraft.
-- **Periods**: day = local calendar day; week starts Monday; month = calendar month (configurable later).
-
-## 3. Key flows
-
-| Flow | Steps |
-|---|---|
-| Add manually | UI → repository insert (confirmed) → providers recompute → banner update |
-| Move money | One action creates two `moved` rows with the same `transferGroupId` |
-| Update a balance | User enters the true balance; app inserts an `adjustment` row for the difference |
-| Capture | Section 1 sequence; pending unless auto-accept is on for that template |
-| Reconcile | If `balanceAfterMinor` differs from the computed balance, flag the unit and offer an adjustment |
-
-## 4. Decision records
-
-### ADR-001: Local database with drift (SQLite)
-- **Context:** Needs relational queries (sums by period, unit, person), reactive UI, migrations, and access from a background isolate.
-- **Decision:** drift on SQLite.
-- **Why:** typed queries, streams for reactive screens, built-in migrations, isolate support. Key-value stores (Hive) and object stores fit aggregations poorly; raw `sqflite` lacks typed queries and streams.
-- **Consequences:** Code generation (`build_runner`); the two-isolate access must be tested early.
-- **Implemented (#13):** schema lives in `lib/data/db/tables.dart` — one table per ER-diagram entity, `@DataClassName`-renamed so generated row classes (`UnitRow`, `TransactionRow`, `LimitRuleRow`, ...) don't collide with the domain models of nearly the same name. `AppDatabase` (`lib/data/db/app_database.dart`) opens a single file in app-private storage via a `LazyDatabase`, enforces `PRAGMA foreign_keys = ON`, and starts at `schemaVersion 1` with an `onUpgrade` stub ready for the first real migration. `Drift*Repository` classes (`lib/data/db/drift_repositories.dart`) implement the same four interfaces the mock repos do and are now the default in `app_providers.dart`; screens didn't change. Category, Template, CaptureSource and UnparsedCapture have tables but no repository yet — those land with the features that use them (#19-#22).
-
-### ADR-002: Riverpod for state management
-- **Decision:** `flutter_riverpod`.
-- **Why:** compile-time safety, easy testing, and provider overrides let the same screens run on mock or drift repositories, which is what UI-first needs.
-- **Alternatives:** Bloc (more boilerplate for a solo four-day build), Provider (weaker testing story).
-
-### ADR-003: Money as integer minor units, currency per unit
-- **Decision:** All amounts are integers in the currency's minor unit; each unit has a currency code; a small lookup gives the exponent (2 for KES, 0 for JPY, and so on).
-- **Why:** floating point causes rounding errors in sums and comparisons.
-- **Consequences:** Formatting and parsing go through one helper (`intl`); v0.1 treats overall limits as single-currency.
-
-### ADR-004: Derive balances from the ledger
-- **Decision:** Balance = opening + sum of signed transactions; never stored.
-- **Why:** edits, deletions and imports can never leave a stale balance.
-- **Consequences:** Needs indexes on `(unitId, occurredAt)`; cache only if profiling shows a need (target: smooth at 5,000 rows).
-
-### ADR-005: Transfers as linked pairs; fees as child rows
-- **Decision:** Two signed `moved` rows share a `transferGroupId`; a fee is a separate `spent` row with `parentId`.
-- **Why:** keeps balance math a plain sum and excludes transfers from spending without special cases; fees automatically count as spending.
-- **Consequences:** The UI groups linked rows into one visual item.
-
-### ADR-006: Notification listener over SMS permission
-- **Context:** Reading SMS directly is the most reliable capture but is heavily restricted by Google Play policy.
-- **Decision:** Use `NotificationListenerService` (special access granted by the user) plus share/paste as a permission-free path; manual entry always works.
-- **Consequences:** Only sees what the SMS app shows (may be truncated); sideloaded builds hit Android's "restricted settings" step, so onboarding must explain it; some manufacturers kill background services. Everything not on the user's allow-list is discarded immediately.
-
-### ADR-007: Template-based parsing (user-labeled), not ML
-- **Decision:** The user pastes a sample and labels spans; the app generates a regex with typed groups. Multiple templates per unit.
-- **Why:** deterministic, fully offline, explainable, unit-testable; users can fix breakages themselves.
-- **Consequences:** Templates break when wording changes; unmatched messages go to a "couldn't read this" list that feeds template fixes.
-
-### ADR-008: Banner as an ongoing notification, not a foreground service
-- **Decision:** `flutter_local_notifications` ongoing notification, re-posted on each data change; the listener is started by Android itself.
-- **Why:** a foreground service is not needed, and newer Android versions limit data-sync foreground services.
-- **Consequences:** Users may swipe the banner away on newer Android; re-post on the next event. Colour is limited, so status is shown with emoji, a progress bar and an accent icon.
-
-### ADR-009: Local-only, no INTERNET permission
-- **Decision:** No network code, no telemetry, release manifest without `INTERNET`, fonts bundled as assets, Android auto-backup disabled.
-- **Consequences:** No crash reporting or sync; export/import by file is the only way data moves. Debug builds still include `INTERNET` for hot reload; only the release manifest is verified (issue #25).
-
-### ADR-010: No database encryption or app lock in v0.1
-- **Decision:** Ship v0.1 with an unencrypted SQLite file.
-- **Why:** time-boxed to four days; the data never leaves the device and auto-backup is off.
-- **Risk accepted:** anyone with a rooted or unlocked device could read the file.
-- **Mitigations now:** auto-backup off, amounts hidden in recents, redacted lock-screen banner by default.
-- **Planned:** SQLCipher with an Android Keystore key, plus app lock, in v1.1.
-
-## 5. Open items
-
-| Item | Status |
-|---|---|
-| Local database and repositories (issue #13) | **Done.** See ADR-001's "Implemented" note. |
-| Listener + DB from a background isolate (issue #18) | Pending: record outcome here. Now that the schema exists, the spike can open the same `fuata.sqlite` file from a second drift connection and confirm two isolates can write to it safely (drift's isolate mode, or WAL — see ADR-001 context). |
-| Final visual tokens (colours, type scale, radii) | Pending: copy from the implemented theme into a "Visual direction" section |
-| Which providers get bundled template presets | Deferred to v1.1 |
+         In particular, this is used by the Flutter engine in io.flutter.plugin.text.ProcessTextPlugin. -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.PROCESS_TEXT"/>
+            <data android:mimeType="text/plain"/>
+        </intent>
+    </queries>
+</manifest>
 </file>
 
 <file path="docs/requirements.md">
@@ -5544,6 +5740,284 @@ class MoneyTransaction {
       templateId: templateId,
       balanceAfterMinor: balanceAfterMinor,
       rawText: rawText,
+    );
+  }
+}
+</file>
+
+<file path="lib/platform/listener_spike.dart">
+// ---------------------------------------------------------------------------
+// Issue #18 — SPIKE, throwaway. Time-boxed to 2 hours.
+//
+// Goal (design.md section 5, "top project risk"): prove that a background
+// isolate, started by Android when the app is fully closed, can open the
+// *same* fuata.sqlite file the UI isolate has open and write a row safely.
+//
+// Deliberately minimal: no allow-list (#22), no template matching (#19),
+// no dedupe. It logs exactly one UnparsedCaptures row per notification so
+// the write path can be inspected afterwards. This file is replaced
+// entirely by the real listener in #22 — do not build on top of it.
+// ---------------------------------------------------------------------------
+import 'dart:ui';
+
+import 'package:flutter/cupertino.dart';
+import 'package:flutter/services.dart';
+
+import '../data/db/app_database.dart';
+
+const _spikeChannel = MethodChannel('fuata/listener_spike');
+
+/// Call once from `main()` on every app start (UI isolate). Registers the
+/// Dart entry point below with Android so the native side can find it
+/// again later, from a process that never ran Dart's `main()` — i.e. when
+/// Android starts the listener service after the app has been swiped away.
+Future<void> registerListenerSpikeCallback() async {
+  final handle = PluginUtilities.getCallbackHandle(_backgroundDispatcher);
+  if (handle == null) {
+    // Only happens if _backgroundDispatcher loses its @pragma below or is
+    // torn out by tree-shaking — fail loud during the spike, not silently.
+    print('[listener_spike] could not obtain a callback handle');
+    return;
+  }
+  await _spikeChannel.invokeMethod('setCallbackHandle', handle.toRawHandle());
+}
+
+/// Opens Android's notification-access settings so the user can grant this
+/// app special access. No permission_handler-style plugin for the spike —
+/// just an implicit intent from the native side.
+Future<void> openNotificationAccessSettings() async {
+  _spikeChannel.invokeMethod('openNotificationAccessSettings');
+}
+
+/// The background entry point. Runs in its own isolate, in its own
+/// FlutterEngine, started by NotificationListener.kt — this is NOT the UI
+/// isolate. `vm:entry-point` stops the AOT compiler tree-shaking a
+/// function that's only ever reached from native code.
+@pragma('vm:entry-point')
+void _backgroundDispatcher() {
+  WidgetsFlutterBinding.ensureInitialized();
+  const channel = MethodChannel('fuata/listener_spike_bg');
+
+  channel.setMethodCallHandler((call) async {
+    if (call.method != 'onNotification') return null;
+    final args = (call.arguments as Map).cast<String, Object?>();
+    final packageName = args['packageName'] as String? ?? 'unknown';
+    final text = args['text'] as String? ?? '';
+
+    final stopwatch = Stopwatch()..start();
+    // A *second* connection to the same file the UI isolate has open —
+    // exactly the scenario design.md flags as the top risk: two isolates,
+    // two AppDatabase instances, one fuata.sqlite.
+    final db = AppDatabase();
+    try {
+      await db
+          .into(db.unparsedCaptures)
+          .insert(
+        UnparsedCapturesCompanion.insert(
+          id: 'spike-${DateTime.now().microsecondsSinceEpoch}',
+          receivedAt: DateTime.now().toUtc(),
+          sourcePackage: packageName,
+          rawText: text,
+        ),
+      );
+      print(
+        '[listener_spike] wrote 1 row from $packageName '
+            'in ${stopwatch.elapsedMilliseconds}ms',
+      );
+    } catch (e, st) {
+      print('[listener_spike] FAILED to write: $e\n$st');
+    } finally {
+      await db.close();
+    }
+    return null;
+  });
+
+  // Tell the native side this isolate is alive and ready for onNotification.
+  channel.invokeMethod('backgroundIsolateReady');
+}
+</file>
+
+<file path="lib/ui/screens/me_screen.dart">
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../../domain/models/settings.dart';
+import '../../platform/listener_spike.dart';
+import '../../widgets/coming_soon_row.dart';
+import '../../widgets/personalization/action_row.dart';
+import '../../widgets/personalization/detail_level_example.dart';
+import '../../widgets/personalization/label.dart';
+import '../../widgets/personalization/privayc_card.dart';
+import '../../widgets/personalization/profile_block.dart';
+import '../../widgets/personalization/section_card.dart';
+import '../../widgets/personalization/toggle_row.dart';
+import '../providers/app_providers.dart';
+import '../theme/app_colors.dart';
+import '../theme/app_spacing.dart';
+import '../theme/app_typography.dart';
+import '../../widgets/app_chips.dart';
+
+/// Me: settings and personalisation (ui-design-brief.md section 7.12,
+/// US-13/US-14/US-16). Every control here writes straight through
+/// `settingsRepositoryProvider` — same UI-first shape as the rest of the
+/// app (screens depend on the repository interface; today that's
+/// `MockSettingsRepository`, an in-memory store, same as units/
+/// transactions/limits until #13).
+///
+/// Limits & alerts, Banner, and Message reading each get their own
+/// dedicated screens in later issues (#15/#17, #16/#17, #19-#22) — shown
+/// here as `ComingSoonRow`s that link out, rather than half-built here.
+class MeScreen extends ConsumerWidget {
+  const MeScreen({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final c = context.colors;
+    final settings = ref.watch(currentSettingsProvider);
+    final repo = ref.read(settingsRepositoryProvider);
+
+    void update(AppSettings Function(AppSettings) fn) {
+      repo.updateSettings(fn(settings));
+    }
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('Me')),
+      body: SafeArea(
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(
+            AppSpacing.margin, AppSpacing.sm, AppSpacing.margin, AppSpacing.xl,
+          ),
+          children: [
+            ProfileBlock(settings: settings, onChanged: update),
+            const SizedBox(height: AppSpacing.lg),
+            SectionCard(
+              title: 'Home',
+              children: [
+                Label('Headline number'),
+                const SizedBox(height: AppSpacing.sm),
+                Wrap(
+                  spacing: AppSpacing.sm,
+                  runSpacing: AppSpacing.sm,
+                  children: HomeHeadline.values.map((h) {
+                    return AppChoiceChip(
+                      label: h.label,
+                      selected: settings.homeHeadline == h,
+                      onTap: () => update((s) => s.copyWith(homeHeadline: h)),
+                    );
+                  }).toList(),
+                ),
+                const SizedBox(height: AppSpacing.md),
+                Label('Sections'),
+                const SizedBox(height: AppSpacing.xs),
+                ...HomeSection.values.map((section) {
+                  final on = settings.homeSections.contains(section);
+                  return ToggleRow(
+                    title: section.label,
+                    subtitle: section.description,
+                    value: on,
+                    onChanged: (v) => update((s) {
+                      final next = Set<HomeSection>.from(s.homeSections);
+                      if (v) {
+                        next.add(section);
+                      } else {
+                        next.remove(section);
+                      }
+                      return s.copyWith(homeSections: next);
+                    }),
+                  );
+                }),
+              ],
+            ),
+            const SizedBox(height: AppSpacing.lg),
+            SectionCard(
+              title: 'Detail level',
+              children: [
+                Wrap(
+                  spacing: AppSpacing.sm,
+                  runSpacing: AppSpacing.sm,
+                  children: DetailLevel.values.map((lvl) {
+                    return AppChoiceChip(
+                      label: lvl.label,
+                      selected: settings.detailLevel == lvl,
+                      onTap: () => update((s) => s.copyWith(detailLevel: lvl)),
+                    );
+                  }).toList(),
+                ),
+                const SizedBox(height: AppSpacing.md),
+                Text(
+                  settings.detailLevel.description,
+                  style: AppTypography.bodySm.copyWith(color: c.onSurfaceVariant),
+                ),
+                const SizedBox(height: AppSpacing.sm),
+                DetailLevelExample(level: settings.detailLevel),
+              ],
+            ),
+            const SizedBox(height: AppSpacing.lg),
+            SectionCard(
+              title: 'Limits, banner and messages',
+              children: [
+                ActionRow(
+                  icon: Icons.notifications_active_outlined,
+                  title: 'Notification access',
+                  subtitle:
+                  'Grant Fuata permission to read bank/mobile-money notifications.',
+                  onTap: openNotificationAccessSettings,
+                ),
+                const SizedBox(height: AppSpacing.sm),
+                const ComingSoonRow(
+                  icon: Icons.mark_email_read_outlined,
+                  title: 'Message reading rules',
+                  subtitle: 'Rules and allowed apps for auto-catch — coming in #19–#22',
+                ),
+                const SizedBox(height: AppSpacing.sm),
+                ComingSoonRow(
+                  icon: Icons.speed_rounded,
+                  title: 'Limits & alerts',
+                  subtitle: 'Daily, weekly and monthly limits, plus nudges — coming in #15/#17',
+                ),
+                SizedBox(height: AppSpacing.sm),
+                ComingSoonRow(
+                  icon: Icons.notifications_active_outlined,
+                  title: 'Banner',
+                  subtitle: 'Choose what the notification banner shows — coming in #16/#17',
+                ),
+                SizedBox(height: AppSpacing.sm),
+                ComingSoonRow(
+                  icon: Icons.mark_email_read_outlined,
+                  title: 'Message reading',
+                  subtitle: 'Rules and allowed apps for auto-catch — coming in #19-#22',
+                ),
+                SizedBox(height: AppSpacing.sm),
+                ComingSoonRow(
+                  icon: Icons.sell_outlined,
+                  title: 'Categories',
+                  subtitle: 'Rename or add category names and icons — coming soon',
+                ),
+              ],
+            ),
+            const SizedBox(height: AppSpacing.lg),
+            SectionCard(
+              title: 'Appearance',
+              children: [
+                Wrap(
+                  spacing: AppSpacing.sm,
+                  runSpacing: AppSpacing.sm,
+                  children: AppThemeMode.values.map((mode) {
+                    return AppChoiceChip(
+                      label: mode.label,
+                      leading: Icon(mode.icon, size: 16, color: settings.themeMode == mode ? c.primary : c.onSurfaceVariant),
+                      selected: settings.themeMode == mode,
+                      onTap: () => update((s) => s.copyWith(themeMode: mode)),
+                    );
+                  }).toList(),
+                ),
+              ],
+            ),
+            const SizedBox(height: AppSpacing.lg),
+            PrivacyCard(settings: settings, onChanged: update),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -6490,6 +6964,74 @@ class GroupedList extends StatelessWidget {
 }
 </file>
 
+<file path="lib/widgets/personalization/action_row.dart">
+import 'package:flutter/material.dart';
+
+import '../../ui/theme/app_colors.dart';
+import '../../ui/theme/app_spacing.dart';
+import '../../ui/theme/app_typography.dart';
+
+/// A working, tappable action row — same bordered-card family as
+/// ComingSoonRow (icon, title, subtitle) but with a primary-tinted
+/// border and a trailing chevron so it reads as "this does something".
+///
+/// First used for the #18 spike's "open notification access settings"
+/// button; stays after #22 lands, replacing that ComingSoonRow rather
+/// than sitting alongside it.
+class ActionRow extends StatelessWidget {
+  const ActionRow({
+    super.key,
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(AppSpacing.unitTileRadius),
+        child: Container(
+          padding: const EdgeInsets.all(AppSpacing.md),
+          decoration: BoxDecoration(
+            border: Border.all(color: c.primary.withValues(alpha: 0.45)),
+            borderRadius: BorderRadius.circular(AppSpacing.unitTileRadius),
+          ),
+          child: Row(
+            children: [
+              Icon(icon, color: c.primary),
+              const SizedBox(width: AppSpacing.sm),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(title,
+                        style: AppTypography.bodyMd.copyWith(color: c.onSurface)),
+                    Text(subtitle,
+                        style: AppTypography.bodySm
+                            .copyWith(color: c.onSurfaceVariant)),
+                  ],
+                ),
+              ),
+              Icon(Icons.chevron_right_rounded, color: c.onSurfaceVariant),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+</file>
+
 <file path="lib/widgets/sheets/transaction_detail_sheet.dart">
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -7032,6 +7574,275 @@ Spending is scattered across cash, mobile money and bank transactions, and recon
 Flutter (Android), Riverpod, drift/SQLite, local notifications. No backend.
 </file>
 
+<file path="docs/design.md">
+# Design: Fuata
+
+**Version:** 0.1 · **Status:** Draft · **Related:** [requirements](requirements.md), [UI design brief](ui-design-brief.md)
+
+This document records how Fuata is structured and why. It is deliberately short: diagrams first, then decision records (ADRs) for choices that would be costly to reverse.
+
+## 1. Architecture
+
+Three layers plus a thin Android platform layer. The **domain** layer is pure Dart (no Flutter imports) so the ledger, limit engine and parser can be unit-tested without a device.
+
+```mermaid
+flowchart TB
+  subgraph UI["UI layer: Flutter widgets + Riverpod providers"]
+    Screens --> Providers
+  end
+  subgraph Domain["Domain layer: pure Dart"]
+    Models["Models"]
+    Ledger["Ledger: balances and totals"]
+    Limits["Limit engine: status"]
+    Parser["Template parser"]
+    Repos["Repository interfaces"]
+  end
+  subgraph Data["Data layer"]
+    Mock["In-memory repositories (UI-first)"]
+    Drift["drift / SQLite repositories"]
+  end
+  subgraph Platform["Android platform layer"]
+    Banner["Banner service: ongoing notification"]
+    Listener["NotificationListenerService"]
+    Share["Share / paste intake"]
+  end
+  Providers --> Ledger
+  Providers --> Limits
+  Providers --> Repos
+  Repos -.->|implemented by| Mock
+  Repos -.->|implemented by| Drift
+  Listener --> Parser
+  Share --> Parser
+  Parser --> Repos
+  Repos --> Banner
+```
+
+**Folder mapping**
+
+| Folder | Layer | Contents |
+|---|---|---|
+| `lib/ui/` | UI | `theme/`, `components/`, `screens/`, Riverpod providers |
+| `lib/domain/` | Domain | `models/`, `repositories/` (interfaces), ledger, limits, parser |
+| `lib/data/` | Data | `mock/` (in-memory), `db/` (drift) |
+| `lib/platform/` | Platform | Banner, listener entry point, share intake (added when needed) |
+
+**UI-first approach.** Screens depend only on repository interfaces. Today they run on in-memory mocks; the drift implementations replace them in issue #13 without touching the screens (Riverpod provider overrides).
+
+### Capture flow
+
+```mermaid
+sequenceDiagram
+  participant N as Android notification
+  participant L as Listener (background isolate)
+  participant P as Parser
+  participant DB as Local DB
+  participant B as Banner
+  N->>L: notification posted
+  L->>L: allow-listed app? if not, discard immediately
+  L->>P: match templates for that app
+  alt template matched
+    P->>DB: dedupe by code, insert transaction (pending or confirmed)
+    DB-->>B: data changed
+    B->>B: recompute status and update banner
+  else nothing matched
+    L->>DB: keep in "couldn't read" list (auto-purged)
+  end
+```
+
+The listener runs in a background Flutter engine, separate from the UI isolate. Both open the same SQLite file, so the database must be safe for two isolates (drift isolate mode or WAL). This is the top project risk and gets a time-boxed spike (issue #18); findings are recorded in section 5.
+
+## 2. Data model
+
+```mermaid
+erDiagram
+  UNIT ||--o{ TRANSACTION : holds
+  CATEGORY |o--o{ TRANSACTION : labels
+  TEMPLATE |o--o{ TRANSACTION : created
+  UNIT ||--o{ TEMPLATE : "read by"
+  UNIT |o--o{ LIMIT_RULE : "may have"
+  TRANSACTION |o--o{ TRANSACTION : "fee of"
+  CAPTURE_SOURCE ||--o{ TEMPLATE : "matches messages from"
+
+  UNIT {
+    text id PK
+    text name
+    text kind
+    text currency
+    text iconType
+    text iconValue
+    int colorValue
+    int openingBalanceMinor
+    int sortOrder
+    bool archived
+    int lastVerifiedAt
+    int createdAt
+  }
+  TRANSACTION {
+    text id PK
+    text unitId FK
+    text type
+    int amountMinor
+    text counterparty
+    text categoryId FK
+    text note
+    text code
+    int occurredAt
+    int createdAt
+    text source
+    text status
+    text transferGroupId
+    text parentId FK
+    text templateId FK
+    int balanceAfterMinor
+    text rawText
+  }
+  CATEGORY {
+    text id PK
+    text name
+    text emoji
+    int colorValue
+  }
+  LIMIT_RULE {
+    text id PK
+    text scope
+    text unitId FK
+    text period
+    int amountMinor
+    text currency
+    real warnAt
+    real dangerAt
+    bool enabled
+  }
+  TEMPLATE {
+    text id PK
+    text unitId FK
+    text captureSourceId FK
+    text name
+    text direction
+    text pattern
+    text fieldMapJson
+    text sampleText
+    int version
+    bool enabled
+  }
+  CAPTURE_SOURCE {
+    text id PK
+    text packageName
+    text displayName
+    bool enabled
+  }
+```
+
+Supporting tables (not drawn): `unparsed_capture` (id, receivedAt, sourcePackage, text; auto-purged after 7 days) and `settings` (key/value: name, accent colour, detail level, Home headline and sections, banner options, theme).
+
+### Field rules
+
+| Field | Rule |
+|---|---|
+| `amountMinor` | **Signed effect on the unit's balance**, integer minor units (e.g. cents). Outflows are negative. |
+| `type` | `spent`, `got`, `moved`, `adjustment` |
+| `status` | `confirmed` or `pending`. **Pending rows are excluded from balances and limits** until confirmed; Home shows "N waiting to confirm". |
+| `source` | `manual`, `shared`, `notification` |
+| `transferGroupId` | Two `moved` rows (one negative, one positive) share a group id. Excluded from spending and income totals. |
+| `parentId` | A fee is its own `spent` row pointing at the transaction it belongs to, so fees count as spending automatically. |
+| `code` | Provider transaction code. Unique per unit when not null (dedupe). |
+| `occurredAt` | UTC epoch milliseconds; "today" is computed in the device's local time zone. |
+| `balanceAfterMinor` | Balance quoted in a message, used only for reconciliation checks. |
+| `rawText` | Original message, **null by default** (privacy); only kept if the user opts in. |
+| `LIMIT_RULE.scope` | `overall` or `unit`. Overall limits cover units in the limit's currency only (v0.1 is effectively single-currency). |
+
+### Derived values (never stored)
+
+- **Balance of a unit** = `openingBalanceMinor + SUM(amountMinor)` over its confirmed transactions.
+- **Spent in a period** = `-SUM(amountMinor)` where `type = 'spent'` and confirmed.
+- **Status** = ratio of spent to limit: below `warnAt` (0.7) Safe; below `dangerAt` (0.9) Warning; below 1.0 Danger; at or above 1.0, or any unit below zero, Overdraft.
+- **Periods**: day = local calendar day; week starts Monday; month = calendar month (configurable later).
+
+## 3. Key flows
+
+| Flow | Steps |
+|---|---|
+| Add manually | UI → repository insert (confirmed) → providers recompute → banner update |
+| Move money | One action creates two `moved` rows with the same `transferGroupId` |
+| Update a balance | User enters the true balance; app inserts an `adjustment` row for the difference |
+| Capture | Section 1 sequence; pending unless auto-accept is on for that template |
+| Reconcile | If `balanceAfterMinor` differs from the computed balance, flag the unit and offer an adjustment |
+
+## 4. Decision records
+
+### ADR-001: Local database with drift (SQLite)
+- **Context:** Needs relational queries (sums by period, unit, person), reactive UI, migrations, and access from a background isolate.
+- **Decision:** drift on SQLite.
+- **Why:** typed queries, streams for reactive screens, built-in migrations, isolate support. Key-value stores (Hive) and object stores fit aggregations poorly; raw `sqflite` lacks typed queries and streams.
+- **Consequences:** Code generation (`build_runner`); the two-isolate access must be tested early.
+- **Implemented (#13):** schema lives in `lib/data/db/tables.dart` — one table per ER-diagram entity, `@DataClassName`-renamed so generated row classes (`UnitRow`, `TransactionRow`, `LimitRuleRow`, ...) don't collide with the domain models of nearly the same name. `AppDatabase` (`lib/data/db/app_database.dart`) opens a single file in app-private storage via a `LazyDatabase`, enforces `PRAGMA foreign_keys = ON`, and starts at `schemaVersion 1` with an `onUpgrade` stub ready for the first real migration. `Drift*Repository` classes (`lib/data/db/drift_repositories.dart`) implement the same four interfaces the mock repos do and are now the default in `app_providers.dart`; screens didn't change. Category, Template, CaptureSource and UnparsedCapture have tables but no repository yet — those land with the features that use them (#19-#22).
+
+### ADR-002: Riverpod for state management
+- **Decision:** `flutter_riverpod`.
+- **Why:** compile-time safety, easy testing, and provider overrides let the same screens run on mock or drift repositories, which is what UI-first needs.
+- **Alternatives:** Bloc (more boilerplate for a solo four-day build), Provider (weaker testing story).
+
+### ADR-003: Money as integer minor units, currency per unit
+- **Decision:** All amounts are integers in the currency's minor unit; each unit has a currency code; a small lookup gives the exponent (2 for KES, 0 for JPY, and so on).
+- **Why:** floating point causes rounding errors in sums and comparisons.
+- **Consequences:** Formatting and parsing go through one helper (`intl`); v0.1 treats overall limits as single-currency.
+
+### ADR-004: Derive balances from the ledger
+- **Decision:** Balance = opening + sum of signed transactions; never stored.
+- **Why:** edits, deletions and imports can never leave a stale balance.
+- **Consequences:** Needs indexes on `(unitId, occurredAt)`; cache only if profiling shows a need (target: smooth at 5,000 rows).
+
+### ADR-005: Transfers as linked pairs; fees as child rows
+- **Decision:** Two signed `moved` rows share a `transferGroupId`; a fee is a separate `spent` row with `parentId`.
+- **Why:** keeps balance math a plain sum and excludes transfers from spending without special cases; fees automatically count as spending.
+- **Consequences:** The UI groups linked rows into one visual item.
+
+### ADR-006: Notification listener over SMS permission
+- **Context:** Reading SMS directly is the most reliable capture but is heavily restricted by Google Play policy.
+- **Decision:** Use `NotificationListenerService` (special access granted by the user) plus share/paste as a permission-free path; manual entry always works.
+- - **Consequences:** Only sees what the SMS app shows (may be truncated); sideloaded builds hit Android's "restricted settings" step, so onboarding must explain it; some manufacturers kill background services (**see §5.1 for a confirmed MIUI case: the listener is granted but not bound unless the grant goes through the UI toggle**). Everything not on the user's allow-list is discarded immediately.
+
+### ADR-007: Template-based parsing (user-labeled), not ML
+- **Decision:** The user pastes a sample and labels spans; the app generates a regex with typed groups. Multiple templates per unit.
+- **Why:** deterministic, fully offline, explainable, unit-testable; users can fix breakages themselves.
+- **Consequences:** Templates break when wording changes; unmatched messages go to a "couldn't read this" list that feeds template fixes.
+
+### ADR-008: Banner as an ongoing notification, not a foreground service
+- **Decision:** `flutter_local_notifications` ongoing notification, re-posted on each data change; the listener is started by Android itself.
+- **Why:** a foreground service is not needed, and newer Android versions limit data-sync foreground services.
+- **Consequences:** Users may swipe the banner away on newer Android; re-post on the next event. Colour is limited, so status is shown with emoji, a progress bar and an accent icon.
+
+### ADR-009: Local-only, no INTERNET permission
+- **Decision:** No network code, no telemetry, release manifest without `INTERNET`, fonts bundled as assets, Android auto-backup disabled.
+- **Consequences:** No crash reporting or sync; export/import by file is the only way data moves. Debug builds still include `INTERNET` for hot reload; only the release manifest is verified (issue #25).
+
+### ADR-010: No database encryption or app lock in v0.1
+- **Decision:** Ship v0.1 with an unencrypted SQLite file.
+- **Why:** time-boxed to four days; the data never leaves the device and auto-backup is off.
+- **Risk accepted:** anyone with a rooted or unlocked device could read the file.
+- **Mitigations now:** auto-backup off, amounts hidden in recents, redacted lock-screen banner by default.
+- **Planned:** SQLCipher with an Android Keystore key, plus app lock, in v1.1.
+
+## 5. Open items
+
+| Item | Status |
+|---|---|
+| Local database and repositories (issue #13) | **Done.** See ADR-001's "Implemented" note. |
+| Listener + DB from a background isolate (issue #18) | **Done.** See §5.1 below. ||
+| Final visual tokens (colours, type scale, radii) | Pending: copy from the implemented theme into a "Visual direction" section |
+| Which providers get bundled template presets | Deferred to v1.1 |
+
+### 5.1 Spike findings — listener + background isolate (issue #18)
+
+**Question.** Can a background isolate, started by Android when the app is not running, safely open the same `fuata.sqlite` the UI isolate has open and write to it? This was ADR-001's top project risk.
+
+**Answer: yes.** Tested on a Xiaomi/[model], Android [version], MIUI, debug build. Notifications captured reliably across four scenarios — foreground, backgrounded, rapid-fire dispatch, and post-reboot-without-launching-the-app — with no `SQLITE_BUSY`, no `FAILED to write`, and no crashes. `NativeDatabase.createInBackground` is confirmed safe for two isolates on the same file. ADR-001's top risk is closed.
+
+**MIUI-specific prerequisite (recorded for #22).** `cmd notification allow_listener` and direct edits to `Settings.Secure.enabled_notification_listeners` are not sufficient on MIUI — the grant is reported as active, but the system never calls `bindService` and Fuata never appears in `dumpsys notification`'s "Live notification listeners" section. Notifications are silently dropped with no `onNotificationPosted` callback. The listener only binds after toggling the grant **off→on through Settings → Notification access** (the UI path, which goes through `MiuiSecurityCenter`), with Autostart on. Once bound, capture survives backgrounding, rapid-fire dispatch, and reboot — no "open the app after reboot" guidance is needed.
+
+**Known gap for #22 (not a spike failure).** `NotificationListener.kt`'s text extraction writes `sbn.tag` into `raw_text` instead of the notification body on this device. Confirmed against two separate tests. The real listener needs an extras-walk helper that checks `EXTRA_TITLE`, `EXTRA_TEXT`, `EXTRA_BIG_TEXT`, `EXTRA_SUB_TEXT`, `EXTRA_TEXT_LINES` and ticker text in a documented order, and explicitly excludes `sbn.tag`. Filed in #22.
+</file>
+
 <file path="lib/data/mock/mock_repositories.dart">
 import 'dart:async';
 
@@ -7391,111 +8202,6 @@ class _RootShellState extends State<RootShell> {
 }
 </file>
 
-<file path="docs/devlog.md">
-# Devlog
-
-A running, honest record of the build: goals, what got done, what broke, and why decisions were made. Newest day first. Keep entries short; this is raw material for the README, the changelog and interviews.
-
-*What broke / learned* and *Decisions*.
-
----
-
-## Day 4: Thu 24 Sep 2026 (planned)
-
-**Goals**
-- [ ] Summaries: today, week, month (#23)
-- [ ] JSON export/import (#24)
-- [ ] Remove `INTERNET` from release manifest, disable backup (#25)
-- [ ] Manual device test pass using `docs/testing.md` (#26)
-- [ ] Release v0.1.0: CHANGELOG, signed APK, README screenshots (#27)
-
-**Cut order if behind:** summaries first, then banner quick-add, then review inbox (auto-accept instead). Never cut ledger and limit-engine tests.
-
-**Done / What broke / Decisions:** _(fill in at the end of the day)_
-
----
-
-## Day 2 (cont.): Drift database and repositories (#13)
-
-**Done**
-- Wrote the drift schema (`lib/data/db/tables.dart`) covering every entity in design.md's ER diagram — Unit, Transaction, Category, LimitRule, Template, CaptureSource, UnparsedCapture, plus the settings key/value table — not just the four issue #13 names, since Transaction/Template/LimitRule already reference the others by id.
-- `AppDatabase` (`lib/data/db/app_database.dart`): single file in app-private storage, opened lazily, foreign keys enforced, `schemaVersion 1` with an `onUpgrade` stub for the next change.
-- `Drift*Repository` classes implement the same four interfaces (`UnitRepository`, `TransactionRepository`, `LimitRepository`, `SettingsRepository`) the mocks already did, and are now the default in `app_providers.dart` via a new `appDatabaseProvider`. No screen changed.
-- Settings are stored as loose key/value rows rather than typed columns, so adding one more personalisation toggle later never needs a migration; `DriftSettingsRepository` owns the mapping to/from `AppSettings` and falls back to `AppSettings.defaults` on a fresh install.
-- Round-trip tests in `test/data/db/app_database_test.dart` against an in-memory database: unit archive/unarchive, a linked `moved` pair, limit upsert-by-id, and settings defaults-then-save.
-
-**Decisions**
-- Renamed every generated drift data class with `@DataClassName` (`UnitRow`, `TransactionRow`, `LimitRuleRow`, ...) — drift's default naming would otherwise generate a `LimitRule` fighting with the domain model of the same name.
-- Enums stored as their `.name` string, not an int index: reordering an enum's cases can't silently reinterpret an old row as the wrong value.
-- Category, Template, CaptureSource and UnparsedCapture get tables now but no repository yet — deferred to the issues that build the features that use them (#19-#22), so this issue stays scoped to what #13 actually asked for.
-
-**What broke / learned**
-Nothing broke yet — the schema and repositories are new code with no prior implementation to reconcile against. The real test is still ahead: `dart run build_runner build` has to run before any of this compiles, and the two-isolate spike (#18) is where a schema written today either holds up or doesn't.
-
-**Time spent:** _~2 hours_
-
----
-
-## Day 3: Wed 23 Sep 2026 (planned)
-
-**Goals**
-- [ ] Template model and parser with tests (#19)
-- [ ] Rule builder UI (#20)
-- [ ] Share/paste to review inbox (#21)
-- [ ] Notification listener with allow-list and dedupe (#22)
-- [ ] Done when: a real notification creates a pending transaction and the banner updates
-
-**Done / What broke / Decisions:** _(fill in)_
-
----
-
-## Day 2: Tue 22 Sep 2026 (planned)
-
-**Goals**
-- [x] Finish Home screen (#8) properly wired to the real theme/status system
-- [X] Add-transaction sheet (#9)
-- [X] Activity screen (#10)
-- [X] Drift database and repositories (#13) — domain models, ledger and mock repos already existed from Monday; real SQLite still to do
-- [ ] Banner (#16) and the 2-hour listener spike (#18)
-
-  **Done**
-- Built the theme and component layer separately from Home (StatusPill, StatusRingCard, UnitCard, TransactionRow, AppChoiceChip, WordLabelChip, `AppColors` as a `ThemeExtension`).
-- Caught two real duplications while reconciling that work with yesterday's Home screen: a second status enum (`BudgetStatus` alongside the domain's `SpendStatus`) and a `MoneyUnit` enum in `unit_card.dart` that silently shadowed the actual `MoneyUnit` model.
-- Fixed by making `SpendStatus` the single status source of truth (presentation extensions in `app_status.dart`), and switching `UnitCard` to the domain's `UnitKind`. Rewired `home_screen.dart` to use the real widgets and theme tokens throughout — no more hardcoded hex colors or private duplicate widgets.
-- Added `Money.majorValue` and `currencySymbol()` as a documented, display-only bridge between integer minor units and the widgets' `double` + symbol API.
-  **What broke / learned**
-  Building the theme/components and Home screen as separate pieces (mine from Monday, yours from the same day) meant they never got reconciled until today — Home kept working the whole time, so nothing *looked* broken, but it was quietly running on placeholder colors instead of the real design system. Lesson: when two people (or two sessions) build adjacent layers in parallel, integrate them the same day rather than letting each "work" in isolation. `flutter analyze` didn't catch the `MoneyUnit` collision because the two types never got imported into the same file — worth remembering that the analyzer won't save you from a naming collision unless something actually forces both into scope together.
-  Mock repos looked done but weren't reactive (async* yields once, stream closes). New transactions silently vanished until app restart. Fixed with a small broadcast-stream store shared across all three mock repos.
-  **Time spent:** _3hours_
-
----
-
-## Day 1: Mon 21 Sep 2026
-
-**Goals**
-- [x] Repo, issues, milestones and docs set up from the terminal
-- [x] Requirements document (#2) and UI design brief (#3)
-- [x] Pick a name and check it for collisions
-- [x] Design doc with data model and ADRs (#4)
-- [x] App theme and personalisation shell (#6)
-- [x] Devlog and testing checklist (#5) *(this commit)*
-  **Done**
-- Created the private repo and ran the setup script: 13 labels, 2 milestones, 27 MVP issues and 12 backlog issues.
-- Scaffolded the Flutter project (Android only, minSdk 26) with a layered folder structure: `ui/`, `domain/`, `data/`.
-- Wrote `requirements.md`, `ui-design-brief.md`, `design.md` (architecture, ER model, 10 ADRs) and the issue plan.
-- Implemented the theme and personalisation shell (#6).
-  **Decisions**
-- **Name: Fuata** (Swahili, "follow"). Checked against Play Store listings, GitHub and web search. Rejected *Pesa Leo* (an existing Tanzanian loan app), *Baki* (an iOS expense tracker with nearly the same pitch), *Kiasi* (an existing Tanzanian savings and budgeting app), and the whole "Pesa___" family (saturated, and associated with loan apps, a bad fit for a privacy-first tracker).
-- **UI first, engine second:** screens depend on repository interfaces and run on in-memory mocks; drift replaces them later without touching the screens.
-- **Signed `amountMinor`:** balance is a plain sum; transfers are linked pairs; fees are child rows (ADR-005).
-- **No encryption in v0.1:** time-boxed, mitigated by disabling backup; SQLCipher planned for v1.1 (ADR-010).
-  **What broke / learned:** Nothing broke; the day was scaffolding and docs. The main lesson carried into Day 2: building the theme/components and the screens that consume them without checking them against each other the same day let them drift apart quietly (see Day 2).
-
-**Time spent:** _3hours_
-
-**Tomorrow:** see Day 2.
-</file>
-
 <file path="lib/ui/providers/app_providers.dart">
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -7689,6 +8395,165 @@ flutter:
           weight: 600
         - asset: assets/fonts/PlusJakartaSans-Bold.ttf
           weight: 700
+</file>
+
+<file path="docs/devlog.md">
+# Devlog
+
+A running, honest record of the build: goals, what got done, what broke, and why decisions were made. Newest day first. Keep entries short; this is raw material for the README, the changelog and interviews.
+
+*What broke / learned* and *Decisions*.
+
+---
+
+## Day 6: Sat 26 Sep 2026 — Template model and parser (#19)
+
+**Goals**
+- [x] Capture template model: labeled spans -> generated regex (ADR-007)
+- [x] Parser: match a message against a unit's templates, extract typed fields
+- [x] Unit tests against fake messages (testing.md P-01 to P-12, minus the two that need a repository)
+
+**Done**
+- `lib/domain/models/template.dart`: `CaptureTemplate` plus `CaptureTemplate.fromLabeledSample()`, which is the actual ADR-007 mechanism — takes a pasted sample and a list of `LabeledSpan`s (start/end offsets + `TemplateFieldType`: amount, code, date, person, balance, fee) and walks the sample once, escaping literal text and swapping each labeled span for a named regex group (`(?<amount>...)`, `(?<amount2>...)` if a field type repeats). `fieldMap` (group name -> field type) is exactly `tables.dart`'s `fieldMapJson` column, just not JSON-encoded yet — `toJson`/`fromJson` do that encoding so a repository (#20) can store and reload a template unchanged.
+- `lib/domain/logic/parser.dart`: `Parser.parse(message, templates, currencyCode: ...)` tries each enabled template in order and returns the first match, with amount/fee/balance run through `Money.parseMajor` (after stripping an optional currency-letter prefix like "Ksh") and the date field tried as ISO first, then a short list of `intl` patterns covering "21/9/26 at 1:12 PM"-style messages. A template with `direction: either` sniffs `received`/`credited`/`deposit` in the message to decide spent vs got when the template itself doesn't pin it down.
+- `test/domain/parser_test.dart`: three fake M-Pesa-style templates (paid/received/withdraw) built the same way the rule builder will build them, covering P-01 (all fields, correct types), P-02 (amount formats, including a bare "350" with no currency prefix), P-03 (same template, different name/amount/code still matches), P-04 (literal `.`, `(`, `)` in the sample survive as literal — checked both that the exact sample still matches *and* that a message with different literal punctuation in the same spots does *not* match), P-05 (no template matches -> `ParseResult.noMatch()`), P-06 (three templates on one unit, each message picks the right one and the right direction), P-09 (both date styles), P-10 (balance field is extracted; noted that comparing it to the computed balance is ledger work, not the parser's), P-11 (JSON round-trip gives byte-identical parse behaviour), P-12 (empty message, a 5000-line message, and a real match buried in noise — none crash).
+
+**What broke / learned**
+- First pass at the amount pattern didn't allow a currency prefix with no digits between it and the decimal-less case ("350" alone) — realized while writing P-02's bare-amount test, not from a bug report, so added that case explicitly rather than assuming the happy-path samples covered it.
+- Regex named-group syntax (`(?<name>...)`) meant field-type names had to double as valid Dart group names — fine since `TemplateFieldType.values` are already single words, but worth remembering if a field type with an underscore or a name starting with a digit is ever added later.
+- No device or emulator needed for any of this — pure Dart, matches design.md's reason for keeping the domain layer Flutter-free. Couldn't actually run `flutter test` in this environment (no Dart SDK / network access to pub.dev here), so the regex-construction and template-matching logic was cross-checked against an equivalent Python `re` harness (named groups, escaping, multi-template selection) before writing the Dart. Still needs a real `flutter test` run before merging, per testing.md's priority rule.
+
+**Decisions**
+- Dedup (testing.md P-07/P-08) is explicitly **not** in the parser. It needs to compare a parse result against already-stored transactions, which means repository access — that lands with the review inbox (#21) and the listener (#22), where it actually has something to compare against. Left a comment in the test file pointing at this so it isn't mistaken for a gap.
+- Reconciliation (P-10: quoted balance vs. computed balance) is the same story — the parser's job stops at handing back `balanceAfterMinor`; deciding it disagrees with the ledger and flagging the unit is design.md section 3's job, not the parser's.
+- `direction: either`'s keyword sniff is a small, deliberately narrow heuristic (three words) rather than a general classifier — matches ADR-007's "deterministic, explainable" reasoning. Most real templates will pin `direction` directly since a given message shape is consistently one or the other; `either` is an escape hatch, not the default path.
+
+**Time spent:** _~2 hours_
+
+**Tomorrow:** rule builder UI (#20) — paste sample, tap-to-label chips feeding `LabeledSpan`s into `CaptureTemplate.fromLabeledSample`, live preview using `Parser.parse` against the sample itself, "test against another message" using a second pasted sample.
+
+---
+
+## Day 5: Fri 25 Sep 2026 — Spike #18 and MIUI rabbit hole
+
+**Goals**
+- [x] Run spike #18 end to end on a real device
+- [x] Confirm drift's two-isolate write is safe (ADR-001's top risk)
+- [x] Record the finding in `docs/design.md` §5.1
+
+**Done**
+- Wired a temporary "Notification access" button into Me → Limits, banner and messages, so the grant can be reached without `adb shell cmd notification allow_listener`. Added a new `ActionRow` widget next to the existing `ComingSoonRow` family — same visual language, primary-tinted border and chevron so it reads as live rather than placeholder.
+- Ran the spike across four scenarios: foreground, backgrounded, rapid-fire (×10), post-reboot-without-launching-the-app. All four captured reliably. 23 rows written across the session with no `SQLITE_BUSY` and no engine-startup failures.
+- Confirmed the two-isolate write path: the background isolate opens its own `AppDatabase` while the UI isolate has one open on the same `fuata.sqlite`, and both commit cleanly. `NativeDatabase.createInBackground` is safe. **ADR-001's top risk is closed.**
+
+**What broke / learned**
+- **MIUI does not bind the listener on a `cmd notification allow_listener` grant.** Symptoms: `enabled_notification_listeners` contains the component, `dumpsys package` reports the app enabled and unstopped, but Fuata is absent from `dumpsys notification`'s "Live notification listeners" section and `dumpsys activity services` shows no bound service. Notifications are silently dropped with no callback. The grant has to go through **Settings → Notification access** as an off→on toggle, which routes through `MiuiSecurityCenter` and forces a re-register; the adb path only edits `Settings.Secure`, which MIUI's own permission layer doesn't read.
+- **`am kill <pkg>` is a no-op while notification access is granted** — the bound listener keeps the process alive by design. Worse, the kill request itself can make the notification manager unbind the listener without rebinding it, so subsequent notifications are dropped until the app is relaunched. Use `am force-stop` for the "stopped package" test instead, and accept that it too is expected to prevent capture until the user opens the app.
+- **`run-as ... sqlite3` fails on release builds** (`Permission denied: exec failed for sqlite3`) even though `run-as cat` works — the app's SELinux context can't execute the system binary. Workaround: `adb exec-out run-as $PKG cat $DB > /tmp/…` plus the `-wal` and `-shm` sidecars, then query locally. Worth remembering for #22/#26 — the on-device query isn't reliable across OEMs.
+- **Debug-build caveat noted.** `am kill` behaviour and background lifecycle differ meaningfully between debug and release (JIT, memory footprint, low-memory killer aggressiveness). The finding above is from a debug build; the release verification is deferred to #26's device test pass.
+
+**Decisions**
+- Recorded the MIUI prerequisite in `docs/design.md` §5.1 and cross-referenced it from ADR-006, so the next person to build a capture feature hits the working path directly rather than re-deriving it.
+- Left the ~20 spike rows in `unparsed_captures` in place — useful evidence for #22 to compare extraction behaviour against. Not cleaning them out.
+
+**Time spent:** _~3 hours_
+
+**Tomorrow:** parser and template model (#19), pure Dart with unit tests against fake bank messages; no device required.
+
+## Day 4: Thu 24 Sep 2026 (planned)
+
+**Goals**
+- [ ] Summaries: today, week, month (#23)
+- [ ] JSON export/import (#24)
+- [ ] Remove `INTERNET` from release manifest, disable backup (#25)
+- [ ] Manual device test pass using `docs/testing.md` (#26)
+- [ ] Release v0.1.0: CHANGELOG, signed APK, README screenshots (#27)
+
+**Cut order if behind:** summaries first, then banner quick-add, then review inbox (auto-accept instead). Never cut ledger and limit-engine tests.
+
+**Done / What broke / Decisions:** _(fill in at the end of the day)_
+
+---
+
+## Day 2 (cont.): Drift database and repositories (#13)
+
+**Done**
+- Wrote the drift schema (`lib/data/db/tables.dart`) covering every entity in design.md's ER diagram — Unit, Transaction, Category, LimitRule, Template, CaptureSource, UnparsedCapture, plus the settings key/value table — not just the four issue #13 names, since Transaction/Template/LimitRule already reference the others by id.
+- `AppDatabase` (`lib/data/db/app_database.dart`): single file in app-private storage, opened lazily, foreign keys enforced, `schemaVersion 1` with an `onUpgrade` stub for the next change.
+- `Drift*Repository` classes implement the same four interfaces (`UnitRepository`, `TransactionRepository`, `LimitRepository`, `SettingsRepository`) the mocks already did, and are now the default in `app_providers.dart` via a new `appDatabaseProvider`. No screen changed.
+- Settings are stored as loose key/value rows rather than typed columns, so adding one more personalisation toggle later never needs a migration; `DriftSettingsRepository` owns the mapping to/from `AppSettings` and falls back to `AppSettings.defaults` on a fresh install.
+- Round-trip tests in `test/data/db/app_database_test.dart` against an in-memory database: unit archive/unarchive, a linked `moved` pair, limit upsert-by-id, and settings defaults-then-save.
+
+**Decisions**
+- Renamed every generated drift data class with `@DataClassName` (`UnitRow`, `TransactionRow`, `LimitRuleRow`, ...) — drift's default naming would otherwise generate a `LimitRule` fighting with the domain model of the same name.
+- Enums stored as their `.name` string, not an int index: reordering an enum's cases can't silently reinterpret an old row as the wrong value.
+- Category, Template, CaptureSource and UnparsedCapture get tables now but no repository yet — deferred to the issues that build the features that use them (#19-#22), so this issue stays scoped to what #13 actually asked for.
+
+**What broke / learned**
+Nothing broke yet — the schema and repositories are new code with no prior implementation to reconcile against. The real test is still ahead: `dart run build_runner build` has to run before any of this compiles, and the two-isolate spike (#18) is where a schema written today either holds up or doesn't.
+
+**Time spent:** _~2 hours_
+
+---
+
+## Day 3: Wed 23 Sep 2026 (planned)
+
+**Goals**
+- [ ] Template model and parser with tests (#19)
+- [ ] Rule builder UI (#20)
+- [ ] Share/paste to review inbox (#21)
+- [ ] Notification listener with allow-list and dedupe (#22)
+- [ ] Done when: a real notification creates a pending transaction and the banner updates
+
+**Done / What broke / Decisions:** _(fill in)_
+
+---
+
+## Day 2: Tue 22 Sep 2026 (planned)
+
+**Goals**
+- [x] Finish Home screen (#8) properly wired to the real theme/status system
+- [X] Add-transaction sheet (#9)
+- [X] Activity screen (#10)
+- [X] Drift database and repositories (#13) — domain models, ledger and mock repos already existed from Monday; real SQLite still to do
+- [ ] Banner (#16) and the 2-hour listener spike (#18)
+
+  **Done**
+- Built the theme and component layer separately from Home (StatusPill, StatusRingCard, UnitCard, TransactionRow, AppChoiceChip, WordLabelChip, `AppColors` as a `ThemeExtension`).
+- Caught two real duplications while reconciling that work with yesterday's Home screen: a second status enum (`BudgetStatus` alongside the domain's `SpendStatus`) and a `MoneyUnit` enum in `unit_card.dart` that silently shadowed the actual `MoneyUnit` model.
+- Fixed by making `SpendStatus` the single status source of truth (presentation extensions in `app_status.dart`), and switching `UnitCard` to the domain's `UnitKind`. Rewired `home_screen.dart` to use the real widgets and theme tokens throughout — no more hardcoded hex colors or private duplicate widgets.
+- Added `Money.majorValue` and `currencySymbol()` as a documented, display-only bridge between integer minor units and the widgets' `double` + symbol API.
+  **What broke / learned**
+  Building the theme/components and Home screen as separate pieces (mine from Monday, yours from the same day) meant they never got reconciled until today — Home kept working the whole time, so nothing *looked* broken, but it was quietly running on placeholder colors instead of the real design system. Lesson: when two people (or two sessions) build adjacent layers in parallel, integrate them the same day rather than letting each "work" in isolation. `flutter analyze` didn't catch the `MoneyUnit` collision because the two types never got imported into the same file — worth remembering that the analyzer won't save you from a naming collision unless something actually forces both into scope together.
+  Mock repos looked done but weren't reactive (async* yields once, stream closes). New transactions silently vanished until app restart. Fixed with a small broadcast-stream store shared across all three mock repos.
+  **Time spent:** _3hours_
+
+---
+
+## Day 1: Mon 21 Sep 2026
+
+**Goals**
+- [x] Repo, issues, milestones and docs set up from the terminal
+- [x] Requirements document (#2) and UI design brief (#3)
+- [x] Pick a name and check it for collisions
+- [x] Design doc with data model and ADRs (#4)
+- [x] App theme and personalisation shell (#6)
+- [x] Devlog and testing checklist (#5) *(this commit)*
+  **Done**
+- Created the private repo and ran the setup script: 13 labels, 2 milestones, 27 MVP issues and 12 backlog issues.
+- Scaffolded the Flutter project (Android only, minSdk 26) with a layered folder structure: `ui/`, `domain/`, `data/`.
+- Wrote `requirements.md`, `ui-design-brief.md`, `design.md` (architecture, ER model, 10 ADRs) and the issue plan.
+- Implemented the theme and personalisation shell (#6).
+  **Decisions**
+- **Name: Fuata** (Swahili, "follow"). Checked against Play Store listings, GitHub and web search. Rejected *Pesa Leo* (an existing Tanzanian loan app), *Baki* (an iOS expense tracker with nearly the same pitch), *Kiasi* (an existing Tanzanian savings and budgeting app), and the whole "Pesa___" family (saturated, and associated with loan apps, a bad fit for a privacy-first tracker).
+- **UI first, engine second:** screens depend on repository interfaces and run on in-memory mocks; drift replaces them later without touching the screens.
+- **Signed `amountMinor`:** balance is a plain sum; transfers are linked pairs; fees are child rows (ADR-005).
+- **No encryption in v0.1:** time-boxed, mitigated by disabling backup; SQLCipher planned for v1.1 (ADR-010).
+  **What broke / learned:** Nothing broke; the day was scaffolding and docs. The main lesson carried into Day 2: building the theme/components and the screens that consume them without checking them against each other the same day let them drift apart quietly (see Day 2).
+
+**Time spent:** _3hours_
+
+**Tomorrow:** see Day 2.
 </file>
 
 <file path="lib/main.dart">
