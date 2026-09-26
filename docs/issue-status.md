@@ -1,9 +1,11 @@
-# Issue status (generated 2026-09-26T10:33Z)
+# Issue status (generated 2026-09-26T21:18Z)
 
 Source of truth: GitHub. Regenerate with `scripts/refresh-issue-status.sh`.
 
 | # | State | Milestone | Title |
 |---|---|---|---|
+| #56 | OPEN | v1.1 Backlog | feat(capture): user-defined custom fields in rule builder |
+| #55 | OPEN | v1.1 Backlog | feat(capture): "This part changes" wildcard in rule builder |
 | #39 | OPEN | v1.1 Backlog | feat: Open-source licence review and contribution guide |
 | #38 | OPEN | v1.1 Backlog | feat: iOS manual/share-sheet edition |
 | #37 | OPEN | v1.1 Backlog | feat: Opt-in redacted diagnostics copy button |
