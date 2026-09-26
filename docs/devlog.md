@@ -6,6 +6,34 @@ A running, honest record of the build: goals, what got done, what broke, and why
 
 ---
 
+## Day 6: Sat 26 Sep 2026 — Template model and parser (#19)
+
+**Goals**
+- [x] Capture template model: labeled spans -> generated regex (ADR-007)
+- [x] Parser: match a message against a unit's templates, extract typed fields
+- [x] Unit tests against fake messages (testing.md P-01 to P-12, minus the two that need a repository)
+
+**Done**
+- `lib/domain/models/template.dart`: `CaptureTemplate` plus `CaptureTemplate.fromLabeledSample()`, which is the actual ADR-007 mechanism — takes a pasted sample and a list of `LabeledSpan`s (start/end offsets + `TemplateFieldType`: amount, code, date, person, balance, fee) and walks the sample once, escaping literal text and swapping each labeled span for a named regex group (`(?<amount>...)`, `(?<amount2>...)` if a field type repeats). `fieldMap` (group name -> field type) is exactly `tables.dart`'s `fieldMapJson` column, just not JSON-encoded yet — `toJson`/`fromJson` do that encoding so a repository (#20) can store and reload a template unchanged.
+- `lib/domain/logic/parser.dart`: `Parser.parse(message, templates, currencyCode: ...)` tries each enabled template in order and returns the first match, with amount/fee/balance run through `Money.parseMajor` (after stripping an optional currency-letter prefix like "Ksh") and the date field tried as ISO first, then a short list of `intl` patterns covering "21/9/26 at 1:12 PM"-style messages. A template with `direction: either` sniffs `received`/`credited`/`deposit` in the message to decide spent vs got when the template itself doesn't pin it down.
+- `test/domain/parser_test.dart`: three fake M-Pesa-style templates (paid/received/withdraw) built the same way the rule builder will build them, covering P-01 (all fields, correct types), P-02 (amount formats, including a bare "350" with no currency prefix), P-03 (same template, different name/amount/code still matches), P-04 (literal `.`, `(`, `)` in the sample survive as literal — checked both that the exact sample still matches *and* that a message with different literal punctuation in the same spots does *not* match), P-05 (no template matches -> `ParseResult.noMatch()`), P-06 (three templates on one unit, each message picks the right one and the right direction), P-09 (both date styles), P-10 (balance field is extracted; noted that comparing it to the computed balance is ledger work, not the parser's), P-11 (JSON round-trip gives byte-identical parse behaviour), P-12 (empty message, a 5000-line message, and a real match buried in noise — none crash).
+
+**What broke / learned**
+- First pass at the amount pattern didn't allow a currency prefix with no digits between it and the decimal-less case ("350" alone) — realized while writing P-02's bare-amount test, not from a bug report, so added that case explicitly rather than assuming the happy-path samples covered it.
+- Regex named-group syntax (`(?<name>...)`) meant field-type names had to double as valid Dart group names — fine since `TemplateFieldType.values` are already single words, but worth remembering if a field type with an underscore or a name starting with a digit is ever added later.
+- No device or emulator needed for any of this — pure Dart, matches design.md's reason for keeping the domain layer Flutter-free. Couldn't actually run `flutter test` in this environment (no Dart SDK / network access to pub.dev here), so the regex-construction and template-matching logic was cross-checked against an equivalent Python `re` harness (named groups, escaping, multi-template selection) before writing the Dart. Still needs a real `flutter test` run before merging, per testing.md's priority rule.
+
+**Decisions**
+- Dedup (testing.md P-07/P-08) is explicitly **not** in the parser. It needs to compare a parse result against already-stored transactions, which means repository access — that lands with the review inbox (#21) and the listener (#22), where it actually has something to compare against. Left a comment in the test file pointing at this so it isn't mistaken for a gap.
+- Reconciliation (P-10: quoted balance vs. computed balance) is the same story — the parser's job stops at handing back `balanceAfterMinor`; deciding it disagrees with the ledger and flagging the unit is design.md section 3's job, not the parser's.
+- `direction: either`'s keyword sniff is a small, deliberately narrow heuristic (three words) rather than a general classifier — matches ADR-007's "deterministic, explainable" reasoning. Most real templates will pin `direction` directly since a given message shape is consistently one or the other; `either` is an escape hatch, not the default path.
+
+**Time spent:** _~2 hours_
+
+**Tomorrow:** rule builder UI (#20) — paste sample, tap-to-label chips feeding `LabeledSpan`s into `CaptureTemplate.fromLabeledSample`, live preview using `Parser.parse` against the sample itself, "test against another message" using a second pasted sample.
+
+---
+
 ## Day 5: Fri 25 Sep 2026 — Spike #18 and MIUI rabbit hole
 
 **Goals**
