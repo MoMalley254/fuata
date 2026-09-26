@@ -123,8 +123,8 @@ void main() {
     final limits = await repo.watchLimits().first;
     expect(limits, hasLength(1));
     expect(limits.single.amountMinor, 200000);
-    expect(limits.single.statusFor(150000), SpendStatus.safe);
-    expect(limits.single.statusFor(200000), SpendStatus.overdraft);
+    expect(limits.single.statusFor(100000), SpendStatus.safe);      // ratio 0.50
+    expect(limits.single.statusFor(200000), SpendStatus.overdraft); // ratio 1.00
   });
 
   test('settings fall back to defaults, then round-trip after a save', () async {
