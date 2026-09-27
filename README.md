@@ -23,3 +23,7 @@ Spending is scattered across cash, mobile money and bank transactions, and recon
 ## Tech
 
 Flutter (Android), Riverpod, drift/SQLite, local notifications. No backend.
+
+
+## Notes
+- Allows users to 
