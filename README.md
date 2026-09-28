@@ -26,4 +26,4 @@ Flutter (Android), Riverpod, drift/SQLite, local notifications. No backend.
 
 
 ## Notes
-- Allows users to 
+- Allows users to label parts of receiving messages. Labelled messages take key labels : code, amount, payee, date, balance and fee. Rest of the string past the last label is completely ignored. In future updates, allow users to choose whether to ignore or strictly match all strings. 
