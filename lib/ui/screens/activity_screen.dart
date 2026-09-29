@@ -55,7 +55,7 @@ class _ActivityScreenState extends ConsumerState<ActivityScreen> {
   Widget build(BuildContext context) {
     final txAsync = ref.watch(transactionsProvider);
     final unitsAsync = ref.watch(unitsProvider);
-    final pendingCount = ref.watch(pendingTransactionsProvider).length;
+    final inboxCount = ref.watch(reviewInboxCountProvider);
 
     return Scaffold(
       appBar: AppBar(
@@ -67,7 +67,7 @@ class _ActivityScreenState extends ConsumerState<ActivityScreen> {
               clipBehavior: Clip.none,
               children: [
                 const Icon(Icons.inbox_rounded),
-                if (pendingCount > 0)
+                if (inboxCount > 0)
                   Positioned(
                     top: -6,
                     right: -8,
@@ -83,7 +83,7 @@ class _ActivityScreenState extends ConsumerState<ActivityScreen> {
                       constraints: const BoxConstraints(minWidth: 16),
                       alignment: Alignment.center,
                       child: Text(
-                        pendingCount > 99 ? '99+' : '$pendingCount',
+                        inboxCount > 99 ? '99+' : '$inboxCount',
                         style: AppTypography.labelSm.copyWith(
                           color: context.colors.onPrimary,
                           height: 1.2,
