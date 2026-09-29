@@ -19,6 +19,7 @@ import '../theme/app_colors.dart';
 import '../theme/app_spacing.dart';
 import '../theme/app_typography.dart';
 import '../../widgets/app_chips.dart';
+import 'banner_setup_screen.dart';
 
 /// Me: settings and personalisation (ui-design-brief.md section 7.12,
 /// US-13/US-14/US-16). Every control here writes straight through
@@ -169,13 +170,18 @@ class MeScreen extends ConsumerWidget {
                 ComingSoonRow(
                   icon: Icons.speed_rounded,
                   title: 'Limits & alerts',
-                  subtitle: 'Daily, weekly and monthly limits, plus nudges — coming in #15/#17',
+                  subtitle: 'Daily, weekly and monthly limits, plus nudges — coming in #15',
                 ),
                 SizedBox(height: AppSpacing.sm),
-                ComingSoonRow(
+                ActionRow(
                   icon: Icons.notifications_active_outlined,
                   title: 'Banner',
-                  subtitle: 'Choose what the notification banner shows — coming in #16/#17',
+                  subtitle: settings.bannerEnabled
+                      ? 'On — choose what it shows'
+                      : 'Off — choose what the notification banner shows',
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const BannerSetupScreen()),
+                  ),
                 ),
                 SizedBox(height: AppSpacing.sm),
                 ComingSoonRow(

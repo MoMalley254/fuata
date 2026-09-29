@@ -139,6 +139,12 @@ class DriftSettingsRepository implements SettingsRepository {
   static const _kRedactedBanner = 'redactedLockScreenBanner';
   static const _kAutoAccept = 'autoAcceptCaptures';
 
+  static const _kBannerEnabled = 'bannerEnabled';
+  static const _kBannerHeadline = 'bannerHeadline';
+  static const _kBannerUnitIds = 'bannerUnitIds'; // comma-separated ids
+  static const _kBannerProgress = 'bannerShowProgress';
+  static const _kBannerQuickAdd = 'bannerShowQuickAdd';
+
   @override
   Stream<AppSettings> watchSettings() {
     return _db.select(_db.settingsEntries).watch().map(_toSettings);
@@ -188,6 +194,16 @@ class DriftSettingsRepository implements SettingsRepository {
         key: _kAutoAccept,
         value: s.autoAcceptCaptures.toString(),
       ),
+      SettingsEntriesCompanion.insert(
+          key: _kBannerEnabled, value: s.bannerEnabled.toString()),
+      SettingsEntriesCompanion.insert(
+          key: _kBannerHeadline, value: s.bannerHeadline.name),
+      SettingsEntriesCompanion.insert(
+          key: _kBannerUnitIds, value: s.bannerUnitIds.join(',')),
+      SettingsEntriesCompanion.insert(
+          key: _kBannerProgress, value: s.bannerShowProgress.toString()),
+      SettingsEntriesCompanion.insert(
+          key: _kBannerQuickAdd, value: s.bannerShowQuickAdd.toString()),
     ];
   }
 
@@ -249,6 +265,16 @@ class DriftSettingsRepository implements SettingsRepository {
         map[_kAutoAccept],
         defaults.autoAcceptCaptures,
       ),
+      bannerEnabled: boolOr(map[_kBannerEnabled], defaults.bannerEnabled),
+      bannerHeadline: byName(
+          map[_kBannerHeadline], BannerHeadline.values, defaults.bannerHeadline),
+      bannerUnitIds: (map[_kBannerUnitIds] ?? '').isEmpty
+          ? <String>{}
+          : map[_kBannerUnitIds]!.split(',').toSet(),
+      bannerShowProgress:
+      boolOr(map[_kBannerProgress], defaults.bannerShowProgress),
+      bannerShowQuickAdd:
+      boolOr(map[_kBannerQuickAdd], defaults.bannerShowQuickAdd),
     );
   }
 }
