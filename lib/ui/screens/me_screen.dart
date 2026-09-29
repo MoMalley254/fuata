@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:fuata/ui/providers/capture_providers.dart';
+import 'package:fuata/ui/screens/auto_catch_screen.dart';
 import 'package:fuata/ui/screens/review_inbox_screen.dart';
 import 'package:fuata/ui/screens/rule_builder_screen.dart';
 
 import '../../domain/models/settings.dart';
-import '../../platform/listener_spike.dart';
 import '../../widgets/coming_soon_row.dart';
 import '../../widgets/personalization/action_row.dart';
 import '../../widgets/personalization/detail_level_example.dart';
@@ -30,7 +30,8 @@ import '../../widgets/app_chips.dart';
 /// Limits & alerts and Banner each get their own dedicated screens in
 /// later issues (#15/#17, #16/#17) — shown here as `ComingSoonRow`s that
 /// link out, rather than half-built here. Message reading is live as of
-/// #20 (rules) and #21 (share/paste capture + review inbox).
+/// #20 (rules), #21 (share/paste capture + review inbox) and #22
+/// (Auto-catch: notification access + allowed apps).
 class MeScreen extends ConsumerWidget {
   const MeScreen({super.key});
 
@@ -40,6 +41,7 @@ class MeScreen extends ConsumerWidget {
     final settings = ref.watch(currentSettingsProvider);
     final repo = ref.read(settingsRepositoryProvider);
     final pendingCount = ref.watch(pendingTransactionsProvider).length;
+    final watchedApps = ref.watch(allowedPackagesProvider).length;
 
     void update(AppSettings Function(AppSettings) fn) {
       repo.updateSettings(fn(settings));
@@ -128,9 +130,15 @@ class MeScreen extends ConsumerWidget {
               children: [
                 ActionRow(
                   icon: Icons.notifications_active_outlined,
-                  title: 'Notification access',
-                  subtitle: 'Grant Fuata permission to read bank/mobile-money notifications.',
-                  onTap: openNotificationAccessSettings,
+                  title: 'Auto-catch',
+                  subtitle: watchedApps == 0
+                      ? 'Off — pick the apps Fuata may read messages from'
+                      : watchedApps == 1
+                      ? 'Watching 1 app'
+                      : 'Watching $watchedApps apps',
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const AutoCatchScreen()),
+                  ),
                 ),
                 const SizedBox(height: AppSpacing.sm),
                 ActionRow(
@@ -150,7 +158,7 @@ class MeScreen extends ConsumerWidget {
                   icon: Icons.mark_email_read_outlined,
                   title: 'Message reading rules',
                   subtitle:
-                      'Teach Fuata to read a bank or mobile-money message',
+                  'Teach Fuata to read a bank or mobile-money message',
                   onTap: () => Navigator.of(context).push(
                     MaterialPageRoute(
                       builder: (_) => const RuleBuilderScreen(),
@@ -171,16 +179,10 @@ class MeScreen extends ConsumerWidget {
                 ),
                 SizedBox(height: AppSpacing.sm),
                 ComingSoonRow(
-                  icon: Icons.mark_email_read_outlined,
-                  title: 'Message reading',
-                  subtitle: 'Allowed apps for auto-catch — coming in #22',
-                ),
-                SizedBox(height: AppSpacing.sm),
-                ComingSoonRow(
                   icon: Icons.sell_outlined,
                   title: 'Categories',
                   subtitle:
-                      'Rename or add category names and icons — coming soon',
+                  'Rename or add category names and icons — coming soon',
                 ),
               ],
             ),
