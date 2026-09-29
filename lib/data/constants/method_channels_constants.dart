@@ -1,0 +1,1 @@
+const String shareIntakeMethodName = 'fuata/share_intake';
