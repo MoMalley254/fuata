@@ -1,3 +1,4 @@
+import '../models/capture_source.dart';
 import '../models/limit_rule.dart';
 import '../models/settings.dart';
 import '../models/template.dart';
@@ -64,4 +65,15 @@ abstract class CaptureRepository {
     required String rawText,
   });
   Future<void> deleteUnparsed(String captureId);
+}
+/// The notification allow-list (design.md CAPTURE_SOURCE, US-10): which
+/// apps Fuata may read notifications from. Enabled rows *are* the
+/// allow-list. There is deliberately no delete: turning an app off flips
+/// `enabled`, because templates reference this table (see
+/// [CaptureSource]).
+abstract class CaptureSourceRepository {
+  Stream<List<CaptureSource>> watchSources();
+
+  /// Upsert by id — use [CaptureSource.idFor] so one package is one row.
+  Future<void> saveSource(CaptureSource source);
 }

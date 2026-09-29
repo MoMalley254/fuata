@@ -80,6 +80,22 @@ Use several fake messages, never real ones.
 | P-11 | Template round trip: export to JSON, import | Identical behaviour |
 | P-12 | Very long or empty message | No crash |
 
+### Notification capture (US-10, US-11) — issue #22
+Run against real drift repositories on an in-memory database (`test/domain/capture_pipeline_test.dart`); fake messages only.
+
+| ID | Case | Expected |
+|---|---|---|
+| N-01 | Notification from an app that was never allowed | Ignored; no transaction **and no unparsed entry** (nothing stored) |
+| N-02 | Notification from an app that is switched off | Same as N-01 |
+| N-03 | Allowed app, message matches a template | Pending transaction, `source = notification`, `rawText` null |
+| N-04 | Auto-accept on | Same transaction is confirmed immediately |
+| N-05 | Same code arrives twice (P-07 via the listener path) | One row |
+| N-06 | Same payment from two allowed apps, no code, inside 2 minutes (P-08) | One row |
+| N-07 | Two notifications for one payment handed over together | Exactly one row (serial queue) |
+| N-08 | Unreadable message re-posted three times | One "Couldn't read these" entry |
+| N-09 | Same unreadable text from two different apps | Two entries |
+| N-10 | Allow-list storage: one row per package, off keeps the row, order by name, toggling a template-referenced source doesn't break the FK | `capture_source_repository_test.dart` |
+
 ## 3. Manual device checklist
 
 **Setup:** real Android device (API 26+), release or profile build installed, notification permission granted. Record device, Android version and build in the table at the end. Mark each row ☐ → ✅ or ❌ and add a note.
@@ -130,6 +146,13 @@ Use several fake messages, never real ones.
 - [ ] Revoke notification access: app detects it and warns; re-grant restores capture
 - [ ] Duplicate notification (same code) produces one transaction only
 - [ ] Banner updates when a captured transaction is confirmed
+- [ ] Me → Auto-catch lists installed apps; switching one on/off survives closing the app
+- [ ] Auto-catch shows "Access is on/off" correctly, and updates after coming back from Android's settings
+- [ ] **Open app on Home, then trigger an allow-listed notification: the pending item appears without restarting or switching tabs** (the background isolate writes through its own connection)
+- [ ] Same, with the app closed, then open it: the pending item is there
+- [ ] Post a notification from an app that is *not* switched on, then check the database: no transaction and no unparsed row
+- [ ] Extracted text is the message body, not the notification tag or title (the #18 MIUI symptom, design.md 5.1)
+- [ ] After updating the app (new build installed over the old), open the app once, then confirm capture resumes
 
 ### Summaries and detail level (US-12, US-13)
 - [ ] Today/Week/Month figures match hand-calculated totals
@@ -171,7 +194,7 @@ APK=build/app/outputs/flutter-apk/app-release.apk
 
 Also confirm in Android Settings → Apps → Fuata → Permissions that no network or contacts permission is listed.
 
-**Handy `adb` tips for testing the listener without a real bank message** (Android 11+; add the shell app to the allow-list temporarily):
+**Handy `adb` tips for testing the listener without a real bank message** (Android 11+). `cmd notification post` is posted as `com.android.shell`, which has no launcher icon, so it is not in the Auto-catch list: in a **debug build** type `com.android.shell` into Me → Auto-catch → "Add by package name", then switch it off again afterwards:
 
 ```bash
 adb shell cmd notification post -S bigtext -t "Test Bank" fuata_test \

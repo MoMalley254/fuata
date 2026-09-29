@@ -251,7 +251,8 @@ Supporting tables (not drawn): `unparsed_capture` (id, receivedAt, sourcePackage
 | Item | Status |
 |---|---|
 | Local database and repositories (issue #13) | **Done.** See ADR-001's "Implemented" note. |
-| Listener + DB from a background isolate (issue #18) | **Done.** See §5.1 below. ||
+| Listener + DB from a background isolate (issue #18) | **Done.** See §5.1 below. |
+| Notification listener, allow-list and dedupe (issue #22) | **Implemented; device pass pending (#26).** See §5.2. |
 | Final visual tokens (colours, type scale, radii) | Pending: copy from the implemented theme into a "Visual direction" section |
 | Which providers get bundled template presets | Deferred to v1.1 |
 
@@ -264,3 +265,25 @@ Supporting tables (not drawn): `unparsed_capture` (id, receivedAt, sourcePackage
 **MIUI-specific prerequisite (recorded for #22).** `cmd notification allow_listener` and direct edits to `Settings.Secure.enabled_notification_listeners` are not sufficient on MIUI — the grant is reported as active, but the system never calls `bindService` and Fuata never appears in `dumpsys notification`'s "Live notification listeners" section. Notifications are silently dropped with no `onNotificationPosted` callback. The listener only binds after toggling the grant **off→on through Settings → Notification access** (the UI path, which goes through `MiuiSecurityCenter`), with Autostart on. Once bound, capture survives backgrounding, rapid-fire dispatch, and reboot — no "open the app after reboot" guidance is needed.
 
 **Known gap for #22 (not a spike failure).** `NotificationListener.kt`'s text extraction writes `sbn.tag` into `raw_text` instead of the notification body on this device. Confirmed against two separate tests. The real listener needs an extras-walk helper that checks `EXTRA_TITLE`, `EXTRA_TEXT`, `EXTRA_BIG_TEXT`, `EXTRA_SUB_TEXT`, `EXTRA_TEXT_LINES` and ticker text in a documented order, and explicitly excludes `sbn.tag`. Filed in #22.
+
+### 5.2 Notification listener, allow-list and dedupe (issue #22)
+
+Replaces the #18 spike (`listener_spike.dart`, the spike `NotificationListener.kt` and the `fuata/listener_spike` channel are gone). What was decided, and why:
+
+**Where the allow-list is enforced: twice.** `capture_sources` (design §2) is the source of truth; enabled rows are the allow-list. Dart mirrors the enabled package names into native `SharedPreferences` on every app start and every change, and `NotificationListener.kt` checks that copy *first* — a notification from any other app is dropped before its text is read and before a Flutter engine is started. `CaptureProcessor.captureNotification` then checks the database again, so US-10 ("discarded immediately and never stored") still holds if the native copy is stale. Until Dart has pushed a list, the native default is to discard everything. Turning an app off flips `enabled` rather than deleting the row, because `templates.captureSourceId` references the table.
+
+**One shared pipeline.** The capture logic moved out of the Riverpod `CaptureService` into `lib/domain/logic/capture_pipeline.dart` (`CaptureProcessor`), which depends only on repository interfaces. The UI isolate (share/paste) and the background isolate (notifications) run the same code; `CaptureService` is a thin wrapper. This is also what makes it testable without a device.
+
+**Dedupe.** Unchanged rule (`Dedupe`: code, else unit + signed amount + 2-minute window), now with two additions that only matter once notifications are automatic:
+- capture is check-then-insert, so `CaptureProcessor` runs each capture through a `SerialQueue`; the background dispatcher does the same across calls. Without this, an SMS and its push twin arriving together would both read "nothing stored yet" and both insert.
+- unparsed captures are deduped on (source package, raw text). Notifications get re-posted, and "Teach me" re-runs capture on text the list already holds; both used to add a copy. **Known remaining gap:** UI isolate and background isolate each have their own queue, so a share and a notification for the same payment landing in the same instant could still both insert. The background isolate is the only automatic writer, so this needs a manual paste at the same moment.
+
+**One engine, not one per notification.** `CaptureEngine.kt` keeps a single headless engine alive while notifications keep arriving (20 s idle teardown, 90 s watchdog) and feeds it in order. The spike started an engine per notification and destroyed it after a fixed 3 s whether or not the write had finished.
+
+**The UI does not hear the background isolate's writes.** Each isolate opens its own drift connection, and drift only re-runs a stream for writes made through the same database instance. So a capture written in the background would not appear in an open Home/Inbox until something else touched the table. Fix: after each write the native side pings the UI engine (`onCapturesChanged`) and `main.dart` calls `markTablesUpdated([transactions, unparsedCaptures])`; the same call runs on `AppLifecycleState.resumed`. When the banner (#16) lands it must be re-posted from the background isolate too — that is where "DB → banner" in the §1 sequence has to hook in.
+
+**Text extraction (the §5.1 known gap).** `NotificationText.kt` walks `EXTRA_BIG_TEXT`, `EXTRA_TEXT`, `EXTRA_TEXT_LINES`, `EXTRA_SUB_TEXT`, `tickerText`, then `EXTRA_TITLE` as a last resort, first non-blank wins, and never reads `sbn.tag` or `sbn.key`. The title is *not* prepended to the body, so the parser sees what a pasted SMS gives it. **Not yet verified on the MIUI device that showed the original symptom.** Group-summary notifications (`FLAG_GROUP_SUMMARY`) are skipped: they are containers for children posted separately, and reading them only produces unreadable "3 new messages" entries. If a device turns out to post only a summary, this is the line to revisit.
+
+**Picking apps without a broad permission.** The picker lists launchable apps via a launcher-intent `<queries>` entry, not `QUERY_ALL_PACKAGES`. Consequence: an app with no launcher icon cannot be picked; debug builds have an "add by package name" field so `adb shell cmd notification post` (posted as `com.android.shell`) can still be allow-listed for testing.
+
+**Known limitations (not bugs):** the Dart callback handle is only valid for the build that registered it, so after an app *update* capture resumes once the app has been opened once; the access status on the Auto-catch screen is the *grant*, not proof the service is bound (§5.1 — detecting that is #36); a notification that arrives while the app has never been opened since install is dropped.

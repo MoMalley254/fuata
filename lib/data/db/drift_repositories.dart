@@ -10,6 +10,7 @@
 import 'package:drift/drift.dart';
 import 'package:flutter/material.dart';
 
+import '../../domain/models/capture_source.dart';
 import '../../domain/models/limit_rule.dart';
 import '../../domain/models/settings.dart';
 import '../../domain/models/template.dart';
@@ -325,5 +326,26 @@ class DriftCaptureRepository implements CaptureRepository {
     return (_db.delete(
       _db.unparsedCaptures,
     )..where((u) => u.id.equals(captureId))).go();
+  }
+}
+/// The notification allow-list (#22). `insertOnConflictUpdate` is an
+/// `INSERT ... ON CONFLICT DO UPDATE`, not a delete-and-insert, so saving
+/// a source that a template already points at can't trip the foreign key.
+class DriftCaptureSourceRepository implements CaptureSourceRepository {
+  DriftCaptureSourceRepository(this._db);
+  final AppDatabase _db;
+
+  @override
+  Stream<List<CaptureSource>> watchSources() {
+    final query = _db.select(_db.captureSources)
+      ..orderBy([(s) => OrderingTerm.asc(s.displayName)]);
+    return query.watch().map((rows) => rows.map(captureSourceFromRow).toList());
+  }
+
+  @override
+  Future<void> saveSource(CaptureSource source) {
+    return _db
+        .into(_db.captureSources)
+        .insertOnConflictUpdate(captureSourceToCompanion(source));
   }
 }

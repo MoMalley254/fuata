@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
-import 'package:fuata/platform/listener_spike.dart';
+import 'package:fuata/platform/notification_capture.dart';
 import 'package:fuata/platform/share_intake.dart';
 import 'package:fuata/ui/providers/app_providers.dart';
 import 'package:fuata/ui/providers/capture_providers.dart';
@@ -15,10 +15,10 @@ final rootScaffoldMessengerKey = GlobalKey<ScaffoldMessengerState>();
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  // Issue #18 spike only: registers the background isolate entry point so
-  // Android can find it again later even if the app process has been
-  // killed. Remove this call when #22 replaces the spike.
-  await registerListenerSpikeCallback();
+  // Issue #22: registers the background isolate entry point so Android
+  // can find it again later, even when the app process has been killed
+  // and the notification listener service starts it cold.
+  await registerCaptureCallback();
 
   // Issue #21: receive text shared from other apps (ACTION_SEND), now and
   // on every cold start launched from a share sheet.
@@ -34,12 +34,33 @@ class Fuata extends ConsumerStatefulWidget {
   ConsumerState<Fuata> createState() => _FuataState();
 }
 
-class _FuataState extends ConsumerState<Fuata> {
+class _FuataState extends ConsumerState<Fuata> with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
     // Starts the share subscription for the app's lifetime.
     ref.read(shareIntakeListenerProvider);
+    // Issue #22: mirror the allow-list to the native listener, and hear
+    // about captures the background isolate wrote.
+    ref.read(allowListSyncProvider);
+    ref.read(captureRefreshProvider);
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Belt and braces for the native "captures changed" ping: whatever the
+    // background isolate wrote while we were away, re-query on return.
+    if (state == AppLifecycleState.resumed) {
+      final db = ref.read(appDatabaseProvider);
+      db.markTablesUpdated([db.transactions, db.unparsedCaptures]);
+    }
   }
 
   @override

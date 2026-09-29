@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../../domain/models/capture_source.dart';
 import '../../domain/models/limit_rule.dart';
 import '../../domain/models/settings.dart';
 import '../../domain/models/template.dart';
@@ -315,4 +316,15 @@ class MockCaptureRepository implements CaptureRepository {
   @override
   Future<void> deleteUnparsed(String captureId) async =>
       _store.removeWhere((u) => u.id == captureId);
+}
+/// In-memory allow-list (#22), same store semantics as the others.
+class MockCaptureSourceRepository implements CaptureSourceRepository {
+  final _store = _Store<CaptureSource>([]);
+
+  @override
+  Stream<List<CaptureSource>> watchSources() => _store.watch();
+
+  @override
+  Future<void> saveSource(CaptureSource source) async =>
+      _store.upsert((s) => s.id == source.id, source);
 }

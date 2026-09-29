@@ -16,6 +16,7 @@ import 'dart:ui';
 import 'package:drift/drift.dart';
 import 'package:fuata/domain/models/template.dart';
 
+import '../../domain/models/capture_source.dart';
 import '../../domain/models/limit_rule.dart';
 import '../../domain/models/transaction.dart';
 import '../../domain/models/unit.dart';
@@ -23,7 +24,7 @@ import '../../domain/models/unparsed_capture.dart';
 import 'app_database.dart';
 
 UnitKind _unitKindFromText(String s) => UnitKind.values.firstWhere(
-  (e) => e.name == s,
+      (e) => e.name == s,
   orElse: () => UnitKind.other,
 );
 
@@ -31,22 +32,22 @@ TxType _txTypeFromText(String s) =>
     TxType.values.firstWhere((e) => e.name == s, orElse: () => TxType.spent);
 
 TxSource _txSourceFromText(String s) => TxSource.values.firstWhere(
-  (e) => e.name == s,
+      (e) => e.name == s,
   orElse: () => TxSource.manual,
 );
 
 TxStatus _txStatusFromText(String s) => TxStatus.values.firstWhere(
-  (e) => e.name == s,
+      (e) => e.name == s,
   orElse: () => TxStatus.confirmed,
 );
 
 LimitScope _limitScopeFromText(String s) => LimitScope.values.firstWhere(
-  (e) => e.name == s,
+      (e) => e.name == s,
   orElse: () => LimitScope.overall,
 );
 
 LimitPeriod _limitPeriodFromText(String s) => LimitPeriod.values.firstWhere(
-  (e) => e.name == s,
+      (e) => e.name == s,
   orElse: () => LimitPeriod.day,
 );
 
@@ -210,5 +211,24 @@ UnparsedCapture unparsedCaptureFromRow(UnparsedCaptureRow row) {
     receivedAt: row.receivedAt,
     sourcePackage: row.sourcePackage,
     rawText: row.rawText,
+  );
+}
+// --- CaptureSource ---------------------------------------------------------
+
+CaptureSource captureSourceFromRow(CaptureSourceRow row) {
+  return CaptureSource(
+    id: row.id,
+    packageName: row.packageName,
+    displayName: row.displayName,
+    enabled: row.enabled,
+  );
+}
+
+CaptureSourcesCompanion captureSourceToCompanion(CaptureSource s) {
+  return CaptureSourcesCompanion.insert(
+    id: s.id,
+    packageName: s.packageName,
+    displayName: s.displayName,
+    enabled: Value(s.enabled),
   );
 }
