@@ -3,6 +3,7 @@ import '../models/settings.dart';
 import '../models/template.dart';
 import '../models/transaction.dart';
 import '../models/unit.dart';
+import '../models/unparsed_capture.dart';
 
 /// Screens depend only on these interfaces (design.md, "UI-first approach").
 /// Two implementations exist: MockUnitRepository etc. (data/mock, used by
@@ -19,6 +20,10 @@ abstract class UnitRepository {
 abstract class TransactionRepository {
   Stream<List<MoneyTransaction>> watchTransactions({String? unitId});
   Future<void> addTransaction(MoneyTransaction transaction);
+  // In-place edit of an existing row (the review inbox's Fix, #21).
+  // Drift implements it as an upsert by primary key; the mock replaces
+  // the stored item with the same id.
+  Future<void> updateTransaction(MoneyTransaction transaction);
   Future<void> confirmTransaction(String transactionId);
   Future<void> deleteTransaction(String transactionId);
 }
@@ -45,4 +50,18 @@ abstract class TemplateRepository {
   Stream<List<CaptureTemplate>> watchTemplates({String? unitId});
   Future<void> saveTemplate(CaptureTemplate template);
   Future<void> deleteTemplate(String templateId);
+}
+
+/// Unparsed captures (design.md's `unparsed_capture` table): messages
+/// nothing could read, kept for the review inbox's "Couldn't read these"
+/// list (US-11) and auto-purged after 7 days. #21 writes these from the
+/// share/paste paths; #22's notification listener writes the same table.
+abstract class CaptureRepository {
+  Stream<List<UnparsedCapture>> watchUnparsed();
+  Future<void> recordUnparsed({
+    required String id,
+    required String sourcePackage,
+    required String rawText,
+  });
+  Future<void> deleteUnparsed(String captureId);
 }

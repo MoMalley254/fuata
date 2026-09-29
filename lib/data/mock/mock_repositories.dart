@@ -7,6 +7,7 @@ import '../../domain/models/settings.dart';
 import '../../domain/models/template.dart';
 import '../../domain/models/transaction.dart';
 import '../../domain/models/unit.dart';
+import '../../domain/models/unparsed_capture.dart';
 import '../../domain/repositories/repositories.dart';
 
 /// Sample data matching docs/ui-design-brief.md section 6, so screens
@@ -224,6 +225,10 @@ class MockTransactionRepository implements TransactionRepository {
       _store.add(transaction);
 
   @override
+  Future<void> updateTransaction(MoneyTransaction transaction) async =>
+      _store.update((t) => t.id == transaction.id, (_) => transaction);
+
+  @override
   Future<void> confirmTransaction(String transactionId) async {
     _store.update(
           (t) => t.id == transactionId,
@@ -279,4 +284,35 @@ class MockTemplateRepository implements TemplateRepository {
   @override
   Future<void> deleteTemplate(String templateId) async =>
       _store.removeWhere((t) => t.id == templateId);
+}
+
+/// In-memory unparsed captures (#21) — same store semantics as the
+/// others, including the 7-day auto-purge the drift repo enforces.
+class MockCaptureRepository implements CaptureRepository {
+  final _store = _Store<UnparsedCapture>([]);
+
+  @override
+  Stream<List<UnparsedCapture>> watchUnparsed() => _store.watch();
+
+  @override
+  Future<void> recordUnparsed({
+    required String id,
+    required String sourcePackage,
+    required String rawText,
+  }) async {
+    _store.add(
+      UnparsedCapture(
+        id: id,
+        receivedAt: DateTime.now().toUtc(),
+        sourcePackage: sourcePackage,
+        rawText: rawText,
+      ),
+    );
+    final cutoff = DateTime.now().toUtc().subtract(const Duration(days: 7));
+    _store.removeWhere((u) => u.receivedAt.isBefore(cutoff));
+  }
+
+  @override
+  Future<void> deleteUnparsed(String captureId) async =>
+      _store.removeWhere((u) => u.id == captureId);
 }
