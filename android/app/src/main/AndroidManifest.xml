@@ -1,4 +1,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Issue #16: Android 13+ needs explicit permission to post the
+         ongoing banner. Requested at first post (see BannerPlatform's
+         _requestPermissionOnce), never at launch. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <application
         android:label="fuata"
         android:name="${applicationName}"
