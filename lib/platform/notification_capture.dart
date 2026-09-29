@@ -26,8 +26,10 @@ import 'package:flutter/widgets.dart';
 import '../data/constants/method_channels_constants.dart';
 import '../data/db/app_database.dart';
 import '../data/db/drift_repositories.dart';
+import '../domain/logic/banner_loader.dart';
 import '../domain/logic/capture_pipeline.dart';
 import '../domain/logic/serial_queue.dart';
+import 'banner.dart';
 
 const _channel = MethodChannel(captureMethodName);
 
@@ -184,12 +186,49 @@ Future<bool> _captureOne(String packageName, String text) async {
       settings: DriftSettingsRepository(db),
     );
     final outcome = await processor.captureNotification(packageName, text);
-    return outcome is Captured || outcome is CaptureUnparsed;
+    final wrote = outcome is Captured || outcome is CaptureUnparsed;
+    if (wrote) {
+      // Issue #16: the ongoing banner has to be re-posted from *here*
+      // too — this isolate is the only thing running when the app is
+      // closed, so the UI isolate's bannerSyncProvider can't see the
+      // write. A banner failure must never break the capture: the row is
+      // already saved, and the UI isolate re-posts on next open.
+      try {
+        await _refreshBanner(db);
+      } catch (e) {
+        debugPrint('[capture] banner re-post failed: ${e.runtimeType}');
+      }
+    }
+    return wrote;
   } catch (e, st) {
     // Type only — an exception message could echo notification text.
     debugPrint('[capture] failed: ${e.runtimeType}\n$st');
     return false;
   } finally {
     await db.close();
+  }
+}
+
+/// Rebuilds the banner from the same repositories the capture just wrote
+/// through, and posts or cancels it. Runs the exact same
+/// [loadBannerContent] the UI isolate does.
+Future<void> _refreshBanner(AppDatabase db) async {
+  final content = await loadBannerContent(
+    units: DriftUnitRepository(db),
+    transactions: DriftTransactionRepository(db),
+    limits: DriftLimitRepository(db),
+    settings: DriftSettingsRepository(db),
+  );
+  if (content == null) {
+    await BannerPlatform.instance.cancel();
+  } else {
+    await BannerPlatform.instance.show(
+      content,
+      // Read once here from the *current* settings so the background
+      // isolate sees the same lock-screen choice the UI isolate would.
+      redactOnLockScreen:
+      (await DriftSettingsRepository(db).watchSettings().first)
+          .redactedLockScreenBanner,
+    );
   }
 }

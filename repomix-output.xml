@@ -95,6 +95,8 @@ lib/
       mock_repositories.dart
   domain/
     logic/
+      banner_content.dart
+      banner_loader.dart
       capture_pipeline.dart
       dedupe.dart
       ledger.dart
@@ -112,16 +114,20 @@ lib/
     repositories/
       repositories.dart
   platform/
+    banner.dart
     notification_capture.dart
     share_intake.dart
   ui/
     providers/
       app_providers.dart
+      banner_providers.dart
       capture_providers.dart
     screens/
       activity_screen.dart
       auto_catch_screen.dart
+      banner_setup_screen.dart
       home_screen.dart
+      limits_screen.dart
       manage_rules_screen.dart
       me_screen.dart
       my_money_screen.dart
@@ -140,10 +146,14 @@ lib/
     activity/
       empty_activity.dart
       grouped_list.dart
+    banner/
+      banner_preview.dart
     capture_review/
       all_caught_up.dart
       pending_card.dart
       unparsed_card.dart
+    limits/
+      limit_card.dart
     personalization/
       action_row.dart
       detail_level_example.dart
@@ -162,6 +172,7 @@ lib/
       step_label.dart
     sheets/
       add_transaction_sheet.dart
+      edit_limit_sheet.dart
       edit_unit_sheet.dart
       fix_captured_sheet.dart
       transaction_detail_sheet.dart
@@ -184,6 +195,7 @@ test/
       app_database_test.dart
       capture_source_repository_test.dart
   domain/
+    banner_content_test.dart
     capture_pipeline_test.dart
     dedupe_test.dart
     ledger_test.dart
@@ -196,6 +208,846 @@ README.md
 
 <files>
 This section contains the contents of the repository's files.
+
+<file path="lib/domain/logic/banner_loader.dart">
+// ---------------------------------------------------------------------------
+// Loading what the ongoing banner needs (issue #16). Depends only on
+// repository interfaces, so the same function runs in the UI isolate
+// (via banner_providers.dart) and in the notification listener's
+// background isolate (via platform/notification_capture.dart) — the
+// banner a person sees can never disagree with what the parser wrote.
+// ---------------------------------------------------------------------------
+
+import '../models/limit_rule.dart';
+import '../repositories/repositories.dart';
+import 'banner_content.dart';
+import 'ledger.dart';
+
+/// Returns the content the banner should show, or null when the banner
+/// is switched off in settings (in which case the caller should cancel
+/// any stale one).
+///
+/// [now] is injectable so tests can pin "today"; production callers leave
+/// it out and get [DateTime.now].
+Future<BannerContent?> loadBannerContent({
+  required UnitRepository units,
+  required TransactionRepository transactions,
+  required LimitRepository limits,
+  required SettingsRepository settings,
+  DateTime Function()? now,
+}) async {
+  final clock = now ?? DateTime.now;
+
+  final s = await settings.watchSettings().first;
+  if (!s.bannerEnabled) return null;
+
+  final unitList = await units.watchUnits().first;
+  final txList = await transactions.watchTransactions().first;
+  final limitList = await limits.watchLimits().first;
+
+  final (start, end) = Ledger.todayRange(clock());
+  final spentToday = Ledger.spentInPeriod(txList, start, end);
+
+  final dailyLimit = limitList
+      .where((l) =>
+  l.scope == LimitScope.overall &&
+      l.period == LimitPeriod.day &&
+      l.enabled)
+      .firstOrNull;
+
+  final balanceByUnit = {
+    for (final u in unitList) u.id: Ledger.balanceOf(u, txList),
+  };
+
+  return BannerContent.build(
+    status: Ledger.statusFor(dailyLimit, spentToday),
+    spentToday: spentToday,
+    dailyLimit: dailyLimit,
+    units: unitList,
+    balanceByUnit: balanceByUnit,
+    headline: s.bannerHeadline,
+    selectedUnitIds: s.bannerUnitIds,
+    showProgress: s.bannerShowProgress,
+    showQuickAdd: s.bannerShowQuickAdd,
+    // Never pre-redacted here: the *real* banner defers redaction to
+    // Android's lock-screen visibility (see BannerPlatform.show). The
+    // setup screen's preview uses `redacted: true` on its own to mock
+    // what the lock screen version looks like.
+    redacted: false,
+  );
+}
+
+extension _FirstOrNull<T> on Iterable<T> {
+  T? get firstOrNull => isEmpty ? null : first;
+}
+</file>
+
+<file path="lib/platform/banner.dart">
+// ---------------------------------------------------------------------------
+// The ongoing status banner (issue #16, US-05, ADR-008).
+//
+// One notification, one fixed id: every change to the person's money
+// updates the same notification rather than stacking a new one per
+// event. ADR-008 chose a plain ongoing notification over a foreground
+// service — Android starts the capture listener itself, and a foreground
+// service just to display a number would be both overkill and
+// increasingly restricted on newer Android.
+//
+// Android ties an app's notification colour to its icon, so status is
+// shown with the emoji, a progress bar and the accent-tinted small icon
+// — never colour alone (ui-design-brief.md 7.10, requirements.md a11y).
+//
+// US-06's alerts live on a *separate* Android channel (issue #16 lists
+// "separate alert channel"), so muting the banner never silences a
+// real nudge.
+//
+// Nothing in this file logs amounts.
+// ---------------------------------------------------------------------------
+
+import 'dart:async';
+import 'dart:ui';
+
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+
+import '../domain/logic/banner_content.dart';
+import '../domain/models/limit_rule.dart';
+
+/// What the person did with the banner: opened it, or hit + Add (US-07).
+enum BannerAction { open, quickAdd }
+
+class BannerPlatform {
+  BannerPlatform._();
+  static final instance = BannerPlatform._();
+
+  /// Fixed id: the banner is one ongoing notification, updated in place.
+  static const bannerId = 1001;
+
+  /// Ongoing status banner. `Importance.low` on purpose — the banner is
+  /// glanceable, not something that should buzz on every data change.
+  static const bannerChannelId = 'fuata_banner';
+  static const bannerChannelName = 'Status banner';
+  static const bannerChannelDescription =
+      'The ongoing banner showing how today is going.';
+
+  /// Separate alert channel (issue #16, US-06). Created here so both are
+  /// visible in Android's per-app notification settings before either
+  /// has ever been posted to.
+  static const alertChannelId = 'fuata_alerts';
+  static const alertChannelName = 'Limit alerts';
+  static const alertChannelDescription =
+      'Nudges when you approach or pass a limit.';
+
+  final _plugin = FlutterLocalNotificationsPlugin();
+  final _actions = StreamController<BannerAction>.broadcast();
+  bool _initialised = false;
+  bool _permissionAsked = false;
+
+  /// Taps and + Add presses on the banner. Broadcast — safe to listen
+  /// late, safe to have no listener at all.
+  Stream<BannerAction> get actions => _actions.stream;
+
+  /// Idempotent. The UI isolate and the listener's background isolate
+  /// each call this once on their own plugin instance; Android sees the
+  /// same notification id either way.
+  Future<void> init() async {
+    if (_initialised) return;
+    const initSettings = InitializationSettings(
+      android: AndroidInitializationSettings('@mipmap/ic_launcher'),
+    );
+    await _plugin.initialize(
+      settings: initSettings,
+      onDidReceiveNotificationResponse: _onResponse,
+    );
+    await _createChannels();
+    _initialised = true;
+  }
+
+  Future<void> _createChannels() async {
+    final android = _plugin.resolvePlatformSpecificImplementation<
+        AndroidFlutterLocalNotificationsPlugin>();
+    if (android == null) return;
+    await android.createNotificationChannel(
+      const AndroidNotificationChannel(
+        bannerChannelId,
+        bannerChannelName,
+        description: bannerChannelDescription,
+        importance: Importance.low,
+      ),
+    );
+    await android.createNotificationChannel(
+      const AndroidNotificationChannel(
+        alertChannelId,
+        alertChannelName,
+        description: alertChannelDescription,
+        importance: Importance.high,
+      ),
+    );
+  }
+
+  BannerAction? _pending;
+
+  void _onResponse(NotificationResponse response) {
+    final action = response.actionId == 'quick_add'
+        ? BannerAction.quickAdd
+        : BannerAction.open;
+    // Cold start from a banner tap: nobody is listening yet, and a
+    // broadcast stream drops un-listened events. Stash it for main.dart
+    // to drain after the first frame.
+    if (_actions.hasListener) {
+      _actions.add(action);
+    } else {
+      _pending = action;
+    }
+  }
+
+  /// One-shot read for a cold start: the banner action that launched the
+  /// app, if any. Cleared on read.
+  BannerAction? consumePendingAction() {
+    final a = _pending;
+    _pending = null;
+    return a;
+  }
+
+  /// Post or update the banner. [content] is exactly what the setup
+  /// screen's live preview built (BannerContent.build is shared), so the
+  /// two can never disagree. [redactOnLockScreen] comes from the
+  /// person's `redactedLockScreenBanner` setting.
+  Future<void> show(
+      BannerContent content, {
+        required bool redactOnLockScreen,
+      }) async {
+    await init();
+    await _requestPermissionOnce();
+    await _plugin.show(
+      id: bannerId,
+      title: content.title,
+      body: _body(content),
+      notificationDetails: NotificationDetails(
+        android: _androidDetails(content, redactOnLockScreen),
+      ),
+    );
+  }
+
+  Future<void> cancel() async {
+    await init();
+    await _plugin.cancel(id: bannerId);
+  }
+
+  /// Ask once per process (Android 13+). No-op on older Androids and
+  /// after the first decision, so it never re-prompts.
+  Future<void> _requestPermissionOnce() async {
+    if (_permissionAsked) return;
+    _permissionAsked = true;
+    final android = _plugin.resolvePlatformSpecificImplementation<
+        AndroidFlutterLocalNotificationsPlugin>();
+    await android?.requestNotificationsPermission();
+  }
+
+  AndroidNotificationDetails _androidDetails(
+      BannerContent content,
+      bool redactOnLockScreen,
+      ) {
+    final progress = content.progress;
+    final body = _body(content);
+
+    return AndroidNotificationDetails(
+      bannerChannelId,
+      bannerChannelName,
+      channelDescription: bannerChannelDescription,
+      importance: Importance.low,
+      priority: Priority.low,
+      // ongoing + autoCancel:false so Android treats it as a status
+      // indicator and a tap doesn't silently remove it. On Android 14+
+      // a person *can* still dismiss it; the data-driven re-post is what
+      // brings it back (design.md ADR-008).
+      ongoing: true,
+      autoCancel: false,
+      playSound: false,
+      enableVibration: false,
+      onlyAlertOnce: true,
+      showWhen: false,
+      category: AndroidNotificationCategory.status,
+      // private redacts content on a secure lock screen; public shows
+      // everything. The banner is always built unredacted — Android
+      // does the redaction, not us, so the shade and the lock screen
+      // can differ without keeping two BannerContents.
+      visibility: redactOnLockScreen
+          ? NotificationVisibility.private
+          : NotificationVisibility.public,
+      // `icon` is the small-icon resource name in
+      // flutter_local_notifications (there is no `smallIcon` parameter).
+      icon: '@mipmap/ic_launcher',
+      color: _statusColor(content.status),
+      showProgress: progress != null,
+      maxProgress: 100,
+      progress: progress == null ? 0 : (progress * 100).round(),
+      actions: [
+        if (content.showQuickAdd)
+          const AndroidNotificationAction(
+            'quick_add',
+            '+ Add',
+            showsUserInterface: true,
+            cancelNotification: false,
+          ),
+        const AndroidNotificationAction(
+          'open',
+          'Open',
+          showsUserInterface: true,
+          cancelNotification: false,
+        ),
+      ],
+      styleInformation:
+      body.isEmpty ? null : BigTextStyleInformation(body),
+    );
+  }
+
+  /// Expanded body: the unit split, then the spent-today line. Empty
+  /// when the content is redacted — the title alone carries the status.
+  String _body(BannerContent content) => [
+    if (content.unitLines.isNotEmpty) content.unitLines.join(' · '),
+    if (content.spentLine != null) content.spentLine!,
+  ].join('\n');
+
+  /// Android takes a single ARGB colour, and this isolate has no access
+  /// to AppColors — the theme extension isn't available on the platform
+  /// side. These are the same hex values AppColors.light ships (see
+  /// lib/ui/theme/app_colors.dart); kept explicit here because the
+  /// banner is a platform concern, not a themed widget.
+  Color _statusColor(SpendStatus status) => switch (status) {
+    SpendStatus.safe => const Color(0xFF2E9E6B),
+    SpendStatus.warning => const Color(0xFFE8A317),
+    SpendStatus.danger => const Color(0xFFE5533D),
+    SpendStatus.overdraft => const Color(0xFFB3123F),
+  };
+}
+</file>
+
+<file path="lib/ui/providers/banner_providers.dart">
+// ---------------------------------------------------------------------------
+// The ongoing banner's data-driven re-post (issue #16, US-05).
+//
+// HomeState already recomputes on every units/transactions/limits change
+// (app_providers.dart), and settings change on every write — so watching
+// both is enough to re-post whenever the numbers or the options move.
+// What this deliberately does *not* handle: a capture written by the
+// notification listener's background isolate. That path re-posts from
+// its own isolate (platform/notification_capture.dart), because the UI
+// isolate isn't running to notice.
+// ---------------------------------------------------------------------------
+
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../../domain/logic/banner_content.dart';
+import '../../platform/banner.dart';
+import 'app_providers.dart';
+
+/// Start once, from Fuata's initState. Never read the value — the side
+/// effect *is* the provider.
+final bannerSyncProvider = Provider<void>((ref) {
+  final home = ref.watch(homeStateProvider).value;
+  final settings = ref.watch(currentSettingsProvider);
+
+  // Still loading: don't cancel a banner the background isolate just
+  // posted, and don't post a stale one. Wait for the first real value.
+  if (home == null) return;
+
+  if (!settings.bannerEnabled) {
+    BannerPlatform.instance.cancel();
+    return;
+  }
+
+  final content = BannerContent.build(
+    status: home.status,
+    spentToday: home.spentToday,
+    dailyLimit: home.dailyLimit,
+    units: home.units,
+    balanceByUnit: home.balanceByUnit,
+    headline: settings.bannerHeadline,
+    selectedUnitIds: settings.bannerUnitIds,
+    showProgress: settings.bannerShowProgress,
+    showQuickAdd: settings.bannerShowQuickAdd,
+    redacted: false, // see BannerPlatform.show — Android redacts, not us
+  );
+
+  BannerPlatform.instance.show(
+    content,
+    redactOnLockScreen: settings.redactedLockScreenBanner,
+  );
+});
+</file>
+
+<file path="lib/ui/screens/limits_screen.dart">
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../../domain/models/limit_rule.dart';
+import '../../widgets/limits/limit_card.dart';
+import '../../widgets/sheets/edit_limit_sheet.dart';
+import '../providers/app_providers.dart';
+import '../theme/app_colors.dart';
+import '../theme/app_spacing.dart';
+import '../theme/app_typography.dart';
+
+/// Limits & alerts (issue #15's UI half, ui-design-brief.md 7.8).
+///
+/// Minimum that makes the banner (#16) meaningful: one overall limit per
+/// period, each with an on/off switch. Alert-level sliders, per-unit
+/// limits, quiet hours and the live banner preview from 7.8 are
+/// deliberately deferred — see the note at the bottom of the screen.
+class LimitsScreen extends ConsumerWidget {
+  const LimitsScreen({super.key});
+
+  LimitRule? _limitFor(List<LimitRule> limits, LimitPeriod period) => limits
+      .where((l) => l.scope == LimitScope.overall && l.period == period)
+      .firstOrNull;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final c = context.colors;
+    final limits = ref.watch(limitsProvider).value ?? const <LimitRule>[];
+    final units = ref.watch(unitsProvider).value ?? const [];
+
+    if (units.isEmpty) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Limits & alerts')),
+        body: SafeArea(
+          child: Center(
+            child: Padding(
+              padding: const EdgeInsets.all(AppSpacing.xl),
+              child: Text(
+                'Add some money first — a limit needs something to '
+                    'count against.',
+                textAlign: TextAlign.center,
+                style: AppTypography.bodyMd.copyWith(
+                  color: c.onSurfaceVariant,
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    // v0.1 is effectively single-currency (ADR: overall limits cover
+    // units in the limit's currency only). Take it from the first unit.
+    final currencyCode = units.first.currencyCode;
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Limits & Alerts'),
+      ),
+      body: SafeArea(
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(
+            AppSpacing.margin,
+            AppSpacing.sm,
+            AppSpacing.margin,
+            AppSpacing.xl,
+          ),
+          children: [
+            Text(
+              "Set how much you'd like to keep to. The banner and Home's "
+                  'status ring are built from your daily limit.',
+              style: AppTypography.bodySm.copyWith(color: c.onSurfaceVariant),
+            ),
+            const SizedBox(height: AppSpacing.lg),
+            for (final period in LimitPeriod.values) ...[
+              LimitCard(
+                period: period,
+                limit: _limitFor(limits, period),
+                currencyCode: currencyCode,
+                onTap: () => showEditLimitSheet(
+                  period: period,
+                  currencyCode: currencyCode,
+                  existing: _limitFor(limits, period),
+                ),
+                onToggle: (on) async {
+                  final current = _limitFor(limits, period);
+                  if (current == null) {
+                    // Turning on a limit that doesn't exist yet: open the
+                    // sheet so an amount gets set. You can't enable a
+                    // number that isn't there.
+                    if (on) {
+                      await showEditLimitSheet(
+                        period: period,
+                        currencyCode: currencyCode,
+                      );
+                    }
+                    return;
+                  }
+                  await ref
+                      .read(limitRepositoryProvider)
+                      .setLimit(current.copyWith(enabled: on));
+                },
+              ),
+              const SizedBox(height: AppSpacing.sm),
+            ],
+            const SizedBox(height: AppSpacing.md),
+            Text(
+              "Nudges at 70% and 90% of a limit, and again when you're "
+                  'over — landing with alerts in a follow-up.',
+              style: AppTypography.labelSm.copyWith(color: c.onSurfaceTertiary),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+</file>
+
+<file path="lib/widgets/limits/limit_card.dart">
+import 'package:flutter/material.dart';
+
+import '../../domain/models/limit_rule.dart';
+import '../../domain/models/money.dart';
+import '../../ui/theme/app_colors.dart';
+import '../../ui/theme/app_spacing.dart';
+import '../../ui/theme/app_typography.dart';
+
+class LimitCard extends StatelessWidget {
+  final LimitPeriod period;
+  final LimitRule? limit;
+  final String currencyCode;
+  final VoidCallback onTap;
+  final ValueChanged<bool> onToggle;
+
+  const LimitCard({
+    super.key,
+    required this.period,
+    required this.limit,
+    required this.currencyCode,
+    required this.onTap,
+    required this.onToggle,
+  });
+
+  String get _title => switch (period) {
+    LimitPeriod.day => 'Daily',
+    LimitPeriod.week => 'Weekly',
+    LimitPeriod.month => 'Monthly',
+  };
+
+  String get _blurb => switch (period) {
+    LimitPeriod.day => 'Resets at midnight.',
+    LimitPeriod.week => 'Resets each Monday.',
+    LimitPeriod.month => 'Resets on the first of the month.',
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    final l = limit;
+    final subtitle = l == null
+        ? 'Not set · $_blurb'
+        : '${Money(l.amountMinor, currencyCode).format()} · '
+        '${l.enabled ? _blurb.toLowerCase() : 'Paused'}';
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(AppSpacing.unitTileRadius),
+        child: Ink(
+          decoration: BoxDecoration(
+            color: c.surface,
+            borderRadius: BorderRadius.circular(AppSpacing.unitTileRadius),
+            border: Border.all(color: c.outlineVariant.withValues(alpha: 0.35)),
+          ),
+          padding: const EdgeInsets.fromLTRB(
+            AppSpacing.md,
+            AppSpacing.sm,
+            AppSpacing.xs,
+            AppSpacing.sm,
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+            Text(
+            _title,
+            style: AppTypography.bodyLg.copyWith(
+              color: l == null || !l.enabled
+                  ? c.onSurfaceVariant
+                  : c.onSurface,
+            ),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            subtitle,
+            style: AppTypography.bodySm.copyWith(
+              color: c.onSurfaceVariant,
+            ),
+          ),
+          ]
+                ),
+              ),
+              Switch.adaptive(
+                value: l?.enabled ?? false,
+                onChanged: onToggle,
+              ),
+              Icon(Icons.chevron_right_rounded, color: c.onSurfaceVariant),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+</file>
+
+<file path="lib/widgets/sheets/edit_limit_sheet.dart">
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
+
+import '../../domain/models/limit_rule.dart';
+import '../../domain/models/money.dart';
+import '../../ui/providers/app_providers.dart';
+import '../../ui/theme/app_colors.dart';
+import '../../ui/theme/app_spacing.dart';
+import '../../ui/theme/app_typography.dart';
+
+Future<void> showEditLimitSheet({
+  required LimitPeriod period,
+  required String currencyCode,
+  LimitRule? existing,
+}) async {
+  return await SmartDialog.show(
+    alignment: Alignment.bottomCenter,
+    clickMaskDismiss: true,
+    animationType: SmartAnimationType.scale,
+    builder: (_) => EditLimitSheet(
+      period: period,
+      currencyCode: currencyCode,
+      existing: existing,
+    ),
+  );
+}
+
+Future<bool?> showRemoveLimitDialog({
+  required String title,
+}) async {
+  return await SmartDialog.show<bool>(
+    clickMaskDismiss: true,
+    builder: (_) => AlertDialog(
+      title: Text('Remove the $title?'.toLowerCase()),
+      content: const Text(
+        'The banner will go back to just showing what you spent today.',
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => SmartDialog.dismiss(result: false),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: () => SmartDialog.dismiss(result: true),
+          child: const Text('Remove'),
+        ),
+      ],
+    ),
+  );
+}
+
+class EditLimitSheet extends ConsumerStatefulWidget {
+  final LimitPeriod period;
+  final String currencyCode;
+  final LimitRule? existing;
+
+  const EditLimitSheet({
+    super.key,
+    required this.period,
+    required this.currencyCode,
+    this.existing,
+  });
+
+  @override
+  ConsumerState<EditLimitSheet> createState() => _EditLimitSheetState();
+}
+
+class _EditLimitSheetState extends ConsumerState<EditLimitSheet> {
+  late final _controller = TextEditingController(
+    text: widget.existing == null
+        ? ''
+        : Money(widget.existing!.amountMinor, widget.currencyCode)
+        .format()
+        .replaceAll(',', ''),
+  );
+  bool _saving = false;
+  String? _error;
+
+  String get _title => switch (widget.period) {
+    LimitPeriod.day => 'Daily limit',
+    LimitPeriod.week => 'Weekly limit',
+    LimitPeriod.month => 'Monthly limit',
+  };
+
+  Future<void> _save() async {
+    late final Money amount;
+    try {
+      amount = Money.parseMajor(_controller.text, widget.currencyCode);
+    } on FormatException {
+      setState(() => _error = "That doesn't look like an amount");
+      return;
+    }
+    if (amount.minor <= 0) {
+      setState(() => _error = 'Amount must be more than zero');
+      return;
+    }
+
+    setState(() {
+      _saving = true;
+      _error = null;
+    });
+
+    final existing = widget.existing;
+    final rule = LimitRule(
+      id: existing?.id ?? 'l_overall_${widget.period.name}',
+      scope: LimitScope.overall,
+      period: widget.period,
+      amountMinor: amount.minor,
+      currencyCode: widget.currencyCode,
+      warnAt: existing?.warnAt ?? 0.7,
+      dangerAt: existing?.dangerAt ?? 0.9,
+      enabled: existing?.enabled ?? true,
+    );
+
+    try {
+      await ref.read(limitRepositoryProvider).setLimit(rule);
+      if (mounted) SmartDialog.dismiss();
+    } catch (e) {
+      setState(() {
+        _saving = false;
+        _error = 'Could not save: $e';
+      });
+    }
+  }
+
+  Future<void> _remove() async {
+    final id = widget.existing?.id;
+    if (id == null) return;
+
+    final confirmed = await showRemoveLimitDialog(title: _title);
+
+    if (confirmed != true) return;
+
+    await ref.read(limitRepositoryProvider).deleteLimit(id);
+    if (mounted) SmartDialog.dismiss();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    final symbol = currencySymbol(widget.currencyCode);
+
+    return Material(
+      color: Colors.transparent,
+      child: Container(
+        decoration: BoxDecoration(
+          color: c.surface,
+          borderRadius: const BorderRadius.vertical(
+            top: Radius.circular(AppSpacing.cardRadiusHero),
+          ),
+        ),
+        child: SafeArea(
+          child: Padding(
+            padding: EdgeInsets.only(
+              bottom: MediaQuery.of(context).viewInsets.bottom,
+            ),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(
+                AppSpacing.lg,
+                AppSpacing.md,
+                AppSpacing.lg,
+                AppSpacing.lg,
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Center(
+                    child: Container(
+                      width: 40,
+                      height: 4,
+                      margin: const EdgeInsets.only(bottom: AppSpacing.md),
+                      decoration: BoxDecoration(
+                        color: c.outlineVariant,
+                        borderRadius: BorderRadius.circular(AppSpacing.pill),
+                      ),
+                    ),
+                  ),
+                  Text(
+                    _title,
+                    style: AppTypography.headlineSm.copyWith(color: c.onSurface),
+                  ),
+                  const SizedBox(height: AppSpacing.xs),
+                  Text(
+                    'How much would you like to keep to?',
+                    style: AppTypography.bodySm.copyWith(
+                      color: c.onSurfaceVariant,
+                    ),
+                  ),
+                  const SizedBox(height: AppSpacing.md),
+                  TextField(
+                    controller: _controller,
+                    autofocus: true,
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                    decoration: InputDecoration(prefixText: symbol),
+                    style: AppTypography.headlineLg.copyWith(color: c.onSurface),
+                  ),
+                  if (_error != null) ...[
+                    const SizedBox(height: AppSpacing.sm),
+                    Text(
+                      _error!,
+                      style: AppTypography.bodySm.copyWith(color: c.statusDanger),
+                    ),
+                  ],
+                  const SizedBox(height: AppSpacing.lg),
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton(
+                      onPressed: _saving ? null : _save,
+                      child: _saving
+                          ? const SizedBox(
+                        height: 18,
+                        width: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                          : const Text('Save'),
+                    ),
+                  ),
+                  if (widget.existing != null) ...[
+                    const SizedBox(height: AppSpacing.sm),
+                    Align(
+                      alignment: Alignment.center,
+                      child: TextButton(
+                        onPressed: _saving ? null : _remove,
+                        child: Text(
+                          'Remove limit',
+                          style: AppTypography.labelMd
+                              .copyWith(color: c.statusDanger),
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+</file>
 
 <file path="android/app/src/debug/AndroidManifest.xml">
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
@@ -1066,6 +1918,123 @@ class SettingsEntries extends Table {
 }
 </file>
 
+<file path="lib/domain/logic/banner_content.dart">
+// ---------------------------------------------------------------------------
+// What the notification banner says (issues #16 / #17, US-05,
+// ui-design-brief.md 7.9-7.10).
+//
+// Pure Dart, no widgets: the banner setup screen's live preview (#17) and
+// the real ongoing notification (#16) both call BannerContent.build(), so
+// what the person sees in the preview is exactly what Android will show.
+// ---------------------------------------------------------------------------
+
+import '../models/limit_rule.dart';
+import '../models/money.dart';
+import '../models/settings.dart';
+import '../models/unit.dart';
+
+class BannerContent {
+  final SpendStatus status;
+
+  /// Collapsed headline, e.g. "🟢 1,500 left today".
+  final String title;
+
+  /// 0..1 share of today's limit used; null when hidden or no daily limit.
+  final double? progress;
+
+  /// Expanded body: one "Cash 760" entry per shown unit (empty when redacted).
+  final List<String> unitLines;
+
+  /// Expanded body: "Spent today 1,500" (null when redacted).
+  final String? spentLine;
+
+  final bool showQuickAdd;
+
+  const BannerContent({
+    required this.status,
+    required this.title,
+    required this.progress,
+    required this.unitLines,
+    required this.spentLine,
+    required this.showQuickAdd,
+  });
+
+  static BannerContent build({
+    required SpendStatus status,
+    required int spentToday,
+    required LimitRule? dailyLimit,
+    required List<MoneyUnit> units,
+    required Map<String, int> balanceByUnit,
+    required BannerHeadline headline,
+    required Set<String> selectedUnitIds, // empty = every unit
+    required bool showProgress,
+    required bool showQuickAdd,
+    required bool redacted,
+
+}) {
+    final active = units.where((u) => !u.archived).toList();
+    final shown = active
+        .where((u) => selectedUnitIds.isEmpty || selectedUnitIds.contains(u.id))
+        .toList();
+
+    final code =
+        dailyLimit?.currencyCode ??
+            (active.isEmpty ? 'KES' : active.first.currencyCode);
+    String fmt(int minor) => Money(minor, code).format();
+
+    final emoji = status.emoji;
+    final left = dailyLimit == null ? null : dailyLimit.amountMinor - spentToday;
+
+    final String title;
+    if (redacted) {
+// Lock-screen version: words only, never an amount.
+      title = '$emoji ${status.label}';
+    } else {
+switch(headline) {
+  case BannerHeadline.leftToday:
+    if (left == null) {
+      title = '$emoji Spent ${fmt(spentToday)} today';
+    } else if (left < 0) {
+      title = '$emoji Over by ${fmt(-left)}';
+    } else if (left == 0) {
+      title = '$emoji Nothing left today';
+    } else {
+      title = '$emoji ${fmt(left)} left today';
+    }
+  case BannerHeadline.spentToday:
+    title = '$emoji Spent ${fmt(spentToday)} today';
+  case BannerHeadline.totalIHave:
+  // Only units in the banner's currency are summed: adding KES to
+  // USD would be a made-up number.
+    final total = shown
+        .where((u) => u.currencyCode == code)
+        .fold<int>(0, (sum, u) => sum + (balanceByUnit[u.id] ?? 0));
+    title = '$emoji ${fmt(total)} in total';
+}
+    }
+
+    double? progress;
+    if (showProgress && dailyLimit != null && dailyLimit.amountMinor > 0) {
+      progress = (spentToday / dailyLimit.amountMinor).clamp(0.0, 1.0);
+    }
+
+    return BannerContent(
+      status: status,
+      title: title,
+      progress: progress,
+      unitLines: redacted
+          ? const []
+          : [
+        for (final u in shown)
+          '${u.name} ${Money(balanceByUnit[u.id] ?? 0, u.currencyCode).format()}',
+      ],
+      spentLine: redacted ? null : 'Spent today ${fmt(spentToday)}',
+      showQuickAdd: showQuickAdd,
+    );
+  }
+}
+</file>
+
 <file path="lib/domain/logic/capture_pipeline.dart">
 // ---------------------------------------------------------------------------
 // The capture pipeline (issues #21 and #22): turns one message — pasted,
@@ -1543,6 +2512,29 @@ class LimitRule {
     if (ratio >= warnAt) return SpendStatus.warning;
     return SpendStatus.safe;
   }
+
+  LimitRule copyWith({
+    LimitScope? scope,
+    String? unitId,
+    LimitPeriod? period,
+    int? amountMinor,
+    String? currencyCode,
+    double? warnAt,
+    double? dangerAt,
+    bool? enabled,
+  }) {
+    return LimitRule(
+      id: id,
+      scope: scope ?? this.scope,
+      unitId: unitId ?? this.unitId,
+      period: period ?? this.period,
+      amountMinor: amountMinor ?? this.amountMinor,
+      currencyCode: currencyCode ?? this.currencyCode,
+      warnAt: warnAt ?? this.warnAt,
+      dangerAt: dangerAt ?? this.dangerAt,
+      enabled: enabled ?? this.enabled,
+    );
+  }
 }
 </file>
 
@@ -1659,8 +2651,10 @@ import 'package:flutter/widgets.dart';
 import '../data/constants/method_channels_constants.dart';
 import '../data/db/app_database.dart';
 import '../data/db/drift_repositories.dart';
+import '../domain/logic/banner_loader.dart';
 import '../domain/logic/capture_pipeline.dart';
 import '../domain/logic/serial_queue.dart';
+import 'banner.dart';
 
 const _channel = MethodChannel(captureMethodName);
 
@@ -1817,13 +2811,50 @@ Future<bool> _captureOne(String packageName, String text) async {
       settings: DriftSettingsRepository(db),
     );
     final outcome = await processor.captureNotification(packageName, text);
-    return outcome is Captured || outcome is CaptureUnparsed;
+    final wrote = outcome is Captured || outcome is CaptureUnparsed;
+    if (wrote) {
+      // Issue #16: the ongoing banner has to be re-posted from *here*
+      // too — this isolate is the only thing running when the app is
+      // closed, so the UI isolate's bannerSyncProvider can't see the
+      // write. A banner failure must never break the capture: the row is
+      // already saved, and the UI isolate re-posts on next open.
+      try {
+        await _refreshBanner(db);
+      } catch (e) {
+        debugPrint('[capture] banner re-post failed: ${e.runtimeType}');
+      }
+    }
+    return wrote;
   } catch (e, st) {
     // Type only — an exception message could echo notification text.
     debugPrint('[capture] failed: ${e.runtimeType}\n$st');
     return false;
   } finally {
     await db.close();
+  }
+}
+
+/// Rebuilds the banner from the same repositories the capture just wrote
+/// through, and posts or cancels it. Runs the exact same
+/// [loadBannerContent] the UI isolate does.
+Future<void> _refreshBanner(AppDatabase db) async {
+  final content = await loadBannerContent(
+    units: DriftUnitRepository(db),
+    transactions: DriftTransactionRepository(db),
+    limits: DriftLimitRepository(db),
+    settings: DriftSettingsRepository(db),
+  );
+  if (content == null) {
+    await BannerPlatform.instance.cancel();
+  } else {
+    await BannerPlatform.instance.show(
+      content,
+      // Read once here from the *current* settings so the background
+      // isolate sees the same lock-screen choice the UI isolate would.
+      redactOnLockScreen:
+      (await DriftSettingsRepository(db).watchSettings().first)
+          .redactedLockScreenBanner,
+    );
   }
 }
 </file>
@@ -2157,6 +3188,249 @@ class _AutoCatchScreenState extends ConsumerState<AutoCatchScreen> with WidgetsB
                       const SizedBox(height: AppSpacing.sm),
                     ],
                   ],
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+</file>
+
+<file path="lib/ui/screens/banner_setup_screen.dart">
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../../domain/logic/banner_content.dart';
+import '../../domain/models/limit_rule.dart';
+import '../../domain/models/money.dart';
+import '../../domain/models/settings.dart';
+import '../../widgets/app_chips.dart';
+import '../../widgets/banner/banner_preview.dart';
+import '../../widgets/personalization/section_card.dart';
+import '../../widgets/personalization/toggle_row.dart';
+import '../providers/app_providers.dart';
+import '../theme/app_colors.dart';
+import '../theme/app_spacing.dart';
+import '../theme/app_typography.dart';
+
+/// Banner setup (issue #17, US-05, ui-design-brief.md 7.9): choose what the
+/// notification banner shows, with a live preview at the top.
+///
+/// Options are saved straight into AppSettings; the banner service (#16)
+/// reads the same settings and the same BannerContent.build(), so the
+/// preview never disagrees with the real notification.
+class BannerSetupScreen extends ConsumerStatefulWidget {
+  const BannerSetupScreen({super.key});
+
+  @override
+  ConsumerState<BannerSetupScreen> createState() => _BannerSetupScreenState();
+}
+
+/// null = "Now" (the person's real numbers); otherwise a made-up day that
+/// lands in that status, so all four looks can be checked (brief 7.10).
+class _BannerSetupScreenState extends ConsumerState<BannerSetupScreen> {
+  SpendStatus? _sample;
+  bool _lockScreen = false;
+
+  static const _sampleRatio = {
+    SpendStatus.safe: 0.25,
+    SpendStatus.warning: 0.8,
+    SpendStatus.danger: 0.95,
+    SpendStatus.overdraft: 1.1,
+  };
+
+  void _update(AppSettings Function(AppSettings) fn) {
+    final current = ref.read(currentSettingsProvider);
+    ref.read(settingsRepositoryProvider).updateSettings(fn(current));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    final s = ref.watch(currentSettingsProvider);
+    final home = ref.watch(homeStateProvider).value ?? HomeState.empty;
+    final units = home.units.where((u) => !u.archived).toList();
+
+    // --- Numbers the preview uses: real ones, or an illustrative day. ---
+    var spent = home.spentToday;
+    var limit = home.dailyLimit;
+    var status = home.status;
+    final sample = _sample;
+    if (sample != null) {
+      final code = limit?.currencyCode ??
+          (units.isEmpty ? 'KES' : units.first.currencyCode);
+      final amount =
+          limit?.amountMinor ?? Money.parseMajor('2000', code).minor;
+      limit = LimitRule(
+        id: 'preview',
+        scope: LimitScope.overall,
+        period: LimitPeriod.day,
+        amountMinor: amount,
+        currencyCode: code,
+      );
+      spent = (amount * _sampleRatio[sample]!).round();
+      status = limit.statusFor(spent);
+    }
+
+    final content = BannerContent.build(
+      status: status,
+      spentToday: spent,
+      dailyLimit: limit,
+      units: units,
+      balanceByUnit: home.balanceByUnit,
+      headline: s.bannerHeadline,
+      selectedUnitIds: s.bannerUnitIds,
+      showProgress: s.bannerShowProgress,
+      showQuickAdd: s.bannerShowQuickAdd,
+      redacted: _lockScreen && s.redactedLockScreenBanner,
+    );
+
+    final allUnits = s.bannerUnitIds.isEmpty;
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('Banner')),
+      body: SafeArea(
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(
+              AppSpacing.margin, AppSpacing.md, AppSpacing.margin, AppSpacing.xl),
+          children: [
+            SectionCard(
+              title: 'Preview',
+              children: [
+                BannerPreview(content: content),
+                const SizedBox(height: AppSpacing.md),
+                Wrap(
+                  spacing: AppSpacing.sm,
+                  runSpacing: AppSpacing.sm,
+                  children: [
+                    AppChoiceChip(
+                      label: 'Now',
+                      selected: _sample == null,
+                      onTap: () => setState(() => _sample = null),
+                    ),
+                    for (final st in SpendStatus.values)
+                      AppChoiceChip(
+                        label: '${st.emoji} ${st.label}',
+                        selected: _sample == st,
+                        onTap: () => setState(() => _sample = st),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: AppSpacing.sm),
+                Wrap(
+                  spacing: AppSpacing.sm,
+                  children: [
+                    AppChoiceChip(
+                      label: 'Unlocked',
+                      selected: !_lockScreen,
+                      onTap: () => setState(() => _lockScreen = false),
+                    ),
+                    AppChoiceChip(
+                      label: 'Lock screen',
+                      selected: _lockScreen,
+                      onTap: () => setState(() => _lockScreen = true),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: AppSpacing.sm),
+                Text(
+                  'Android limits notification colour, so your status shows as an '
+                      'emoji, a progress bar and a coloured icon.',
+                  style: AppTypography.bodySm.copyWith(color: c.onSurfaceVariant),
+                ),
+              ],
+            ),
+            const SizedBox(height: AppSpacing.lg),
+            SectionCard(
+              title: 'Show the banner',
+              children: [
+                ToggleRow(
+                  title: 'Banner in my notifications',
+                  subtitle: 'See how you are doing without opening the app.',
+                  value: s.bannerEnabled,
+                  onChanged: (v) => _update((x) => x.copyWith(bannerEnabled: v)),
+                ),
+              ],
+            ),
+            const SizedBox(height: AppSpacing.lg),
+            SectionCard(
+              title: 'The big number',
+              children: [
+                Wrap(
+                  spacing: AppSpacing.sm,
+                  runSpacing: AppSpacing.sm,
+                  children: [
+                    for (final h in BannerHeadline.values)
+                      AppChoiceChip(
+                        label: h.label,
+                        selected: s.bannerHeadline == h,
+                        onTap: () => _update((x) => x.copyWith(bannerHeadline: h)),
+                      ),
+                  ],
+                ),
+              ],
+            ),
+            const SizedBox(height: AppSpacing.lg),
+            SectionCard(
+              title: 'Units shown',
+              children: [
+                Wrap(
+                  spacing: AppSpacing.sm,
+                  runSpacing: AppSpacing.sm,
+                  children: [
+                    AppChoiceChip(
+                      label: 'All',
+                      selected: allUnits,
+                      onTap: () =>
+                          _update((x) => x.copyWith(bannerUnitIds: <String>{})),
+                    ),
+                    for (final u in units)
+                      AppChoiceChip(
+                        label: '${u.iconEmoji} ${u.name}',
+                        selected: !allUnits && s.bannerUnitIds.contains(u.id),
+                        onTap: () => _update((x) {
+                          final next = {...x.bannerUnitIds};
+                          if (!next.remove(u.id)) next.add(u.id);
+                          // Everything picked, or nothing left: same as "All".
+                          final everything = units.every((e) => next.contains(e.id));
+                          return x.copyWith(
+                            bannerUnitIds: everything ? <String>{} : next,
+                          );
+                        }),
+                      ),
+                  ],
+                ),
+              ],
+            ),
+            const SizedBox(height: AppSpacing.lg),
+            SectionCard(
+              title: 'Details',
+              children: [
+                ToggleRow(
+                  title: 'Progress bar',
+                  subtitle: 'How much of today\'s limit is used.',
+                  value: s.bannerShowProgress,
+                  onChanged: (v) =>
+                      _update((x) => x.copyWith(bannerShowProgress: v)),
+                ),
+                const SizedBox(height: AppSpacing.sm),
+                ToggleRow(
+                  title: '+ Add button',
+                  subtitle: 'Add a transaction straight from the banner.',
+                  value: s.bannerShowQuickAdd,
+                  onChanged: (v) =>
+                      _update((x) => x.copyWith(bannerShowQuickAdd: v)),
+                ),
+                const SizedBox(height: AppSpacing.sm),
+                ToggleRow(
+                  title: 'Hide amounts on the lock screen',
+                  subtitle: 'Shows only the status until the phone is unlocked.',
+                  value: s.redactedLockScreenBanner,
+                  onChanged: (v) =>
+                      _update((x) => x.copyWith(redactedLockScreenBanner: v)),
+                ),
               ],
             ),
           ],
@@ -2706,6 +3980,137 @@ class EmptyActivity extends StatelessWidget {
       ),
     );
   }
+}
+</file>
+
+<file path="lib/widgets/banner/banner_preview.dart">
+import 'package:flutter/material.dart';
+import 'package:fuata/domain/logic/banner_content.dart';
+import 'package:fuata/ui/theme/app_colors.dart';
+
+import '../../ui/theme/app_spacing.dart';
+import '../../ui/theme/app_status.dart';
+import '../../ui/theme/app_typography.dart';
+
+/// A mock of the Android notification shade showing the banner both
+/// collapsed and expanded (ui-design-brief.md 7.9 / 7.10). Purely
+/// presentational: everything it shows comes from [BannerContent].
+class BannerPreview extends StatelessWidget {
+  final BannerContent content;
+  const BannerPreview({super.key, required this.content});
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(AppSpacing.md),
+      decoration: BoxDecoration(
+        color: c.surfaceContainer,
+        borderRadius: BorderRadius.circular(AppSpacing.unitTileRadius),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Collapsed',
+              style: AppTypography.labelMd.copyWith(color: c.onSurfaceVariant)),
+          const SizedBox(height: AppSpacing.sm),
+          _Card(content: content, expanded: false),
+          const SizedBox(height: AppSpacing.md),
+          Text('Expanded',
+              style: AppTypography.labelMd.copyWith(color: c.onSurfaceVariant)),
+          const SizedBox(height: AppSpacing.sm),
+          _Card(content: content, expanded: true),
+        ],
+      ),
+    );
+  }
+}
+
+class _Card extends StatelessWidget {
+  final BannerContent content;
+  final bool expanded;
+  const _Card({required this.content, required this.expanded});
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    final accent = content.status.fg(c);
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(AppSpacing.md),
+      decoration: BoxDecoration(
+        color: c.surface,
+        borderRadius: BorderRadius.circular(AppSpacing.md),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Android's app row: small accent icon, app name, "now".
+          Row(
+            children: [
+              Icon(content.status.icon, size: 14, color: accent),
+              const SizedBox(width: AppSpacing.xs),
+              Text('Fuata · now',
+                  style: AppTypography.labelSm
+                      .copyWith(color: c.onSurfaceVariant)),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.xs),
+          Text(content.title,
+              style: AppTypography.bodyMd.copyWith(
+                  color: c.onSurface, fontWeight: FontWeight.w700)),
+          if (content.progress != null) ...[
+            const SizedBox(height: AppSpacing.sm),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(AppSpacing.pill),
+              child: LinearProgressIndicator(
+                value: content.progress,
+                minHeight: 6,
+                color: accent,
+                backgroundColor: accent.withValues(alpha: 0.18),
+              ),
+            ),
+          ],
+          if (expanded) ...[
+            if (content.unitLines.isNotEmpty) ...[
+              const SizedBox(height: AppSpacing.sm),
+              Text(content.unitLines.join(' · '),
+                  style: AppTypography.bodySm
+                      .copyWith(color: c.onSurfaceVariant)),
+            ],
+            if (content.spentLine != null) ...[
+              const SizedBox(height: AppSpacing.xs),
+              Text(content.spentLine!,
+                  style: AppTypography.bodySm
+                      .copyWith(color: c.onSurfaceVariant)),
+            ],
+            const SizedBox(height: AppSpacing.sm),
+            Row(
+              children: [
+                if (content.showQuickAdd) ...[
+                  _ActionLabel('+ Add', color: c.primary),
+                  const SizedBox(width: AppSpacing.md),
+                ],
+                _ActionLabel('Open', color: c.primary),
+              ],
+            ),
+          ]
+        ],
+      ),
+    );
+  }
+}
+
+class _ActionLabel extends StatelessWidget {
+  const _ActionLabel(this.text, {required this.color});
+  final String text;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) => Text(text,
+      style: AppTypography.labelLg.copyWith(color: color));
 }
 </file>
 
@@ -5774,6 +7179,109 @@ void main() {
 }
 </file>
 
+<file path="test/domain/banner_content_test.dart">
+import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:fuata/domain/logic/banner_content.dart';
+import 'package:fuata/domain/models/limit_rule.dart';
+import 'package:fuata/domain/models/settings.dart';
+import 'package:fuata/domain/models/unit.dart';
+
+void main() {
+  final now = DateTime(2026, 9, 29);
+
+  MoneyUnit unit(String id, String name, {bool archived = false}) => MoneyUnit(
+        id: id,
+        name: name,
+        kind: UnitKind.cash,
+        currencyCode: 'KES',
+        iconEmoji: '💵',
+        color: const Color(0xFF000000),
+        openingBalanceMinor: 0,
+        sortOrder: 0,
+        createdAt: now,
+        archived: archived,
+      );
+
+  final limit = const LimitRule(
+    id: 'l1',
+    scope: LimitScope.overall,
+    period: LimitPeriod.day,
+    amountMinor: 300000, // 3,000.00
+    currencyCode: 'KES',
+  );
+  final cash = unit('cash', 'Cash');
+  final mpesa = unit('mpesa', 'Mobile');
+
+  BannerContent build({
+    int spent = 150000,
+    LimitRule? dailyLimit,
+    BannerHeadline headline = BannerHeadline.leftToday,
+    Set<String> selected = const {},
+    bool progress = true,
+    bool redacted = false,
+    List<MoneyUnit>? units,
+  }) {
+    final l = dailyLimit ?? limit;
+    return BannerContent.build(
+      status: l.statusFor(spent),
+      spentToday: spent,
+      dailyLimit: l,
+      units: units ?? [cash, mpesa],
+      balanceByUnit: {'cash': 76000, 'mpesa': 345000},
+      headline: headline,
+      selectedUnitIds: selected,
+      showProgress: progress,
+      showQuickAdd: true,
+      redacted: redacted,
+    );
+  }
+
+  test('left today: emoji, amount left, progress', () {
+    final b = build();
+    expect(b.title, '🟢 1,500.00 left today');
+    expect(b.progress, closeTo(0.5, 1e-9));
+  });
+
+  test('overdraft says how far over', () {
+    final b = build(spent: 320000);
+    expect(b.status, SpendStatus.overdraft);
+    expect(b.title, '🔴 Over by 200.00');
+    expect(b.progress, 1.0); // clamped
+  });
+
+  test('spent today and total headlines', () {
+    expect(build(headline: BannerHeadline.spentToday).title,
+        '🟢 Spent 1,500.00 today');
+    expect(build(headline: BannerHeadline.totalIHave).title,
+        '🟢 4,210.00 in total');
+  });
+
+  test('picked units limit the split and the total', () {
+    final b = build(
+        selected: {'cash'}, headline: BannerHeadline.totalIHave);
+    expect(b.unitLines, ['Cash 760.00']);
+    expect(b.title, '🟢 760.00 in total');
+  });
+
+  test('archived units never appear', () {
+    final b = build(units: [cash, unit('old', 'Old', archived: true)]);
+    expect(b.unitLines, ['Cash 760.00']);
+  });
+
+  test('progress hidden when switched off', () {
+    expect(build(progress: false).progress, isNull);
+  });
+
+  test('redacted (lock screen) shows no amounts at all', () {
+    final b = build(redacted: true);
+    expect(b.title, "🟢 You're good");
+    expect(b.unitLines, isEmpty);
+    expect(b.spentLine, isNull);
+  });
+}
+</file>
+
 <file path="test/domain/capture_pipeline_test.dart">
 // Issue #22: the capture pipeline as the notification listener uses it.
 // Runs the real CaptureProcessor against real drift repositories on an
@@ -7608,201 +9116,6 @@ class Money {
 
   @override
   String toString() => '${format()} $currencyCode';
-}
-</file>
-
-<file path="lib/domain/models/settings.dart">
-// ---------------------------------------------------------------------------
-// Settings (design.md's `settings` key/value table: name, accent colour,
-// detail level, Home headline and sections, banner options, theme).
-//
-// Like unit.dart, this brings in a `Color` — the same precedent already
-// established there: the "pure Dart domain" rule is about not importing
-// *widgets*, not about avoiding Flutter's colour/enum types.
-// ---------------------------------------------------------------------------
-
-import 'package:flutter/material.dart';
-
-/// Detail level applied to Activity and transaction detail
-/// (ui-design-brief.md section 3, US-13). This is the single source of
-/// truth for the three levels — previously duplicated as a private
-/// `_DetailLevel` enum inside transaction_detail_sheet.dart.
-enum DetailLevel { simple, balanced, detailed }
-
-extension DetailLevelLabel on DetailLevel {
-  String get label => switch (this) {
-    DetailLevel.simple => 'Simple',
-    DetailLevel.balanced => 'Balanced',
-    DetailLevel.detailed => 'Detailed',
-  };
-
-  String get description => switch (this) {
-    DetailLevel.simple => 'Amount, who, and a friendly time. Nothing else.',
-    DetailLevel.balanced => 'Adds the money unit and category.',
-    DetailLevel.detailed =>
-    'Adds exact time, code, fee, note, source and balance after.',
-  };
-}
-
-/// The big number on Home's hero card (ui-design-brief.md section 3).
-enum HomeHeadline { leftToday, totalIHave, spentToday }
-
-extension HomeHeadlineLabel on HomeHeadline {
-  String get label => switch (this) {
-    HomeHeadline.leftToday => 'Left Today',
-    HomeHeadline.totalIHave => 'Total I have',
-    HomeHeadline.spentToday => 'Spent Today',
-  };
-}
-
-/// Which optional blocks Home shows, and in what order they're offered
-/// here (design brief section 3: "Which sections Home shows").
-enum HomeSection { units, lately, weekPeek }
-
-extension HomeSectionsLabel on HomeSection {
-  String get label => switch (this) {
-    HomeSection.units => 'My Money',
-    HomeSection.lately => 'Lately',
-    HomeSection.weekPeek => 'Week Peek',
-  };
-
-  String get description => switch (this) {
-    HomeSection.units => 'The scrolling row of units cards.',
-    HomeSection.lately => 'Your most recent transactions.',
-  // Not built yet (design.md open item) — the toggle exists so the
-  // preference survives until the widget does.
-    HomeSection.weekPeek => 'A tiny 7-day bar strip. Coming soon',
-  };
-}
-
-/// Light / dark / follow system (design brief section 3). A dedicated
-/// enum, rather than reusing Flutter's ThemeMode directly, keeps the
-/// domain model independent of *which* widget toolkit reads it.
-enum AppThemeMode { system, light, dark }
-
-extension AppThemeModeLabel on AppThemeMode {
-  String get label => switch (this) {
-    AppThemeMode.system => 'Follow system',
-    AppThemeMode.light => 'Light',
-    AppThemeMode.dark => 'Dark',
-  };
-
-  IconData get icon => switch (this) {
-    AppThemeMode.system => Icons.brightness_auto_rounded,
-    AppThemeMode.light => Icons.light_mode_rounded,
-    AppThemeMode.dark => Icons.dark_mode_outlined,
-  };
-
-  ThemeMode get flutterThemeMode => switch (this) {
-    AppThemeMode.system => ThemeMode.system,
-    AppThemeMode.light => ThemeMode.light,
-    AppThemeMode.dark => ThemeMode.dark,
-  };
-}
-
-/// The accent swatches offered in Onboarding and Me (design brief:
-/// "~8 warm/cool options, plus custom"). Named, not just a raw list, so
-/// "custom" can still be recognised as "not one of these" elsewhere.
-class AppAccents {
-  AppAccents._();
-
-  static const teal = Color(0xFF006762); // default
-  static const coral = Color(0xFFE07A5F);
-  static const purple = Color(0xFF7B5EA7);
-  static const blue = Color(0xFF277DA1);
-  static const green = Color(0xFF2E9E6B);
-  static const amber = Color(0xFFE8A317);
-  static const berry = Color(0xFFB3123F);
-  static const slate = Color(0xFF3E4948);
-
-  static const swatches = <Color>[
-    teal,
-    coral,
-    purple,
-    blue,
-    green,
-    amber,
-    berry,
-    slate,
-  ];
-}
-
-/// Everything the person controls about how the app looks and behaves,
-/// as opposed to *their money* (units/transactions/limits, which live in
-/// their own repositories). One bundle, one repository, one provider —
-/// same "fewer moving parts" reasoning as HomeState in app_providers.dart.
-@immutable
-class AppSettings {
-  final String name;
-  final Color accent;
-  final AppThemeMode themeMode;
-  final HomeHeadline homeHeadline;
-  final Set<HomeSection> homeSections;
-  final DetailLevel detailLevel;
-
-  // Privacy toggles (requirements.md US-16, design brief 7.12). These are
-  // *preferences* the person sets here; the two that need OS-level
-  // enforcement (redacting the lock-screen banner, hiding amounts in
-  // Android's Recents screen) are wired up on the platform side in a
-  // later issue — this screen is where the person turns them on.
-  final bool amountsHiddenInRecents;
-  final bool redactedLockScreenBanner;
-
-  // Review-inbox toggle (ui-design-brief.md 7.6's header setting,
-  // US-11): when on, captures are inserted as confirmed and skip the
-  // Looks-right step entirely. Off by default — caught money should be
-  // eyeballed at least once.
-  final bool autoAcceptCaptures;
-
-  const AppSettings({
-    required this.name,
-    required this.accent,
-    required this.themeMode,
-    required this.homeHeadline,
-    required this.homeSections,
-    required this.detailLevel,
-    required this.amountsHiddenInRecents,
-    required this.redactedLockScreenBanner,
-    required this.autoAcceptCaptures,
-  });
-
-  static final defaults = AppSettings(
-    name: 'Amina',
-    accent: AppAccents.teal,
-    themeMode: AppThemeMode.system,
-    homeHeadline: HomeHeadline.leftToday,
-    homeSections: {HomeSection.units, HomeSection.lately},
-    detailLevel: DetailLevel.balanced,
-    amountsHiddenInRecents: false,
-    redactedLockScreenBanner: true,
-    autoAcceptCaptures: false,
-  );
-
-  AppSettings copyWith({
-    String? name,
-    Color? accent,
-    AppThemeMode? themeMode,
-    HomeHeadline? homeHeadline,
-    Set<HomeSection>? homeSections,
-    DetailLevel? detailLevel,
-    bool? amountsHiddenInRecents,
-    bool? redactedLockScreenBanner,
-    bool? autoAcceptCaptures,
-  }) {
-    return AppSettings(
-      name: name ?? this.name,
-      accent: accent ?? this.accent,
-      themeMode: themeMode ?? this.themeMode,
-      homeHeadline: homeHeadline ?? this.homeHeadline,
-      homeSections: homeSections ?? this.homeSections,
-      detailLevel: detailLevel ?? this.detailLevel,
-      amountsHiddenInRecents:
-      amountsHiddenInRecents ?? this.amountsHiddenInRecents,
-      redactedLockScreenBanner:
-      redactedLockScreenBanner ?? this.redactedLockScreenBanner,
-      autoAcceptCaptures: autoAcceptCaptures ?? this.autoAcceptCaptures,
-    );
-  }
 }
 </file>
 
@@ -10583,54 +11896,237 @@ class NotificationListener : NotificationListenerService() {
 }
 </file>
 
-<file path="docs/issue-status.md">
-# Issue status (generated 2026-09-29T12:53Z)
+<file path="lib/domain/models/settings.dart">
+// ---------------------------------------------------------------------------
+// Settings (design.md's `settings` key/value table: name, accent colour,
+// detail level, Home headline and sections, banner options, theme).
+//
+// Like unit.dart, this brings in a `Color` — the same precedent already
+// established there: the "pure Dart domain" rule is about not importing
+// *widgets*, not about avoiding Flutter's colour/enum types.
+// ---------------------------------------------------------------------------
 
-Source of truth: GitHub. Regenerate with `scripts/refresh-issue-status.sh`.
+import 'package:flutter/material.dart';
 
-| # | State | Milestone | Title |
-|---|---|---|---|
-| #56 | OPEN | v1.1 Backlog | feat(capture): user-defined custom fields in rule builder |
-| #55 | OPEN | v1.1 Backlog | feat(capture): "This part changes" wildcard in rule builder |
-| #39 | OPEN | v1.1 Backlog | feat: Open-source licence review and contribution guide |
-| #38 | OPEN | v1.1 Backlog | feat: iOS manual/share-sheet edition |
-| #37 | OPEN | v1.1 Backlog | feat: Opt-in redacted diagnostics copy button |
-| #36 | OPEN | v1.1 Backlog | feat: Listener-inactive detection and manufacturer keep-alive guides |
-| #35 | OPEN | v1.1 Backlog | feat: Scheduled encrypted export to a user-chosen folder |
-| #34 | OPEN | v1.1 Backlog | feat: Template packs: export/import/share by file or QR, bundled presets |
-| #33 | OPEN | v1.1 Backlog | feat: Recurring bills and expected income |
-| #32 | OPEN | v1.1 Backlog | feat: Recipient to category rules |
-| #31 | OPEN | v1.1 Backlog | feat: Scheduled daily/weekly/monthly summary notifications |
-| #30 | OPEN | v1.1 Backlog | feat: Outing mode (temporary budget with its own banner) |
-| #29 | OPEN | v1.1 Backlog | feat: Home screen widget |
-| #28 | OPEN | v1.1 Backlog | feat: SQLCipher encryption with Android Keystore and app lock |
-| #27 | OPEN | v0.1 MVP | chore(release): v0.1.0 |
-| #26 | OPEN | v0.1 MVP | test: manual device test pass |
-| #25 | OPEN | v0.1 MVP | chore(privacy): remove INTERNET permission and disable backup |
-| #24 | OPEN | v0.1 MVP | feat(data): JSON export/import |
-| #23 | OPEN | v0.1 MVP | feat(insight): Today/Week/Month summaries |
-| #22 | CLOSED | v0.1 MVP | feat(capture): notification listener with app allow-list and dedupe |
-| #21 | CLOSED | v0.1 MVP | feat(capture): share/paste to review inbox |
-| #20 | CLOSED | v0.1 MVP | feat(capture): rule builder UI |
-| #19 | CLOSED | v0.1 MVP | feat(capture): template model and parser |
-| #18 | CLOSED | v0.1 MVP | spike: notification listener with app closed |
-| #17 | OPEN | v0.1 MVP | feat(banner): banner setup screen with live preview |
-| #16 | OPEN | v0.1 MVP | feat(banner): ongoing notification banner |
-| #15 | CLOSED | v0.1 MVP | feat(limits): limit engine and status |
-| #14 | CLOSED | v0.1 MVP | feat(ledger): computed balances, transfers, fees |
-| #13 | CLOSED | v0.1 MVP | feat(data): local database and repositories |
-| #12 | CLOSED | v0.1 MVP | feat(ui): Me and personalisation settings |
-| #11 | CLOSED | v0.1 MVP | feat(ui): My money and unit pages |
-| #10 | CLOSED | v0.1 MVP | feat(ui): Activity screen and transaction detail |
-| #9 | CLOSED | v0.1 MVP | feat(ui): add-transaction sheet |
-| #8 | CLOSED | v0.1 MVP | feat(ui): Home (Today) screen |
-| #7 | OPEN | v0.1 MVP | feat(ui): onboarding flow |
-| #6 | CLOSED | v0.1 MVP | feat(ui): app theme, tokens and personalisation shell |
-| #5 | CLOSED | v0.1 MVP | docs: devlog and testing checklist |
-| #4 | CLOSED | v0.1 MVP | docs: design doc (data model, architecture, decision records) |
-| #3 | CLOSED | v0.1 MVP | docs: UI design brief and design tokens |
-| #2 | CLOSED | v0.1 MVP | docs: requirements document |
-| #1 | CLOSED | v0.1 MVP | chore: initialise repo and Flutter project |
+/// Detail level applied to Activity and transaction detail
+/// (ui-design-brief.md section 3, US-13). This is the single source of
+/// truth for the three levels — previously duplicated as a private
+/// `_DetailLevel` enum inside transaction_detail_sheet.dart.
+enum DetailLevel { simple, balanced, detailed }
+
+extension DetailLevelLabel on DetailLevel {
+  String get label => switch (this) {
+    DetailLevel.simple => 'Simple',
+    DetailLevel.balanced => 'Balanced',
+    DetailLevel.detailed => 'Detailed',
+  };
+
+  String get description => switch (this) {
+    DetailLevel.simple => 'Amount, who, and a friendly time. Nothing else.',
+    DetailLevel.balanced => 'Adds the money unit and category.',
+    DetailLevel.detailed =>
+    'Adds exact time, code, fee, note, source and balance after.',
+  };
+}
+
+/// The big number on Home's hero card (ui-design-brief.md section 3).
+enum HomeHeadline { leftToday, totalIHave, spentToday }
+
+extension HomeHeadlineLabel on HomeHeadline {
+  String get label => switch (this) {
+    HomeHeadline.leftToday => 'Left Today',
+    HomeHeadline.totalIHave => 'Total I have',
+    HomeHeadline.spentToday => 'Spent Today',
+  };
+}
+
+/// Which optional blocks Home shows, and in what order they're offered
+/// here (design brief section 3: "Which sections Home shows").
+enum HomeSection { units, lately, weekPeek }
+
+extension HomeSectionsLabel on HomeSection {
+  String get label => switch (this) {
+    HomeSection.units => 'My Money',
+    HomeSection.lately => 'Lately',
+    HomeSection.weekPeek => 'Week Peek',
+  };
+
+  String get description => switch (this) {
+    HomeSection.units => 'The scrolling row of units cards.',
+    HomeSection.lately => 'Your most recent transactions.',
+  // Not built yet (design.md open item) — the toggle exists so the
+  // preference survives until the widget does.
+    HomeSection.weekPeek => 'A tiny 7-day bar strip. Coming soon',
+  };
+}
+
+///#17 The big number in the banner's collapsed line (ui-design-brief.md 7.9).
+enum BannerHeadline { leftToday, spentToday, totalIHave }
+
+extension BannerHeadlineLabel on BannerHeadline {
+  String get label => switch (this) {
+    BannerHeadline.leftToday => 'Left today',
+    BannerHeadline.spentToday => 'Spent today',
+    BannerHeadline.totalIHave => 'Total I have',
+  };
+}
+
+/// Light / dark / follow system (design brief section 3). A dedicated
+/// enum, rather than reusing Flutter's ThemeMode directly, keeps the
+/// domain model independent of *which* widget toolkit reads it.
+enum AppThemeMode { system, light, dark }
+
+extension AppThemeModeLabel on AppThemeMode {
+  String get label => switch (this) {
+    AppThemeMode.system => 'Follow system',
+    AppThemeMode.light => 'Light',
+    AppThemeMode.dark => 'Dark',
+  };
+
+  IconData get icon => switch (this) {
+    AppThemeMode.system => Icons.brightness_auto_rounded,
+    AppThemeMode.light => Icons.light_mode_rounded,
+    AppThemeMode.dark => Icons.dark_mode_outlined,
+  };
+
+  ThemeMode get flutterThemeMode => switch (this) {
+    AppThemeMode.system => ThemeMode.system,
+    AppThemeMode.light => ThemeMode.light,
+    AppThemeMode.dark => ThemeMode.dark,
+  };
+}
+
+/// The accent swatches offered in Onboarding and Me (design brief:
+/// "~8 warm/cool options, plus custom"). Named, not just a raw list, so
+/// "custom" can still be recognised as "not one of these" elsewhere.
+class AppAccents {
+  AppAccents._();
+
+  static const teal = Color(0xFF006762); // default
+  static const coral = Color(0xFFE07A5F);
+  static const purple = Color(0xFF7B5EA7);
+  static const blue = Color(0xFF277DA1);
+  static const green = Color(0xFF2E9E6B);
+  static const amber = Color(0xFFE8A317);
+  static const berry = Color(0xFFB3123F);
+  static const slate = Color(0xFF3E4948);
+
+  static const swatches = <Color>[
+    teal,
+    coral,
+    purple,
+    blue,
+    green,
+    amber,
+    berry,
+    slate,
+  ];
+}
+
+/// Everything the person controls about how the app looks and behaves,
+/// as opposed to *their money* (units/transactions/limits, which live in
+/// their own repositories). One bundle, one repository, one provider —
+/// same "fewer moving parts" reasoning as HomeState in app_providers.dart.
+@immutable
+class AppSettings {
+  final String name;
+  final Color accent;
+  final AppThemeMode themeMode;
+  final HomeHeadline homeHeadline;
+  final Set<HomeSection> homeSections;
+  final DetailLevel detailLevel;
+
+  // Privacy toggles (requirements.md US-16, design brief 7.12). These are
+  // *preferences* the person sets here; the two that need OS-level
+  // enforcement (redacting the lock-screen banner, hiding amounts in
+  // Android's Recents screen) are wired up on the platform side in a
+  // later issue — this screen is where the person turns them on.
+  final bool amountsHiddenInRecents;
+  final bool redactedLockScreenBanner;
+
+  // Review-inbox toggle (ui-design-brief.md 7.6's header setting,
+  // US-11): when on, captures are inserted as confirmed and skip the
+  // Looks-right step entirely. Off by default — caught money should be
+  // eyeballed at least once.
+  final bool autoAcceptCaptures;
+
+  // Banner options (issue #17). Empty bannerUnitIds means "all units".
+  final bool bannerEnabled;
+  final BannerHeadline bannerHeadline;
+  final Set<String> bannerUnitIds;
+  final bool bannerShowProgress;
+  final bool bannerShowQuickAdd;
+
+  const AppSettings({
+    required this.name,
+    required this.accent,
+    required this.themeMode,
+    required this.homeHeadline,
+    required this.homeSections,
+    required this.detailLevel,
+    required this.amountsHiddenInRecents,
+    required this.redactedLockScreenBanner,
+    required this.autoAcceptCaptures,
+    required this.bannerEnabled,
+    required this.bannerHeadline,
+    required this.bannerUnitIds,
+    required this.bannerShowProgress,
+    required this.bannerShowQuickAdd,
+  });
+
+  static final defaults = AppSettings(
+    name: 'Amina',
+    accent: AppAccents.teal,
+    themeMode: AppThemeMode.system,
+    homeHeadline: HomeHeadline.leftToday,
+    homeSections: {HomeSection.units, HomeSection.lately},
+    detailLevel: DetailLevel.balanced,
+    amountsHiddenInRecents: false,
+    redactedLockScreenBanner: true,
+    autoAcceptCaptures: false,
+    bannerEnabled: false, // turned on by onboarding (#7) or this screen
+    bannerHeadline: BannerHeadline.leftToday,
+    bannerUnitIds: <String>{},
+    bannerShowProgress: true,
+    bannerShowQuickAdd: true,
+  );
+
+  AppSettings copyWith({
+    String? name,
+    Color? accent,
+    AppThemeMode? themeMode,
+    HomeHeadline? homeHeadline,
+    Set<HomeSection>? homeSections,
+    DetailLevel? detailLevel,
+    bool? amountsHiddenInRecents,
+    bool? redactedLockScreenBanner,
+    bool? autoAcceptCaptures,
+    bool? bannerEnabled,
+    BannerHeadline? bannerHeadline,
+    Set<String>? bannerUnitIds,
+    bool? bannerShowProgress,
+    bool? bannerShowQuickAdd,
+  }) {
+    return AppSettings(
+      name: name ?? this.name,
+      accent: accent ?? this.accent,
+      themeMode: themeMode ?? this.themeMode,
+      homeHeadline: homeHeadline ?? this.homeHeadline,
+      homeSections: homeSections ?? this.homeSections,
+      detailLevel: detailLevel ?? this.detailLevel,
+      amountsHiddenInRecents:
+      amountsHiddenInRecents ?? this.amountsHiddenInRecents,
+      redactedLockScreenBanner:
+      redactedLockScreenBanner ?? this.redactedLockScreenBanner,
+      autoAcceptCaptures: autoAcceptCaptures ?? this.autoAcceptCaptures,
+      bannerEnabled: bannerEnabled ?? this.bannerEnabled,
+      bannerHeadline: bannerHeadline ?? this.bannerHeadline,
+      bannerUnitIds: bannerUnitIds ?? this.bannerUnitIds,
+      bannerShowProgress: bannerShowProgress ?? this.bannerShowProgress,
+      bannerShowQuickAdd: bannerShowQuickAdd ?? this.bannerShowQuickAdd
+    );
+  }
+}
 </file>
 
 <file path="lib/ui/screens/activity_screen.dart">
@@ -11309,6 +12805,10 @@ class MainActivity : FlutterActivity() {
 
 <file path="android/app/src/main/AndroidManifest.xml">
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Issue #16: Android 13+ needs explicit permission to post the
+         ongoing banner. Requested at first post (see BannerPlatform's
+         _requestPermissionOnce), never at launch. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <application
         android:label="fuata"
         android:name="${applicationName}"
@@ -11679,358 +13179,54 @@ Replaces the #18 spike (`listener_spike.dart`, the spike `NotificationListener.k
 **Known limitations (not bugs):** the Dart callback handle is only valid for the build that registered it, so after an app *update* capture resumes once the app has been opened once; the access status on the Auto-catch screen is the *grant*, not proof the service is bound (§5.1 — detecting that is #36); a notification that arrives while the app has never been opened since install is dropped.
 </file>
 
-<file path="lib/data/db/drift_repositories.dart">
-// ---------------------------------------------------------------------------
-// The real repositories (issue #13). Same interfaces the mock repos in
-// data/mock/mock_repositories.dart already implement — screens don't know
-// or care which one they're wired to (design.md, "UI-first approach").
-//
-// Swapped in via app_providers.dart's provider overrides; no screen in
-// lib/ui or lib/widgets changes for this.
-// ---------------------------------------------------------------------------
+<file path="docs/issue-status.md">
+# Issue status (generated 2026-09-29T14:13Z)
 
-import 'package:drift/drift.dart';
-import 'package:flutter/material.dart';
+Source of truth: GitHub. Regenerate with `scripts/refresh-issue-status.sh`.
 
-import '../../domain/models/capture_source.dart';
-import '../../domain/models/limit_rule.dart';
-import '../../domain/models/settings.dart';
-import '../../domain/models/template.dart';
-import '../../domain/models/transaction.dart';
-import '../../domain/models/unit.dart';
-import '../../domain/models/unparsed_capture.dart';
-import '../../domain/repositories/repositories.dart';
-import 'app_database.dart';
-import 'mappers.dart';
-
-class DriftUnitRepository implements UnitRepository {
-  DriftUnitRepository(this._db);
-  final AppDatabase _db;
-
-  @override
-  Stream<List<MoneyUnit>> watchUnits({bool includeArchived = false}) {
-    final query = _db.select(_db.units)
-      ..orderBy([(u) => OrderingTerm(expression: u.sortOrder)]);
-    if (!includeArchived) {
-      query.where((u) => u.archived.equals(false));
-    }
-    return query.watch().map((rows) => rows.map(unitFromRow).toList());
-  }
-
-  @override
-  Future<void> addUnit(MoneyUnit unit) {
-    return _db.into(_db.units).insertOnConflictUpdate(unitToCompanion(unit));
-  }
-
-  @override
-  Future<void> updateUnit(MoneyUnit unit) {
-    return _db.into(_db.units).insertOnConflictUpdate(unitToCompanion(unit));
-  }
-
-  @override
-  Future<void> archiveUnit(String unitId) {
-    return (_db.update(_db.units)..where((u) => u.id.equals(unitId))).write(
-      const UnitsCompanion(archived: Value(true)),
-    );
-  }
-}
-
-class DriftTransactionRepository implements TransactionRepository {
-  DriftTransactionRepository(this._db);
-  final AppDatabase _db;
-
-  @override
-  Stream<List<MoneyTransaction>> watchTransactions({String? unitId}) {
-    final query = _db.select(_db.transactions)
-      ..orderBy([(t) => OrderingTerm.desc(t.occurredAt)]);
-    final wantedUnitId = unitId;
-    if (wantedUnitId != null) {
-      query.where((t) => t.unitId.equals(wantedUnitId));
-    }
-    return query.watch().map((rows) => rows.map(transactionFromRow).toList());
-  }
-
-  @override
-  Future<void> addTransaction(MoneyTransaction transaction) {
-    return _db
-        .into(_db.transactions)
-        .insertOnConflictUpdate(transactionToCompanion(transaction));
-  }
-
-  @override
-  Future<void> updateTransaction(MoneyTransaction transaction) {
-    // insertOnConflictUpdate by primary key — the same statement as add;
-    // the name just records what the caller means (the review inbox's
-    // Fix action, #21). Balances pick the change up automatically since
-    // they're always derived (ADR-004).
-    return _db
-        .into(_db.transactions)
-        .insertOnConflictUpdate(transactionToCompanion(transaction));
-  }
-
-  @override
-  Future<void> confirmTransaction(String transactionId) {
-    return (_db.update(
-      _db.transactions,
-    )..where((t) => t.id.equals(transactionId))).write(
-      TransactionsCompanion(status: Value(TxStatus.confirmed.name)),
-    );
-  }
-
-  @override
-  Future<void> deleteTransaction(String transactionId) {
-    return (_db.delete(
-      _db.transactions,
-    )..where((t) => t.id.equals(transactionId))).go();
-  }
-}
-
-class DriftLimitRepository implements LimitRepository {
-  DriftLimitRepository(this._db);
-  final AppDatabase _db;
-
-  @override
-  Stream<List<LimitRule>> watchLimits() {
-    return _db.select(_db.limitRules).watch().map(
-          (rows) => rows.map(limitRuleFromRow).toList(),
-    );
-  }
-
-  @override
-  Future<void> setLimit(LimitRule limit) {
-    return _db
-        .into(_db.limitRules)
-        .insertOnConflictUpdate(limitRuleToCompanion(limit));
-  }
-}
-
-/// Settings are stored as key/value rows (design.md), so this repository
-/// also owns the mapping to/from [AppSettings] — no other class needs to
-/// know the on-disk shape.
-class DriftSettingsRepository implements SettingsRepository {
-  DriftSettingsRepository(this._db);
-  final AppDatabase _db;
-
-  static const _kName = 'name';
-  static const _kAccent = 'accentValue';
-  static const _kThemeMode = 'themeMode';
-  static const _kHomeHeadline = 'homeHeadline';
-  static const _kHomeSections = 'homeSections'; // comma-separated enum names
-  static const _kDetailLevel = 'detailLevel';
-  static const _kAmountsHidden = 'amountsHiddenInRecents';
-  static const _kRedactedBanner = 'redactedLockScreenBanner';
-  static const _kAutoAccept = 'autoAcceptCaptures';
-
-  @override
-  Stream<AppSettings> watchSettings() {
-    return _db.select(_db.settingsEntries).watch().map(_toSettings);
-  }
-
-  @override
-  Future<void> updateSettings(AppSettings settings) {
-    final entries = _toEntries(settings);
-    // Replace the whole set in one transaction: simpler and safer than
-    // diffing which keys changed, and this table is tiny (under a dozen
-    // rows), so there's no performance reason not to.
-    return _db.transaction(() async {
-      await _db.delete(_db.settingsEntries).go();
-      await _db.batch((b) => b.insertAll(_db.settingsEntries, entries));
-    });
-  }
-
-  List<SettingsEntriesCompanion> _toEntries(AppSettings s) {
-    return [
-      SettingsEntriesCompanion.insert(key: _kName, value: s.name),
-      SettingsEntriesCompanion.insert(
-        key: _kAccent,
-        value: s.accent.toARGB32().toString(),
-      ),
-      SettingsEntriesCompanion.insert(key: _kThemeMode, value: s.themeMode.name),
-      SettingsEntriesCompanion.insert(
-        key: _kHomeHeadline,
-        value: s.homeHeadline.name,
-      ),
-      SettingsEntriesCompanion.insert(
-        key: _kHomeSections,
-        value: s.homeSections.map((e) => e.name).join(','),
-      ),
-      SettingsEntriesCompanion.insert(
-        key: _kDetailLevel,
-        value: s.detailLevel.name,
-      ),
-      SettingsEntriesCompanion.insert(
-        key: _kAmountsHidden,
-        value: s.amountsHiddenInRecents.toString(),
-      ),
-      SettingsEntriesCompanion.insert(
-        key: _kRedactedBanner,
-        value: s.redactedLockScreenBanner.toString(),
-      ),
-      SettingsEntriesCompanion.insert(
-        key: _kAutoAccept,
-        value: s.autoAcceptCaptures.toString(),
-      ),
-    ];
-  }
-
-  AppSettings _toSettings(List<SettingsEntryRow> rows) {
-    // Before the first updateSettings() call the table is empty (a fresh
-    // install) — fall back to AppSettings.defaults entirely rather than
-    // half-constructing settings from missing keys.
-    if (rows.isEmpty) return AppSettings.defaults;
-
-    final map = {for (final r in rows) r.key: r.value};
-    final defaults = AppSettings.defaults;
-
-    T byName<T extends Enum>(String? raw, List<T> values, T fallback) {
-      if (raw == null) return fallback;
-      return values.firstWhere((v) => v.name == raw, orElse: () => fallback);
-    }
-
-    bool boolOr(String? raw, bool fallback) {
-      if (raw == null) return fallback;
-      return raw.toLowerCase() == 'true';
-    }
-
-    return AppSettings(
-      name: map[_kName] ?? defaults.name,
-      accent: map[_kAccent] != null
-          ? Color(int.parse(map[_kAccent]!))
-          : defaults.accent,
-      themeMode: byName(map[_kThemeMode], AppThemeMode.values, defaults.themeMode),
-      homeHeadline: byName(
-        map[_kHomeHeadline],
-        HomeHeadline.values,
-        defaults.homeHeadline,
-      ),
-      homeSections: map[_kHomeSections] != null && map[_kHomeSections]!.isNotEmpty
-          ? map[_kHomeSections]!
-          .split(',')
-          .map(
-            (n) => HomeSection.values.firstWhere(
-              (v) => v.name == n,
-          orElse: () => HomeSection.units,
-        ),
-      )
-          .toSet()
-          : defaults.homeSections,
-      detailLevel: byName(
-        map[_kDetailLevel],
-        DetailLevel.values,
-        defaults.detailLevel,
-      ),
-      amountsHiddenInRecents: boolOr(
-        map[_kAmountsHidden],
-        defaults.amountsHiddenInRecents,
-      ),
-      redactedLockScreenBanner: boolOr(
-        map[_kRedactedBanner],
-        defaults.redactedLockScreenBanner,
-      ),
-      autoAcceptCaptures: boolOr(
-        map[_kAutoAccept],
-        defaults.autoAcceptCaptures,
-      ),
-    );
-  }
-}
-
-class DriftTemplateRepository implements TemplateRepository {
-  DriftTemplateRepository(this._db);
-  final AppDatabase _db;
-
-  @override
-  Stream<List<CaptureTemplate>> watchTemplates({String? unitId}) {
-    final query = _db.select(_db.templates)
-      ..orderBy([(t) => OrderingTerm.asc(t.name)]);
-    final wantedUnitId = unitId;
-    if (wantedUnitId != null) {
-      query.where((t) => t.unitId.equals(wantedUnitId));
-    }
-    return query.watch().map((rows) => rows.map(templateFromRow).toList());
-  }
-
-  @override
-  Future<void> saveTemplate(CaptureTemplate template) {
-    return _db
-        .into(_db.templates)
-        .insertOnConflictUpdate(templateToCompanion(template));
-  }
-
-  @override
-  Future<void> deleteTemplate(String templateId) {
-    return (_db.delete(
-      _db.templates,
-    )..where((t) => t.id.equals(templateId))).go();
-  }
-}
-
-/// Unparsed captures (#21): the review inbox's "Couldn't read these"
-/// list. Insert and 7-day purge run in one transaction so the table can
-/// never grow without bound, whichever happens first.
-class DriftCaptureRepository implements CaptureRepository {
-  DriftCaptureRepository(this._db);
-  final AppDatabase _db;
-
-  @override
-  Stream<List<UnparsedCapture>> watchUnparsed() {
-    final query = _db.select(_db.unparsedCaptures)
-      ..orderBy([(u) => OrderingTerm.desc(u.receivedAt)]);
-    return query.watch().map(
-          (rows) => rows.map(unparsedCaptureFromRow).toList(),
-    );
-  }
-
-  @override
-  Future<void> recordUnparsed({
-    required String id,
-    required String sourcePackage,
-    required String rawText,
-  }) {
-    return _db.transaction(() async {
-      await _db.into(_db.unparsedCaptures).insert(
-        UnparsedCapturesCompanion.insert(
-          id: id,
-          receivedAt: DateTime.now().toUtc(),
-          sourcePackage: sourcePackage,
-          rawText: rawText,
-        ),
-      );
-      final cutoff = DateTime.now().toUtc().subtract(const Duration(days: 7));
-      await (_db.delete(_db.unparsedCaptures)
-        ..where((u) => u.receivedAt.isSmallerThanValue(cutoff)))
-          .go();
-    });
-  }
-
-  @override
-  Future<void> deleteUnparsed(String captureId) {
-    return (_db.delete(
-      _db.unparsedCaptures,
-    )..where((u) => u.id.equals(captureId))).go();
-  }
-}
-/// The notification allow-list (#22). `insertOnConflictUpdate` is an
-/// `INSERT ... ON CONFLICT DO UPDATE`, not a delete-and-insert, so saving
-/// a source that a template already points at can't trip the foreign key.
-class DriftCaptureSourceRepository implements CaptureSourceRepository {
-  DriftCaptureSourceRepository(this._db);
-  final AppDatabase _db;
-
-  @override
-  Stream<List<CaptureSource>> watchSources() {
-    final query = _db.select(_db.captureSources)
-      ..orderBy([(s) => OrderingTerm.asc(s.displayName)]);
-    return query.watch().map((rows) => rows.map(captureSourceFromRow).toList());
-  }
-
-  @override
-  Future<void> saveSource(CaptureSource source) {
-    return _db
-        .into(_db.captureSources)
-        .insertOnConflictUpdate(captureSourceToCompanion(source));
-  }
-}
+| # | State | Milestone | Title |
+|---|---|---|---|
+| #56 | OPEN | v1.1 Backlog | feat(capture): user-defined custom fields in rule builder |
+| #55 | OPEN | v1.1 Backlog | feat(capture): "This part changes" wildcard in rule builder |
+| #39 | OPEN | v1.1 Backlog | feat: Open-source licence review and contribution guide |
+| #38 | OPEN | v1.1 Backlog | feat: iOS manual/share-sheet edition |
+| #37 | OPEN | v1.1 Backlog | feat: Opt-in redacted diagnostics copy button |
+| #36 | OPEN | v1.1 Backlog | feat: Listener-inactive detection and manufacturer keep-alive guides |
+| #35 | OPEN | v1.1 Backlog | feat: Scheduled encrypted export to a user-chosen folder |
+| #34 | OPEN | v1.1 Backlog | feat: Template packs: export/import/share by file or QR, bundled presets |
+| #33 | OPEN | v1.1 Backlog | feat: Recurring bills and expected income |
+| #32 | OPEN | v1.1 Backlog | feat: Recipient to category rules |
+| #31 | OPEN | v1.1 Backlog | feat: Scheduled daily/weekly/monthly summary notifications |
+| #30 | OPEN | v1.1 Backlog | feat: Outing mode (temporary budget with its own banner) |
+| #29 | OPEN | v1.1 Backlog | feat: Home screen widget |
+| #28 | OPEN | v1.1 Backlog | feat: SQLCipher encryption with Android Keystore and app lock |
+| #27 | OPEN | v0.1 MVP | chore(release): v0.1.0 |
+| #26 | OPEN | v0.1 MVP | test: manual device test pass |
+| #25 | OPEN | v0.1 MVP | chore(privacy): remove INTERNET permission and disable backup |
+| #24 | OPEN | v0.1 MVP | feat(data): JSON export/import |
+| #23 | OPEN | v0.1 MVP | feat(insight): Today/Week/Month summaries |
+| #22 | CLOSED | v0.1 MVP | feat(capture): notification listener with app allow-list and dedupe |
+| #21 | CLOSED | v0.1 MVP | feat(capture): share/paste to review inbox |
+| #20 | CLOSED | v0.1 MVP | feat(capture): rule builder UI |
+| #19 | CLOSED | v0.1 MVP | feat(capture): template model and parser |
+| #18 | CLOSED | v0.1 MVP | spike: notification listener with app closed |
+| #17 | CLOSED | v0.1 MVP | feat(banner): banner setup screen with live preview |
+| #16 | OPEN | v0.1 MVP | feat(banner): ongoing notification banner |
+| #15 | CLOSED | v0.1 MVP | feat(limits): limit engine and status |
+| #14 | CLOSED | v0.1 MVP | feat(ledger): computed balances, transfers, fees |
+| #13 | CLOSED | v0.1 MVP | feat(data): local database and repositories |
+| #12 | CLOSED | v0.1 MVP | feat(ui): Me and personalisation settings |
+| #11 | CLOSED | v0.1 MVP | feat(ui): My money and unit pages |
+| #10 | CLOSED | v0.1 MVP | feat(ui): Activity screen and transaction detail |
+| #9 | CLOSED | v0.1 MVP | feat(ui): add-transaction sheet |
+| #8 | CLOSED | v0.1 MVP | feat(ui): Home (Today) screen |
+| #7 | OPEN | v0.1 MVP | feat(ui): onboarding flow |
+| #6 | CLOSED | v0.1 MVP | feat(ui): app theme, tokens and personalisation shell |
+| #5 | CLOSED | v0.1 MVP | docs: devlog and testing checklist |
+| #4 | CLOSED | v0.1 MVP | docs: design doc (data model, architecture, decision records) |
+| #3 | CLOSED | v0.1 MVP | docs: UI design brief and design tokens |
+| #2 | CLOSED | v0.1 MVP | docs: requirements document |
+| #1 | CLOSED | v0.1 MVP | chore: initialise repo and Flutter project |
 </file>
 
 <file path="lib/data/db/mappers.dart">
@@ -12602,7 +13798,7 @@ class UnitDetailScreen extends ConsumerWidget {
                     const ComingSoonRow(
                       icon: Icons.speed_rounded,
                       title: 'Limit for this unit',
-                      subtitle: 'Set a spending limit just for this one — coming in #15/#17',
+                      subtitle: 'Set a spending limit just for this one — coming later',
                     ),
                     const SizedBox(height: AppSpacing.sm),
                     Builder(
@@ -12686,6 +13882,392 @@ Flutter (Android), Riverpod, drift/SQLite, local notifications. No backend.
 
 ## Notes
 - Allows users to label parts of receiving messages. Labelled messages take key labels : code, amount, payee, date, balance and fee. Rest of the string past the last label is completely ignored. In future updates, allow users to choose whether to ignore or strictly match all strings.
+</file>
+
+<file path="lib/data/db/drift_repositories.dart">
+// ---------------------------------------------------------------------------
+// The real repositories (issue #13). Same interfaces the mock repos in
+// data/mock/mock_repositories.dart already implement — screens don't know
+// or care which one they're wired to (design.md, "UI-first approach").
+//
+// Swapped in via app_providers.dart's provider overrides; no screen in
+// lib/ui or lib/widgets changes for this.
+// ---------------------------------------------------------------------------
+
+import 'package:drift/drift.dart';
+import 'package:flutter/material.dart';
+
+import '../../domain/models/capture_source.dart';
+import '../../domain/models/limit_rule.dart';
+import '../../domain/models/settings.dart';
+import '../../domain/models/template.dart';
+import '../../domain/models/transaction.dart';
+import '../../domain/models/unit.dart';
+import '../../domain/models/unparsed_capture.dart';
+import '../../domain/repositories/repositories.dart';
+import 'app_database.dart';
+import 'mappers.dart';
+
+class DriftUnitRepository implements UnitRepository {
+  DriftUnitRepository(this._db);
+  final AppDatabase _db;
+
+  @override
+  Stream<List<MoneyUnit>> watchUnits({bool includeArchived = false}) {
+    final query = _db.select(_db.units)
+      ..orderBy([(u) => OrderingTerm(expression: u.sortOrder)]);
+    if (!includeArchived) {
+      query.where((u) => u.archived.equals(false));
+    }
+    return query.watch().map((rows) => rows.map(unitFromRow).toList());
+  }
+
+  @override
+  Future<void> addUnit(MoneyUnit unit) {
+    return _db.into(_db.units).insertOnConflictUpdate(unitToCompanion(unit));
+  }
+
+  @override
+  Future<void> updateUnit(MoneyUnit unit) {
+    return _db.into(_db.units).insertOnConflictUpdate(unitToCompanion(unit));
+  }
+
+  @override
+  Future<void> archiveUnit(String unitId) {
+    return (_db.update(_db.units)..where((u) => u.id.equals(unitId))).write(
+      const UnitsCompanion(archived: Value(true)),
+    );
+  }
+}
+
+class DriftTransactionRepository implements TransactionRepository {
+  DriftTransactionRepository(this._db);
+  final AppDatabase _db;
+
+  @override
+  Stream<List<MoneyTransaction>> watchTransactions({String? unitId}) {
+    final query = _db.select(_db.transactions)
+      ..orderBy([(t) => OrderingTerm.desc(t.occurredAt)]);
+    final wantedUnitId = unitId;
+    if (wantedUnitId != null) {
+      query.where((t) => t.unitId.equals(wantedUnitId));
+    }
+    return query.watch().map((rows) => rows.map(transactionFromRow).toList());
+  }
+
+  @override
+  Future<void> addTransaction(MoneyTransaction transaction) {
+    return _db
+        .into(_db.transactions)
+        .insertOnConflictUpdate(transactionToCompanion(transaction));
+  }
+
+  @override
+  Future<void> updateTransaction(MoneyTransaction transaction) {
+    // insertOnConflictUpdate by primary key — the same statement as add;
+    // the name just records what the caller means (the review inbox's
+    // Fix action, #21). Balances pick the change up automatically since
+    // they're always derived (ADR-004).
+    return _db
+        .into(_db.transactions)
+        .insertOnConflictUpdate(transactionToCompanion(transaction));
+  }
+
+  @override
+  Future<void> confirmTransaction(String transactionId) {
+    return (_db.update(
+      _db.transactions,
+    )..where((t) => t.id.equals(transactionId))).write(
+      TransactionsCompanion(status: Value(TxStatus.confirmed.name)),
+    );
+  }
+
+  @override
+  Future<void> deleteTransaction(String transactionId) {
+    return (_db.delete(
+      _db.transactions,
+    )..where((t) => t.id.equals(transactionId))).go();
+  }
+}
+
+class DriftLimitRepository implements LimitRepository {
+  DriftLimitRepository(this._db);
+  final AppDatabase _db;
+
+  @override
+  Stream<List<LimitRule>> watchLimits() {
+    return _db.select(_db.limitRules).watch().map(
+          (rows) => rows.map(limitRuleFromRow).toList(),
+    );
+  }
+
+  @override
+  Future<void> setLimit(LimitRule limit) {
+    return _db
+        .into(_db.limitRules)
+        .insertOnConflictUpdate(limitRuleToCompanion(limit));
+  }
+
+  @override
+  Future<void> deleteLimit(String limitId) {
+    return (_db.delete(_db.limitRules)
+      ..where((l) => l.id.equals(limitId))).go();
+  }
+}
+
+/// Settings are stored as key/value rows (design.md), so this repository
+/// also owns the mapping to/from [AppSettings] — no other class needs to
+/// know the on-disk shape.
+class DriftSettingsRepository implements SettingsRepository {
+  DriftSettingsRepository(this._db);
+  final AppDatabase _db;
+
+  static const _kName = 'name';
+  static const _kAccent = 'accentValue';
+  static const _kThemeMode = 'themeMode';
+  static const _kHomeHeadline = 'homeHeadline';
+  static const _kHomeSections = 'homeSections'; // comma-separated enum names
+  static const _kDetailLevel = 'detailLevel';
+  static const _kAmountsHidden = 'amountsHiddenInRecents';
+  static const _kRedactedBanner = 'redactedLockScreenBanner';
+  static const _kAutoAccept = 'autoAcceptCaptures';
+
+  static const _kBannerEnabled = 'bannerEnabled';
+  static const _kBannerHeadline = 'bannerHeadline';
+  static const _kBannerUnitIds = 'bannerUnitIds'; // comma-separated ids
+  static const _kBannerProgress = 'bannerShowProgress';
+  static const _kBannerQuickAdd = 'bannerShowQuickAdd';
+
+  @override
+  Stream<AppSettings> watchSettings() {
+    return _db.select(_db.settingsEntries).watch().map(_toSettings);
+  }
+
+  @override
+  Future<void> updateSettings(AppSettings settings) {
+    final entries = _toEntries(settings);
+    // Replace the whole set in one transaction: simpler and safer than
+    // diffing which keys changed, and this table is tiny (under a dozen
+    // rows), so there's no performance reason not to.
+    return _db.transaction(() async {
+      await _db.delete(_db.settingsEntries).go();
+      await _db.batch((b) => b.insertAll(_db.settingsEntries, entries));
+    });
+  }
+
+  List<SettingsEntriesCompanion> _toEntries(AppSettings s) {
+    return [
+      SettingsEntriesCompanion.insert(key: _kName, value: s.name),
+      SettingsEntriesCompanion.insert(
+        key: _kAccent,
+        value: s.accent.toARGB32().toString(),
+      ),
+      SettingsEntriesCompanion.insert(key: _kThemeMode, value: s.themeMode.name),
+      SettingsEntriesCompanion.insert(
+        key: _kHomeHeadline,
+        value: s.homeHeadline.name,
+      ),
+      SettingsEntriesCompanion.insert(
+        key: _kHomeSections,
+        value: s.homeSections.map((e) => e.name).join(','),
+      ),
+      SettingsEntriesCompanion.insert(
+        key: _kDetailLevel,
+        value: s.detailLevel.name,
+      ),
+      SettingsEntriesCompanion.insert(
+        key: _kAmountsHidden,
+        value: s.amountsHiddenInRecents.toString(),
+      ),
+      SettingsEntriesCompanion.insert(
+        key: _kRedactedBanner,
+        value: s.redactedLockScreenBanner.toString(),
+      ),
+      SettingsEntriesCompanion.insert(
+        key: _kAutoAccept,
+        value: s.autoAcceptCaptures.toString(),
+      ),
+      SettingsEntriesCompanion.insert(
+          key: _kBannerEnabled, value: s.bannerEnabled.toString()),
+      SettingsEntriesCompanion.insert(
+          key: _kBannerHeadline, value: s.bannerHeadline.name),
+      SettingsEntriesCompanion.insert(
+          key: _kBannerUnitIds, value: s.bannerUnitIds.join(',')),
+      SettingsEntriesCompanion.insert(
+          key: _kBannerProgress, value: s.bannerShowProgress.toString()),
+      SettingsEntriesCompanion.insert(
+          key: _kBannerQuickAdd, value: s.bannerShowQuickAdd.toString()),
+    ];
+  }
+
+  AppSettings _toSettings(List<SettingsEntryRow> rows) {
+    // Before the first updateSettings() call the table is empty (a fresh
+    // install) — fall back to AppSettings.defaults entirely rather than
+    // half-constructing settings from missing keys.
+    if (rows.isEmpty) return AppSettings.defaults;
+
+    final map = {for (final r in rows) r.key: r.value};
+    final defaults = AppSettings.defaults;
+
+    T byName<T extends Enum>(String? raw, List<T> values, T fallback) {
+      if (raw == null) return fallback;
+      return values.firstWhere((v) => v.name == raw, orElse: () => fallback);
+    }
+
+    bool boolOr(String? raw, bool fallback) {
+      if (raw == null) return fallback;
+      return raw.toLowerCase() == 'true';
+    }
+
+    return AppSettings(
+      name: map[_kName] ?? defaults.name,
+      accent: map[_kAccent] != null
+          ? Color(int.parse(map[_kAccent]!))
+          : defaults.accent,
+      themeMode: byName(map[_kThemeMode], AppThemeMode.values, defaults.themeMode),
+      homeHeadline: byName(
+        map[_kHomeHeadline],
+        HomeHeadline.values,
+        defaults.homeHeadline,
+      ),
+      homeSections: map[_kHomeSections] != null && map[_kHomeSections]!.isNotEmpty
+          ? map[_kHomeSections]!
+          .split(',')
+          .map(
+            (n) => HomeSection.values.firstWhere(
+              (v) => v.name == n,
+          orElse: () => HomeSection.units,
+        ),
+      )
+          .toSet()
+          : defaults.homeSections,
+      detailLevel: byName(
+        map[_kDetailLevel],
+        DetailLevel.values,
+        defaults.detailLevel,
+      ),
+      amountsHiddenInRecents: boolOr(
+        map[_kAmountsHidden],
+        defaults.amountsHiddenInRecents,
+      ),
+      redactedLockScreenBanner: boolOr(
+        map[_kRedactedBanner],
+        defaults.redactedLockScreenBanner,
+      ),
+      autoAcceptCaptures: boolOr(
+        map[_kAutoAccept],
+        defaults.autoAcceptCaptures,
+      ),
+      bannerEnabled: boolOr(map[_kBannerEnabled], defaults.bannerEnabled),
+      bannerHeadline: byName(
+          map[_kBannerHeadline], BannerHeadline.values, defaults.bannerHeadline),
+      bannerUnitIds: (map[_kBannerUnitIds] ?? '').isEmpty
+          ? <String>{}
+          : map[_kBannerUnitIds]!.split(',').toSet(),
+      bannerShowProgress:
+      boolOr(map[_kBannerProgress], defaults.bannerShowProgress),
+      bannerShowQuickAdd:
+      boolOr(map[_kBannerQuickAdd], defaults.bannerShowQuickAdd),
+    );
+  }
+}
+
+class DriftTemplateRepository implements TemplateRepository {
+  DriftTemplateRepository(this._db);
+  final AppDatabase _db;
+
+  @override
+  Stream<List<CaptureTemplate>> watchTemplates({String? unitId}) {
+    final query = _db.select(_db.templates)
+      ..orderBy([(t) => OrderingTerm.asc(t.name)]);
+    final wantedUnitId = unitId;
+    if (wantedUnitId != null) {
+      query.where((t) => t.unitId.equals(wantedUnitId));
+    }
+    return query.watch().map((rows) => rows.map(templateFromRow).toList());
+  }
+
+  @override
+  Future<void> saveTemplate(CaptureTemplate template) {
+    return _db
+        .into(_db.templates)
+        .insertOnConflictUpdate(templateToCompanion(template));
+  }
+
+  @override
+  Future<void> deleteTemplate(String templateId) {
+    return (_db.delete(
+      _db.templates,
+    )..where((t) => t.id.equals(templateId))).go();
+  }
+}
+
+/// Unparsed captures (#21): the review inbox's "Couldn't read these"
+/// list. Insert and 7-day purge run in one transaction so the table can
+/// never grow without bound, whichever happens first.
+class DriftCaptureRepository implements CaptureRepository {
+  DriftCaptureRepository(this._db);
+  final AppDatabase _db;
+
+  @override
+  Stream<List<UnparsedCapture>> watchUnparsed() {
+    final query = _db.select(_db.unparsedCaptures)
+      ..orderBy([(u) => OrderingTerm.desc(u.receivedAt)]);
+    return query.watch().map(
+          (rows) => rows.map(unparsedCaptureFromRow).toList(),
+    );
+  }
+
+  @override
+  Future<void> recordUnparsed({
+    required String id,
+    required String sourcePackage,
+    required String rawText,
+  }) {
+    return _db.transaction(() async {
+      await _db.into(_db.unparsedCaptures).insert(
+        UnparsedCapturesCompanion.insert(
+          id: id,
+          receivedAt: DateTime.now().toUtc(),
+          sourcePackage: sourcePackage,
+          rawText: rawText,
+        ),
+      );
+      final cutoff = DateTime.now().toUtc().subtract(const Duration(days: 7));
+      await (_db.delete(_db.unparsedCaptures)
+        ..where((u) => u.receivedAt.isSmallerThanValue(cutoff)))
+          .go();
+    });
+  }
+
+  @override
+  Future<void> deleteUnparsed(String captureId) {
+    return (_db.delete(
+      _db.unparsedCaptures,
+    )..where((u) => u.id.equals(captureId))).go();
+  }
+}
+/// The notification allow-list (#22). `insertOnConflictUpdate` is an
+/// `INSERT ... ON CONFLICT DO UPDATE`, not a delete-and-insert, so saving
+/// a source that a template already points at can't trip the foreign key.
+class DriftCaptureSourceRepository implements CaptureSourceRepository {
+  DriftCaptureSourceRepository(this._db);
+  final AppDatabase _db;
+
+  @override
+  Stream<List<CaptureSource>> watchSources() {
+    final query = _db.select(_db.captureSources)
+      ..orderBy([(s) => OrderingTerm.asc(s.displayName)]);
+    return query.watch().map((rows) => rows.map(captureSourceFromRow).toList());
+  }
+
+  @override
+  Future<void> saveSource(CaptureSource source) {
+    return _db
+        .into(_db.captureSources)
+        .insertOnConflictUpdate(captureSourceToCompanion(source));
+  }
+}
 </file>
 
 <file path="lib/ui/providers/app_providers.dart">
@@ -12829,7 +14411,7 @@ final homeStateProvider = Provider<AsyncValue<HomeState>>((ref) {
   final spentToday = Ledger.spentInPeriod(transactions, start, end);
 
   final dailyLimit = limits
-      .where((l) => l.scope == LimitScope.overall && l.period == LimitPeriod.day)
+      .where((l) => l.enabled && l.scope == LimitScope.overall && l.period == LimitPeriod.day)
       .firstOrNull;
 
   final status = Ledger.statusFor(dailyLimit, spentToday);
@@ -12849,229 +14431,6 @@ final homeStateProvider = Provider<AsyncValue<HomeState>>((ref) {
 
 extension _FirstOrNull<T> on Iterable<T> {
   T? get firstOrNull => isEmpty ? null : first;
-}
-</file>
-
-<file path="lib/ui/screens/me_screen.dart">
-import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:fuata/ui/providers/capture_providers.dart';
-import 'package:fuata/ui/screens/auto_catch_screen.dart';
-import 'package:fuata/ui/screens/review_inbox_screen.dart';
-import 'package:fuata/ui/screens/rule_builder_screen.dart';
-
-import '../../domain/models/settings.dart';
-import '../../widgets/coming_soon_row.dart';
-import '../../widgets/personalization/action_row.dart';
-import '../../widgets/personalization/detail_level_example.dart';
-import '../../widgets/personalization/label.dart';
-import '../../widgets/personalization/privayc_card.dart';
-import '../../widgets/personalization/profile_block.dart';
-import '../../widgets/personalization/section_card.dart';
-import '../../widgets/personalization/toggle_row.dart';
-import '../providers/app_providers.dart';
-import '../theme/app_colors.dart';
-import '../theme/app_spacing.dart';
-import '../theme/app_typography.dart';
-import '../../widgets/app_chips.dart';
-
-/// Me: settings and personalisation (ui-design-brief.md section 7.12,
-/// US-13/US-14/US-16). Every control here writes straight through
-/// `settingsRepositoryProvider` — same UI-first shape as the rest of the
-/// app (screens depend on the repository interface; today that's
-/// `MockSettingsRepository`, an in-memory store, same as units/
-/// transactions/limits until #13).
-///
-/// Limits & alerts and Banner each get their own dedicated screens in
-/// later issues (#15/#17, #16/#17) — shown here as `ComingSoonRow`s that
-/// link out, rather than half-built here. Message reading is live as of
-/// #20 (rules), #21 (share/paste capture + review inbox) and #22
-/// (Auto-catch: notification access + allowed apps).
-class MeScreen extends ConsumerWidget {
-  const MeScreen({super.key});
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final c = context.colors;
-    final settings = ref.watch(currentSettingsProvider);
-    final repo = ref.read(settingsRepositoryProvider);
-    final pendingCount = ref.watch(pendingTransactionsProvider).length;
-    final watchedApps = ref.watch(allowedPackagesProvider).length;
-
-    void update(AppSettings Function(AppSettings) fn) {
-      repo.updateSettings(fn(settings));
-    }
-
-    return Scaffold(
-      appBar: AppBar(title: const Text('Me')),
-      body: SafeArea(
-        child: ListView(
-          padding: const EdgeInsets.fromLTRB(
-            AppSpacing.margin,
-            AppSpacing.sm,
-            AppSpacing.margin,
-            AppSpacing.xl,
-          ),
-          children: [
-            ProfileBlock(settings: settings, onChanged: update),
-            const SizedBox(height: AppSpacing.lg),
-            SectionCard(
-              title: 'Home',
-              children: [
-                Label('Headline number'),
-                const SizedBox(height: AppSpacing.sm),
-                Wrap(
-                  spacing: AppSpacing.sm,
-                  runSpacing: AppSpacing.sm,
-                  children: HomeHeadline.values.map((h) {
-                    return AppChoiceChip(
-                      label: h.label,
-                      selected: settings.homeHeadline == h,
-                      onTap: () => update((s) => s.copyWith(homeHeadline: h)),
-                    );
-                  }).toList(),
-                ),
-                const SizedBox(height: AppSpacing.md),
-                Label('Sections'),
-                const SizedBox(height: AppSpacing.xs),
-                ...HomeSection.values.map((section) {
-                  final on = settings.homeSections.contains(section);
-                  return ToggleRow(
-                    title: section.label,
-                    subtitle: section.description,
-                    value: on,
-                    onChanged: (v) => update((s) {
-                      final next = Set<HomeSection>.from(s.homeSections);
-                      if (v) {
-                        next.add(section);
-                      } else {
-                        next.remove(section);
-                      }
-                      return s.copyWith(homeSections: next);
-                    }),
-                  );
-                }),
-              ],
-            ),
-            const SizedBox(height: AppSpacing.lg),
-            SectionCard(
-              title: 'Detail level',
-              children: [
-                Wrap(
-                  spacing: AppSpacing.sm,
-                  runSpacing: AppSpacing.sm,
-                  children: DetailLevel.values.map((lvl) {
-                    return AppChoiceChip(
-                      label: lvl.label,
-                      selected: settings.detailLevel == lvl,
-                      onTap: () => update((s) => s.copyWith(detailLevel: lvl)),
-                    );
-                  }).toList(),
-                ),
-                const SizedBox(height: AppSpacing.md),
-                Text(
-                  settings.detailLevel.description,
-                  style: AppTypography.bodySm.copyWith(
-                    color: c.onSurfaceVariant,
-                  ),
-                ),
-                const SizedBox(height: AppSpacing.sm),
-                DetailLevelExample(level: settings.detailLevel),
-              ],
-            ),
-            const SizedBox(height: AppSpacing.lg),
-            SectionCard(
-              title: 'Limits, banner and messages',
-              children: [
-                ActionRow(
-                  icon: Icons.notifications_active_outlined,
-                  title: 'Auto-catch',
-                  subtitle: watchedApps == 0
-                      ? 'Off — pick the apps Fuata may read messages from'
-                      : watchedApps == 1
-                      ? 'Watching 1 app'
-                      : 'Watching $watchedApps apps',
-                  onTap: () => Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => const AutoCatchScreen()),
-                  ),
-                ),
-                const SizedBox(height: AppSpacing.sm),
-                ActionRow(
-                  icon: Icons.inbox_rounded,
-                  title: 'Caught from your messages',
-                  subtitle: pendingCount == 0
-                      ? 'Nothing waiting for your check'
-                      : '$pendingCount waiting for your check',
-                  onTap: () => Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (_) => const ReviewInboxScreen(),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: AppSpacing.sm),
-                ActionRow(
-                  icon: Icons.mark_email_read_outlined,
-                  title: 'Message reading rules',
-                  subtitle:
-                  'Teach Fuata to read a bank or mobile-money message',
-                  onTap: () => Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (_) => const RuleBuilderScreen(),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: AppSpacing.sm),
-                ComingSoonRow(
-                  icon: Icons.speed_rounded,
-                  title: 'Limits & alerts',
-                  subtitle: 'Daily, weekly and monthly limits, plus nudges — coming in #15/#17',
-                ),
-                SizedBox(height: AppSpacing.sm),
-                ComingSoonRow(
-                  icon: Icons.notifications_active_outlined,
-                  title: 'Banner',
-                  subtitle: 'Choose what the notification banner shows — coming in #16/#17',
-                ),
-                SizedBox(height: AppSpacing.sm),
-                ComingSoonRow(
-                  icon: Icons.sell_outlined,
-                  title: 'Categories',
-                  subtitle:
-                  'Rename or add category names and icons — coming soon',
-                ),
-              ],
-            ),
-            const SizedBox(height: AppSpacing.lg),
-            SectionCard(
-              title: 'Appearance',
-              children: [
-                Wrap(
-                  spacing: AppSpacing.sm,
-                  runSpacing: AppSpacing.sm,
-                  children: AppThemeMode.values.map((mode) {
-                    return AppChoiceChip(
-                      label: mode.label,
-                      leading: Icon(
-                        mode.icon,
-                        size: 16,
-                        color: settings.themeMode == mode
-                            ? c.primary
-                            : c.onSurfaceVariant,
-                      ),
-                      selected: settings.themeMode == mode,
-                      onTap: () => update((s) => s.copyWith(themeMode: mode)),
-                    );
-                  }).toList(),
-                ),
-              ],
-            ),
-            const SizedBox(height: AppSpacing.lg),
-            PrivacyCard(settings: settings, onChanged: update),
-          ],
-        ),
-      ),
-    );
-  }
 }
 </file>
 
@@ -13100,6 +14459,11 @@ dependencies:
   path_provider: ^2.1.6
   path: ^1.9.1
   flutter_smart_dialog: ^5.3.0
+
+  # Ongoing status banner (#16, ADR-008) and its Android channels. Alerts
+  # (US-06) get their own channel so the banner can be muted without
+  # silencing them.
+  flutter_local_notifications: ^22.3.1
 
 dev_dependencies:
   flutter_test:
@@ -13379,6 +14743,10 @@ class MockLimitRepository implements LimitRepository {
   @override
   Future<void> setLimit(LimitRule limit) async =>
       _store.upsert((l) => l.id == limit.id, limit);
+
+  @override
+  Future<void> deleteLimit(String limitId) async =>
+      _store.removeWhere((l) => l.id == limitId);
 }
 
 /// `_Store<T>` is built around lists, but reusing it here (with a
@@ -13493,6 +14861,7 @@ abstract class TransactionRepository {
 abstract class LimitRepository {
   Stream<List<LimitRule>> watchLimits();
   Future<void> setLimit(LimitRule limit);
+  Future<void> deleteLimit(String limitId);
 }
 
 /// Personalisation settings (design.md's `settings` key/value table).
@@ -13537,6 +14906,249 @@ abstract class CaptureSourceRepository {
 
   /// Upsert by id — use [CaptureSource.idFor] so one package is one row.
   Future<void> saveSource(CaptureSource source);
+}
+</file>
+
+<file path="lib/ui/screens/me_screen.dart">
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:fuata/ui/providers/capture_providers.dart';
+import 'package:fuata/ui/screens/auto_catch_screen.dart';
+import 'package:fuata/ui/screens/review_inbox_screen.dart';
+import 'package:fuata/ui/screens/rule_builder_screen.dart';
+
+import '../../domain/models/limit_rule.dart';
+import '../../domain/models/money.dart';
+import '../../domain/models/settings.dart';
+import '../../widgets/coming_soon_row.dart';
+import '../../widgets/personalization/action_row.dart';
+import '../../widgets/personalization/detail_level_example.dart';
+import '../../widgets/personalization/label.dart';
+import '../../widgets/personalization/privayc_card.dart';
+import '../../widgets/personalization/profile_block.dart';
+import '../../widgets/personalization/section_card.dart';
+import '../../widgets/personalization/toggle_row.dart';
+import '../providers/app_providers.dart';
+import '../theme/app_colors.dart';
+import '../theme/app_spacing.dart';
+import '../theme/app_typography.dart';
+import '../../widgets/app_chips.dart';
+import 'banner_setup_screen.dart';
+import 'limits_screen.dart';
+
+/// Me: settings and personalisation (ui-design-brief.md section 7.12,
+/// US-13/US-14/US-16). Every control here writes straight through
+/// `settingsRepositoryProvider` — same UI-first shape as the rest of the
+/// app (screens depend on the repository interface; today that's
+/// `MockSettingsRepository`, an in-memory store, same as units/
+/// transactions/limits until #13).
+///
+/// Limits & alerts and Banner each get their own dedicated screens in
+/// later issues (#15/#17, #16/#17) — shown here as `ComingSoonRow`s that
+/// link out, rather than half-built here. Message reading is live as of
+/// #20 (rules), #21 (share/paste capture + review inbox) and #22
+/// (Auto-catch: notification access + allowed apps).
+class MeScreen extends ConsumerWidget {
+  const MeScreen({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final c = context.colors;
+    final settings = ref.watch(currentSettingsProvider);
+    final repo = ref.read(settingsRepositoryProvider);
+    final pendingCount = ref.watch(pendingTransactionsProvider).length;
+    final watchedApps = ref.watch(allowedPackagesProvider).length;
+    final dailyLimit = (ref.watch(limitsProvider).value ?? const <LimitRule>[])
+        .where((l) =>
+    l.scope == LimitScope.overall &&
+        l.period == LimitPeriod.day &&
+        l.enabled)
+        .firstOrNull;
+
+    void update(AppSettings Function(AppSettings) fn) {
+      repo.updateSettings(fn(settings));
+    }
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('Me')),
+      body: SafeArea(
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(
+            AppSpacing.margin,
+            AppSpacing.sm,
+            AppSpacing.margin,
+            AppSpacing.xl,
+          ),
+          children: [
+            ProfileBlock(settings: settings, onChanged: update),
+            const SizedBox(height: AppSpacing.lg),
+            SectionCard(
+              title: 'Home',
+              children: [
+                Label('Headline number'),
+                const SizedBox(height: AppSpacing.sm),
+                Wrap(
+                  spacing: AppSpacing.sm,
+                  runSpacing: AppSpacing.sm,
+                  children: HomeHeadline.values.map((h) {
+                    return AppChoiceChip(
+                      label: h.label,
+                      selected: settings.homeHeadline == h,
+                      onTap: () => update((s) => s.copyWith(homeHeadline: h)),
+                    );
+                  }).toList(),
+                ),
+                const SizedBox(height: AppSpacing.md),
+                Label('Sections'),
+                const SizedBox(height: AppSpacing.xs),
+                ...HomeSection.values.map((section) {
+                  final on = settings.homeSections.contains(section);
+                  return ToggleRow(
+                    title: section.label,
+                    subtitle: section.description,
+                    value: on,
+                    onChanged: (v) => update((s) {
+                      final next = Set<HomeSection>.from(s.homeSections);
+                      if (v) {
+                        next.add(section);
+                      } else {
+                        next.remove(section);
+                      }
+                      return s.copyWith(homeSections: next);
+                    }),
+                  );
+                }),
+              ],
+            ),
+            const SizedBox(height: AppSpacing.lg),
+            SectionCard(
+              title: 'Detail level',
+              children: [
+                Wrap(
+                  spacing: AppSpacing.sm,
+                  runSpacing: AppSpacing.sm,
+                  children: DetailLevel.values.map((lvl) {
+                    return AppChoiceChip(
+                      label: lvl.label,
+                      selected: settings.detailLevel == lvl,
+                      onTap: () => update((s) => s.copyWith(detailLevel: lvl)),
+                    );
+                  }).toList(),
+                ),
+                const SizedBox(height: AppSpacing.md),
+                Text(
+                  settings.detailLevel.description,
+                  style: AppTypography.bodySm.copyWith(
+                    color: c.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.sm),
+                DetailLevelExample(level: settings.detailLevel),
+              ],
+            ),
+            const SizedBox(height: AppSpacing.lg),
+            SectionCard(
+              title: 'Limits, banner and messages',
+              children: [
+                ActionRow(
+                  icon: Icons.notifications_active_outlined,
+                  title: 'Auto-catch',
+                  subtitle: watchedApps == 0
+                      ? 'Off — pick the apps Fuata may read messages from'
+                      : watchedApps == 1
+                      ? 'Watching 1 app'
+                      : 'Watching $watchedApps apps',
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const AutoCatchScreen()),
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.sm),
+                ActionRow(
+                  icon: Icons.inbox_rounded,
+                  title: 'Caught from your messages',
+                  subtitle: pendingCount == 0
+                      ? 'Nothing waiting for your check'
+                      : '$pendingCount waiting for your check',
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => const ReviewInboxScreen(),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.sm),
+                ActionRow(
+                  icon: Icons.mark_email_read_outlined,
+                  title: 'Message reading rules',
+                  subtitle:
+                  'Teach Fuata to read a bank or mobile-money message',
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => const RuleBuilderScreen(),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.sm),
+                ActionRow(
+                  icon: Icons.speed_rounded,
+                  title: 'Limits & alerts',
+                  subtitle: dailyLimit == null
+                      ? 'Set how much you can spend each day, week or month'
+                      : 'Daily limit: ${Money(dailyLimit.amountMinor, dailyLimit.currencyCode).format()}',
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const LimitsScreen()),
+                  ),
+                ),
+                SizedBox(height: AppSpacing.sm),
+                ActionRow(
+                  icon: Icons.notifications_active_outlined,
+                  title: 'Banner',
+                  subtitle: settings.bannerEnabled
+                      ? 'On — choose what it shows'
+                      : 'Off — choose what the notification banner shows',
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const BannerSetupScreen()),
+                  ),
+                ),
+                SizedBox(height: AppSpacing.sm),
+                ComingSoonRow(
+                  icon: Icons.sell_outlined,
+                  title: 'Categories',
+                  subtitle:
+                  'Rename or add category names and icons — coming soon',
+                ),
+              ],
+            ),
+            const SizedBox(height: AppSpacing.lg),
+            SectionCard(
+              title: 'Appearance',
+              children: [
+                Wrap(
+                  spacing: AppSpacing.sm,
+                  runSpacing: AppSpacing.sm,
+                  children: AppThemeMode.values.map((mode) {
+                    return AppChoiceChip(
+                      label: mode.label,
+                      leading: Icon(
+                        mode.icon,
+                        size: 16,
+                        color: settings.themeMode == mode
+                            ? c.primary
+                            : c.onSurfaceVariant,
+                      ),
+                      selected: settings.themeMode == mode,
+                      onTap: () => update((s) => s.copyWith(themeMode: mode)),
+                    );
+                  }).toList(),
+                ),
+              ],
+            ),
+            const SizedBox(height: AppSpacing.lg),
+            PrivacyCard(settings: settings, onChanged: update),
+          ],
+        ),
+      ),
+    );
+  }
 }
 </file>
 
@@ -13731,15 +15343,20 @@ Nothing broke yet — the schema and repositories are new code with no prior imp
 </file>
 
 <file path="lib/main.dart">
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
+import 'package:fuata/platform/banner.dart';
 import 'package:fuata/platform/notification_capture.dart';
 import 'package:fuata/platform/share_intake.dart';
 import 'package:fuata/ui/providers/app_providers.dart';
+import 'package:fuata/ui/providers/banner_providers.dart';
 import 'package:fuata/ui/providers/capture_providers.dart';
 import 'package:fuata/ui/screens/root_shell.dart';
 import 'package:fuata/ui/theme/app_theme.dart';
+import 'package:fuata/widgets/sheets/add_transaction_sheet.dart';
 
 import 'domain/models/settings.dart';
 
@@ -13757,6 +15374,11 @@ void main() async {
   // on every cold start launched from a share sheet.
   await initShareIntake();
 
+  // Issue #16: create both notification channels and register the tap
+  // handler *before* runApp, so a cold start from a banner tap has
+  // somewhere to land.
+  await BannerPlatform.instance.init();
+
   runApp(const ProviderScope(child: Fuata()));
 }
 
@@ -13768,6 +15390,8 @@ class Fuata extends ConsumerStatefulWidget {
 }
 
 class _FuataState extends ConsumerState<Fuata> with WidgetsBindingObserver {
+  StreamSubscription<BannerAction>? _bannerSub;
+
   @override
   void initState() {
     super.initState();
@@ -13777,13 +15401,40 @@ class _FuataState extends ConsumerState<Fuata> with WidgetsBindingObserver {
     // about captures the background isolate wrote.
     ref.read(allowListSyncProvider);
     ref.read(captureRefreshProvider);
+    // Issue #16: keeps the ongoing banner in step with the data.
+    ref.read(bannerSyncProvider);
+    _bannerSub = BannerPlatform.instance.actions.listen(_onBannerAction);
+
+    // Cold start from a banner tap or its + Add — the callback fired
+    // before initState could subscribe.
+    final pending = BannerPlatform.instance.consumePendingAction();
+    if (pending != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _onBannerAction(pending);
+      });
+    }
     WidgetsBinding.instance.addObserver(this);
   }
 
   @override
   void dispose() {
+    _bannerSub?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
+  }
+
+  void _onBannerAction(BannerAction action) {
+    switch (action) {
+      case BannerAction.open:
+      // The app is already coming to the front; nothing to route.
+        break;
+      case BannerAction.quickAdd:
+      // US-07: straight into the add sheet, no menus.
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          final ctx = rootNavigatorKey.currentContext;
+          if (ctx != null) showAddTransactionSheet(ctx);
+        });
+    }
   }
 
   @override

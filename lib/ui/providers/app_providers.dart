@@ -138,7 +138,7 @@ final homeStateProvider = Provider<AsyncValue<HomeState>>((ref) {
   final spentToday = Ledger.spentInPeriod(transactions, start, end);
 
   final dailyLimit = limits
-      .where((l) => l.scope == LimitScope.overall && l.period == LimitPeriod.day)
+      .where((l) => l.enabled && l.scope == LimitScope.overall && l.period == LimitPeriod.day)
       .firstOrNull;
 
   final status = Ledger.statusFor(dailyLimit, spentToday);

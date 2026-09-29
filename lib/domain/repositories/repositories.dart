@@ -32,6 +32,7 @@ abstract class TransactionRepository {
 abstract class LimitRepository {
   Stream<List<LimitRule>> watchLimits();
   Future<void> setLimit(LimitRule limit);
+  Future<void> deleteLimit(String limitId);
 }
 
 /// Personalisation settings (design.md's `settings` key/value table).

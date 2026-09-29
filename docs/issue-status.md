@@ -1,4 +1,4 @@
-# Issue status (generated 2026-09-29T12:53Z)
+# Issue status (generated 2026-09-29T23:37Z)
 
 Source of truth: GitHub. Regenerate with `scripts/refresh-issue-status.sh`.
 
@@ -28,7 +28,7 @@ Source of truth: GitHub. Regenerate with `scripts/refresh-issue-status.sh`.
 | #20 | CLOSED | v0.1 MVP | feat(capture): rule builder UI |
 | #19 | CLOSED | v0.1 MVP | feat(capture): template model and parser |
 | #18 | CLOSED | v0.1 MVP | spike: notification listener with app closed |
-| #17 | OPEN | v0.1 MVP | feat(banner): banner setup screen with live preview |
+| #17 | CLOSED | v0.1 MVP | feat(banner): banner setup screen with live preview |
 | #16 | OPEN | v0.1 MVP | feat(banner): ongoing notification banner |
 | #15 | CLOSED | v0.1 MVP | feat(limits): limit engine and status |
 | #14 | CLOSED | v0.1 MVP | feat(ledger): computed balances, transfers, fees |

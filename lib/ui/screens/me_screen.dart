@@ -5,6 +5,8 @@ import 'package:fuata/ui/screens/auto_catch_screen.dart';
 import 'package:fuata/ui/screens/review_inbox_screen.dart';
 import 'package:fuata/ui/screens/rule_builder_screen.dart';
 
+import '../../domain/models/limit_rule.dart';
+import '../../domain/models/money.dart';
 import '../../domain/models/settings.dart';
 import '../../widgets/coming_soon_row.dart';
 import '../../widgets/personalization/action_row.dart';
@@ -20,6 +22,7 @@ import '../theme/app_spacing.dart';
 import '../theme/app_typography.dart';
 import '../../widgets/app_chips.dart';
 import 'banner_setup_screen.dart';
+import 'limits_screen.dart';
 
 /// Me: settings and personalisation (ui-design-brief.md section 7.12,
 /// US-13/US-14/US-16). Every control here writes straight through
@@ -43,6 +46,12 @@ class MeScreen extends ConsumerWidget {
     final repo = ref.read(settingsRepositoryProvider);
     final pendingCount = ref.watch(pendingTransactionsProvider).length;
     final watchedApps = ref.watch(allowedPackagesProvider).length;
+    final dailyLimit = (ref.watch(limitsProvider).value ?? const <LimitRule>[])
+        .where((l) =>
+    l.scope == LimitScope.overall &&
+        l.period == LimitPeriod.day &&
+        l.enabled)
+        .firstOrNull;
 
     void update(AppSettings Function(AppSettings) fn) {
       repo.updateSettings(fn(settings));
@@ -167,10 +176,15 @@ class MeScreen extends ConsumerWidget {
                   ),
                 ),
                 const SizedBox(height: AppSpacing.sm),
-                ComingSoonRow(
+                ActionRow(
                   icon: Icons.speed_rounded,
                   title: 'Limits & alerts',
-                  subtitle: 'Daily, weekly and monthly limits, plus nudges — coming in #15',
+                  subtitle: dailyLimit == null
+                      ? 'Set how much you can spend each day, week or month'
+                      : 'Daily limit: ${Money(dailyLimit.amountMinor, dailyLimit.currencyCode).format()}',
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const LimitsScreen()),
+                  ),
                 ),
                 SizedBox(height: AppSpacing.sm),
                 ActionRow(

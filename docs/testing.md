@@ -128,6 +128,7 @@ Run against real drift repositories on an in-memory database (`test/domain/captu
 - [ ] Swipe the banner away; it returns after the next transaction
 - [ ] Disable banner in settings; it disappears
 
+- [ ] Banner shows a status-coloured small icon (currently the launcher PNG, which MIUI hides — see design.md 5.3)
 ### Capture: share and paste (US-08, US-09, US-11)
 - [ ] Paste a sample; label words; live preview shows extracted fields
 - [ ] "Try another message" works with a second sample

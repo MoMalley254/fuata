@@ -251,6 +251,10 @@ class MockLimitRepository implements LimitRepository {
   @override
   Future<void> setLimit(LimitRule limit) async =>
       _store.upsert((l) => l.id == limit.id, limit);
+
+  @override
+  Future<void> deleteLimit(String limitId) async =>
+      _store.removeWhere((l) => l.id == limitId);
 }
 
 /// `_Store<T>` is built around lists, but reusing it here (with a

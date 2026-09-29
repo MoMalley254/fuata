@@ -23,6 +23,11 @@ dependencies:
   path: ^1.9.1
   flutter_smart_dialog: ^5.3.0
 
+  # Ongoing status banner (#16, ADR-008) and its Android channels. Alerts
+  # (US-06) get their own channel so the banner can be muted without
+  # silencing them.
+  flutter_local_notifications: ^22.3.1
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

@@ -287,3 +287,32 @@ Replaces the #18 spike (`listener_spike.dart`, the spike `NotificationListener.k
 **Picking apps without a broad permission.** The picker lists launchable apps via a launcher-intent `<queries>` entry, not `QUERY_ALL_PACKAGES`. Consequence: an app with no launcher icon cannot be picked; debug builds have an "add by package name" field so `adb shell cmd notification post` (posted as `com.android.shell`) can still be allow-listed for testing.
 
 **Known limitations (not bugs):** the Dart callback handle is only valid for the build that registered it, so after an app *update* capture resumes once the app has been opened once; the access status on the Auto-catch screen is the *grant*, not proof the service is bound (§5.1 — detecting that is #36); a notification that arrives while the app has never been opened since install is dropped.
+
+### 5.3 Banner rendering on MIUI (found during #16)
+
+Two MIUI behaviours that cost an afternoon to chase; recorded here so
+#26's device pass and any future banner work start from the answer
+rather than re-deriving it.
+
+**Lock-screen display requires IMPORTANCE_DEFAULT.** A notification
+channel created at `Importance.low` is treated as "silent" and hidden
+from the lock screen entirely on MIUI — regardless of the notification's
+own `vis=PUBLIC` flag, and regardless of the per-app lock-screen toggle
+being on. Raising the importance on the *existing* channel does nothing:
+Android locks a channel's importance after creation. The fix is a new
+channel id at `Importance.defaultImportance`; existing installs need a
+reinstall (or `pm clear`) once. The banner channel ships as
+`fuata_banner_v2` for exactly this reason. `onlyAlertOnce` +
+`playSound: false` + `enableVibration: false` keep it quiet despite the
+higher importance — the banner never buzzes, it just becomes eligible
+to appear on the lock screen.
+
+**Small icon must be a monochrome drawable.** `_androidDetails()` sets
+`icon: '@mipmap/ic_launcher'` — a full-colour PNG. Android's small
+notification icon is meant to be a white-on-transparent silhouette; on
+MIUI a colour bitmap is hidden entirely, leaving only the "Fuata" text
+visible. The fix is `res/drawable/ic_notification.xml` (white vector)
+referenced by bare name; Android then tints it via the existing
+`setColor()` per status. **Deferred for v0.1** — the banner is legible
+without it, and it's a polish item rather than a correctness bug. See
+`docs/github-issues.md` Post-#20 follow-ups for the tracking issue.
