@@ -6,6 +6,37 @@ A running, honest record of the build: goals, what got done, what broke, and why
 
 ---
 
+## Day 9: Tue 29 Sep 2026 — Notification listener, allow-list and dedupe (#22)
+
+**Goals**
+- [x] Real listener replacing the #18 spike: discard non-allowed apps immediately
+- [x] Allow-list stored in `capture_sources`, picked in the app (US-10)
+- [x] Dedupe safe when notifications arrive together
+- [x] Fix the spike's text-extraction gap (design.md 5.1)
+- [ ] Verify on a real device (moves to #26)
+
+**Done**
+- `CaptureProcessor` (`lib/domain/logic/capture_pipeline.dart`): the #21 capture logic lifted out of `CaptureService` so the background isolate can run it with no Riverpod. `CaptureService` now wraps it; the outcome types are re-exported from `capture_providers.dart`, so no screen changed its imports.
+- `CaptureSource` model, `CaptureSourceRepository` (drift + mock), `allowedPackagesProvider`, and an Auto-catch screen under Me: notification-access status, a searchable app list, one switch per app.
+- Native: `NotificationListener.kt` gates on a `SharedPreferences` mirror of the allow-list before reading anything; `CaptureEngine.kt` keeps one headless engine alive across a burst; `NotificationText.kt` is the documented extras walk; `CaptureChannel.kt` replaces the spike channel.
+- Tests written: `capture_pipeline_test.dart` (US-10, P-07, P-08, simultaneous arrival, unparsed dedupe), `serial_queue_test.dart`, `capture_source_repository_test.dart`.
+
+**What broke / learned**
+- Reading the spike again showed something the spike could never have caught: it wrote rows from a second drift connection, and drift only re-runs a stream for writes made through the *same* database instance. Rows would land in the file but an open Home or inbox would not refresh. Added a native ping plus `markTablesUpdated`, and the same call on app resume.
+- Dedupe by code is check-then-insert. With one engine per notification (the spike's shape) an SMS and its push twin would race and both insert; that is why there is now one engine and a serial queue.
+- Found while writing the tests: "Teach me" re-runs capture on text already in the unparsed list, so a still-unreadable message added a copy every time. Deduped on (package, text).
+- The repo's own adb test tip posts as `com.android.shell`, which has no launcher icon and so can't appear in the picker; added a debug-only "add by package name" field.
+
+**Decisions**
+- Allow-list enforced natively *and* against the database, not one or the other (design.md 5.2).
+- Turning an app off flips `enabled`; rows are never deleted (`templates.captureSourceId` references the table).
+- `FLAG_GROUP_SUMMARY` notifications are skipped; revisit if a device posts only a summary.
+- Templates are not yet tied to a source: a template with no `captureSourceId` matches any allowed app. Source-scoped matching is a later refinement, not needed for US-10.
+
+**Time spent:** 4hours
+
+---
+
 ## Day 6: Sat 26 Sep 2026 — Template model and parser (#19)
 
 **Goals**
