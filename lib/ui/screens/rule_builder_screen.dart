@@ -28,6 +28,9 @@ import '../theme/app_typography.dart';
 /// and [Parser] runs both the preview and the test — this screen owns no
 /// parsing logic of its own, it only feeds the domain pieces.
 ///
+/// [sampleText] (issue #21) seeds the sample box — the review inbox's
+/// "Teach me" opens this screen with the unreadable message pre-pasted.
+///
 /// Deferred, flagged rather than silently dropped: "This part changes"
 /// wildcards (ui-design-brief.md 7.7's palette has it; the template model
 /// only turns *labeled* spans into capture groups today, so a varying
@@ -37,7 +40,16 @@ import '../theme/app_typography.dart';
 class RuleBuilderScreen extends ConsumerStatefulWidget {
   final String? unitId;
   final CaptureTemplate? existing;
-  const RuleBuilderScreen({super.key, this.unitId, this.existing});
+
+  /// A message to pre-fill in step 1 (e.g. an unparsed capture from the
+  /// review inbox's "Teach me").
+  final String? sampleText;
+  const RuleBuilderScreen({
+    super.key,
+    this.unitId,
+    this.existing,
+    this.sampleText,
+  });
 
   @override
   ConsumerState<RuleBuilderScreen> createState() => _RuleBuilderScreenState();
@@ -77,6 +89,12 @@ class _RuleBuilderScreenState extends ConsumerState<RuleBuilderScreen> {
       _labels = _labelsFromTemplate(existing);
     } else {
       _unitId = widget.unitId;
+      // #21: arriving from the review inbox's "Teach me" — seed the
+      // sample before the listener attaches so the labels aren't wiped.
+      final sample = widget.sampleText;
+      if (sample != null && sample.trim().isNotEmpty) {
+        _sampleController.text = sample.trim();
+      }
     }
     // Rebuild the chips on every keystroke, and — important — drop all
     // labels when the sample itself changes, since their offsets point
@@ -166,10 +184,10 @@ class _RuleBuilderScreenState extends ConsumerState<RuleBuilderScreen> {
 
   bool get _canSave =>
       !_saving &&
-          _sampleText.trim().isNotEmpty &&
-          _labels.any((l) => l.type == TemplateFieldType.amount) &&
-          _unitId != null &&
-          _nameController.text.trim().isNotEmpty;
+      _sampleText.trim().isNotEmpty &&
+      _labels.any((l) => l.type == TemplateFieldType.amount) &&
+      _unitId != null &&
+      _nameController.text.trim().isNotEmpty;
 
   (int, int)? get _selection {
     final a = _rangeAnchor;
@@ -201,7 +219,9 @@ class _RuleBuilderScreenState extends ConsumerState<RuleBuilderScreen> {
 
   void _removeAt(int tokenIndex) {
     final t = _tokens[tokenIndex];
-    setState(() => _labels.removeWhere((s) => s.start <= t.start && t.end <= s.end));
+    setState(
+      () => _labels.removeWhere((s) => s.start <= t.start && t.end <= s.end),
+    );
   }
 
   void _onWordTap(int i) {
@@ -297,118 +317,129 @@ class _RuleBuilderScreenState extends ConsumerState<RuleBuilderScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final c= context.colors;
+    final c = context.colors;
     final unitsAsync = ref.watch(unitsProvider);
 
     return Scaffold(
-        appBar: AppBar(
-          title: Text(widget.existing == null ? 'Teach a message' : 'Edit rule'),
-        ),
+      appBar: AppBar(
+        title: Text(widget.existing == null ? 'Teach a message' : 'Edit rule'),
+      ),
       body: SafeArea(
         child: unitsAsync.when(
-            loading: () => const Center(
-              child: CircularProgressIndicator.adaptive(),
-            ),
-            error: (e, st) => Center(
-              child: Text('Something went wrong: $e'),
-            ),
-            data: (units) {
-              if (units.isEmpty) {
-                return Center(
-                  child: Padding(
-                    padding: const EdgeInsets.all(AppSpacing.xl),
-                    child: Text(
-                      'Add some money first — rules belong to a unit.',
-                      style: AppTypography.bodyMd.copyWith(color: c.onSurfaceVariant),
-                      textAlign: TextAlign.center,
+          loading: () =>
+              const Center(child: CircularProgressIndicator.adaptive()),
+          error: (e, st) => Center(child: Text('Something went wrong: $e')),
+          data: (units) {
+            if (units.isEmpty) {
+              return Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(AppSpacing.xl),
+                  child: Text(
+                    'Add some money first — rules belong to a unit.',
+                    style: AppTypography.bodyMd.copyWith(
+                      color: c.onSurfaceVariant,
                     ),
+                    textAlign: TextAlign.center,
                   ),
-                );
-              }
-
-              _unitId ??= units.first.id;
-              final unit = units.firstWhere((u) => u.id == _unitId);
-              final currencyCode = unit.currencyCode;
-
-              return ListView(
-                padding: const EdgeInsets.fromLTRB(
-                  AppSpacing.margin, AppSpacing.sm, AppSpacing.margin, AppSpacing.xl,
                 ),
-                children: [
-                  StepLabel('1 · Paste a sample message'),
-                  const SizedBox(height: AppSpacing.sm),
-                  TextField(
-                    controller: _sampleController,
-                    maxLines: 6,
-                    minLines: 3,
-                    decoration: const InputDecoration(
-                      hintText: 'Paste one real message from your bank or mobile money',
-                    ),
-                    style: AppTypography.bodyMd.copyWith(color: c.onSurface),
-                  ),
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: TextButton.icon(
-                      onPressed: _pasteSample,
-                      icon: const Icon(Icons.content_paste_rounded, size: 18),
-                      label: const Text('Paste from clipboard'),
-                    ),
-                  ),
-                  if (_sampleText.trim().isNotEmpty) ...[
-                    const SizedBox(height: AppSpacing.sm),
-                    StepLabel('2 · Tap words to say what they are'),
-                    const SizedBox(height: AppSpacing.xs),
-                    Text(
-                      'Tap a word to label it. Long-press, then tap another word, to label a whole phrase. Tap a coloured word to remove its label.',
-                      style: AppTypography.bodySm.copyWith(color: c.onSurfaceVariant),
-                    ),
-                    const SizedBox(height: AppSpacing.sm),
-                    _buildWordChips(c),
-                    if (_rangeAnchor != null) ...[
-                      const SizedBox(height: AppSpacing.sm),
-                      _buildRangeBar(c),
-                    ],
-                    const SizedBox(height: AppSpacing.lg),
-                    StepLabel("3 · Here's what I found"),
-                    const SizedBox(height: AppSpacing.sm),
-                    _buildPreviewCard(c, currencyCode),
-                    const SizedBox(height: AppSpacing.sm),
-                    _buildPatternPreview(c),
-                    const SizedBox(height: AppSpacing.lg,),
-                    StepLabel('4 · Try another message'),
-                    const SizedBox(height: AppSpacing.sm),
-                    _buildTester(c, currencyCode),
-                    const SizedBox(height: AppSpacing.lg),
-                    StepLabel('5 · Save this rule'),
-                    const SizedBox(height: AppSpacing.sm),
-                    _buildRuleDetails(c, units),
-                    if (_error != null) ...[
-                      const SizedBox(height: AppSpacing.sm),
-                      Text(
-                        _error!,
-                        style: AppTypography.bodySm.copyWith(color: c.statusDanger),
-                      ),
-                    ],
-                    const SizedBox(height: AppSpacing.lg),
-                    SizedBox(
-                      width: double.infinity,
-                      child: FilledButton(
-                        onPressed: _canSave ? () => _save(unit) : null,
-                        child: _saving
-                            ? const SizedBox(
-                          height: 18,
-                          width: 18,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                            : Text(widget.existing == null ? 'Save rule' : 'Save changes'),
-                      ),
-                    )
-                  ]
-                ],
               );
             }
+
+            _unitId ??= units.first.id;
+            final unit = units.firstWhere((u) => u.id == _unitId);
+            final currencyCode = unit.currencyCode;
+
+            return ListView(
+              padding: const EdgeInsets.fromLTRB(
+                AppSpacing.margin,
+                AppSpacing.sm,
+                AppSpacing.margin,
+                AppSpacing.xl,
+              ),
+              children: [
+                StepLabel('1 · Paste a sample message'),
+                const SizedBox(height: AppSpacing.sm),
+                TextField(
+                  controller: _sampleController,
+                  maxLines: 6,
+                  minLines: 3,
+                  decoration: const InputDecoration(
+                    hintText:
+                        'Paste one real message from your bank or mobile money',
+                  ),
+                  style: AppTypography.bodyMd.copyWith(color: c.onSurface),
+                ),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton.icon(
+                    onPressed: _pasteSample,
+                    icon: const Icon(Icons.content_paste_rounded, size: 18),
+                    label: const Text('Paste from clipboard'),
+                  ),
+                ),
+                if (_sampleText.trim().isNotEmpty) ...[
+                  const SizedBox(height: AppSpacing.sm),
+                  StepLabel('2 · Tap words to say what they are'),
+                  const SizedBox(height: AppSpacing.xs),
+                  Text(
+                    'Tap a word to label it. Long-press, then tap another word, to label a whole phrase. Tap a coloured word to remove its label.',
+                    style: AppTypography.bodySm.copyWith(
+                      color: c.onSurfaceVariant,
+                    ),
+                  ),
+                  const SizedBox(height: AppSpacing.sm),
+                  _buildWordChips(c),
+                  if (_rangeAnchor != null) ...[
+                    const SizedBox(height: AppSpacing.sm),
+                    _buildRangeBar(c),
+                  ],
+                  const SizedBox(height: AppSpacing.lg),
+                  StepLabel("3 · Here's what I found"),
+                  const SizedBox(height: AppSpacing.sm),
+                  _buildPreviewCard(c, currencyCode),
+                  const SizedBox(height: AppSpacing.sm),
+                  _buildPatternPreview(c),
+                  const SizedBox(height: AppSpacing.lg),
+                  StepLabel('4 · Try another message'),
+                  const SizedBox(height: AppSpacing.sm),
+                  _buildTester(c, currencyCode),
+                  const SizedBox(height: AppSpacing.lg),
+                  StepLabel('5 · Save this rule'),
+                  const SizedBox(height: AppSpacing.sm),
+                  _buildRuleDetails(c, units),
+                  if (_error != null) ...[
+                    const SizedBox(height: AppSpacing.sm),
+                    Text(
+                      _error!,
+                      style: AppTypography.bodySm.copyWith(
+                        color: c.statusDanger,
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: AppSpacing.lg),
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton(
+                      onPressed: _canSave ? () => _save(unit) : null,
+                      child: _saving
+                          ? const SizedBox(
+                              height: 18,
+                              width: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : Text(
+                              widget.existing == null
+                                  ? 'Save rule'
+                                  : 'Save changes',
+                            ),
+                    ),
+                  ),
+                ],
+              ],
+            );
+          },
         ),
-      )
+      ),
     );
   }
 
@@ -431,7 +462,8 @@ class _RuleBuilderScreenState extends ConsumerState<RuleBuilderScreen> {
               key: ValueKey('tok_$i'),
               word: tokens[i].text,
               assignedField: _typeAt(i) == null ? null : fieldName(_typeAt(i)!),
-              highlighted: selection != null && i >= selection.$1 && i <= selection.$2,
+              highlighted:
+                  selection != null && i >= selection.$1 && i <= selection.$2,
               onTap: () => _onWordTap(i),
               onLongPress: () => setState(() {
                 _rangeAnchor = i;
@@ -500,36 +532,31 @@ class _RuleBuilderScreenState extends ConsumerState<RuleBuilderScreen> {
     if (_labels.isEmpty || template == null) {
       return HintCard(
         c: c,
-        message: 'Tap a word above and pick what it is — start with the amount.',
+        message:
+            'Tap a word above and pick what it is — start with the amount.',
       );
     }
     try {
-      final result =
-      Parser.parse(_sampleText, [template], currencyCode: currencyCode);
+      final result = Parser.parse(_sampleText, [
+        template,
+      ], currencyCode: currencyCode);
       final fields = result.fields;
       if (!result.matched || fields == null || fields.amountMinor == null) {
         return HintCard(
           c: c,
-          message:
-          'Every rule needs an Amount — tap the amount in the message and label it.',
+          message: 'Every rule needs an Amount — tap the amount in the message and label it.',
         );
       }
       return FoundCard(fields: fields, currencyCode: currencyCode);
     } catch (e) {
-      return HintCard(
-        c: c,
-        message: "Couldn't build the preview: $e",
-      );
+      return HintCard(c: c, message: "Couldn't build the preview: $e");
     }
   }
 
   Widget _buildPatternPreview(AppColors c) {
     if (_labels.isEmpty) return const SizedBox.shrink();
     return PatternPreviewCard(
-      description: describePattern(
-        sampleText: _sampleText,
-        labels: _labels,
-      ),
+      description: describePattern(sampleText: _sampleText, labels: _labels),
     );
   }
 
@@ -538,28 +565,24 @@ class _RuleBuilderScreenState extends ConsumerState<RuleBuilderScreen> {
     final input = _testController.text;
     Widget? resultCard;
     if (input.trim().isNotEmpty) {
-
-
       if (template == null) {
         resultCard = HintCard(c: c, message: 'Label the sample above first.');
       } else {
         try {
-          final result = Parser.parse(input, [template], currencyCode: currencyCode);
+          final result = Parser.parse(input, [
+            template,
+          ], currencyCode: currencyCode);
           final fields = result.fields;
           if (!result.matched || fields == null || fields.amountMinor == null) {
-            resultCard =  HintCard(
+            resultCard = HintCard(
               c: c,
-              message:
-              "Couldn't read this one yet. That's normal while you're still labeling — or this message is shaped differently.",
+              message: "Couldn't read this one yet. That's normal while you're still labeling — or this message is shaped differently.",
             );
           } else {
             resultCard = FoundCard(fields: fields, currencyCode: currencyCode);
           }
         } catch (e) {
-          return HintCard(
-            c: c,
-            message: "Couldn't build the preview: $e",
-          );
+          return HintCard(c: c, message: "Couldn't build the preview: $e");
         }
       }
     }
@@ -589,11 +612,16 @@ class _RuleBuilderScreenState extends ConsumerState<RuleBuilderScreen> {
       children: [
         TextField(
           controller: _nameController,
-          decoration: const InputDecoration(hintText: 'Name it, e.g. "M-Pesa · money out"'),
+          decoration: const InputDecoration(
+            hintText: 'Name it, e.g. "M-Pesa · money out"',
+          ),
           style: AppTypography.bodyLg.copyWith(color: c.onSurface),
         ),
         const SizedBox(height: AppSpacing.md),
-        Text('For', style: AppTypography.labelMd.copyWith(color: c.onSurfaceVariant)),
+        Text(
+          'For',
+          style: AppTypography.labelMd.copyWith(color: c.onSurfaceVariant),
+        ),
         const SizedBox(height: AppSpacing.xs),
         Wrap(
           spacing: AppSpacing.sm,
@@ -607,7 +635,10 @@ class _RuleBuilderScreenState extends ConsumerState<RuleBuilderScreen> {
           }).toList(),
         ),
         const SizedBox(height: AppSpacing.md),
-        Text('This message means', style: AppTypography.labelMd.copyWith(color: c.onSurfaceVariant)),
+        Text(
+          'This message means',
+          style: AppTypography.labelMd.copyWith(color: c.onSurfaceVariant),
+        ),
         const SizedBox(height: AppSpacing.xs),
         Wrap(
           spacing: AppSpacing.sm,
@@ -626,21 +657,19 @@ class _RuleBuilderScreenState extends ConsumerState<RuleBuilderScreen> {
             AppChoiceChip(
               label: 'Let the message decide',
               selected: _direction == TemplateDirection.either,
-              onTap: () => setState(() => _direction = TemplateDirection.either),
+              onTap: () =>
+                  setState(() => _direction = TemplateDirection.either),
             ),
           ],
         ),
         const SizedBox(height: AppSpacing.xs),
-        Text(
-          switch (_direction) {
-            TemplateDirection.spent => 'Every match counts as money out.',
-            TemplateDirection.got   => 'Every match counts as money in.',
-            TemplateDirection.either =>
+        Text(switch (_direction) {
+          TemplateDirection.spent => 'Every match counts as money out.',
+          TemplateDirection.got => 'Every match counts as money in.',
+          TemplateDirection.either =>
             'Decided per message: looks for "received", "credited" or '
                 '"deposit" to call it money in, otherwise money out.',
-          },
-          style: AppTypography.bodySm.copyWith(color: c.onSurfaceVariant),
-        ),
+        }, style: AppTypography.bodySm.copyWith(color: c.onSurfaceVariant)),
       ],
     );
   }

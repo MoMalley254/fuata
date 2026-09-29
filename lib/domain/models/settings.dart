@@ -26,7 +26,7 @@ extension DetailLevelLabel on DetailLevel {
     DetailLevel.simple => 'Amount, who, and a friendly time. Nothing else.',
     DetailLevel.balanced => 'Adds the money unit and category.',
     DetailLevel.detailed =>
-      'Adds exact time, code, fee, note, source and balance after.',
+    'Adds exact time, code, fee, note, source and balance after.',
   };
 }
 
@@ -55,8 +55,8 @@ extension HomeSectionsLabel on HomeSection {
   String get description => switch (this) {
     HomeSection.units => 'The scrolling row of units cards.',
     HomeSection.lately => 'Your most recent transactions.',
-    // Not built yet (design.md open item) — the toggle exists so the
-    // preference survives until the widget does.
+  // Not built yet (design.md open item) — the toggle exists so the
+  // preference survives until the widget does.
     HomeSection.weekPeek => 'A tiny 7-day bar strip. Coming soon',
   };
 }
@@ -134,6 +134,12 @@ class AppSettings {
   final bool amountsHiddenInRecents;
   final bool redactedLockScreenBanner;
 
+  // Review-inbox toggle (ui-design-brief.md 7.6's header setting,
+  // US-11): when on, captures are inserted as confirmed and skip the
+  // Looks-right step entirely. Off by default — caught money should be
+  // eyeballed at least once.
+  final bool autoAcceptCaptures;
+
   const AppSettings({
     required this.name,
     required this.accent,
@@ -143,6 +149,7 @@ class AppSettings {
     required this.detailLevel,
     required this.amountsHiddenInRecents,
     required this.redactedLockScreenBanner,
+    required this.autoAcceptCaptures,
   });
 
   static final defaults = AppSettings(
@@ -154,6 +161,7 @@ class AppSettings {
     detailLevel: DetailLevel.balanced,
     amountsHiddenInRecents: false,
     redactedLockScreenBanner: true,
+    autoAcceptCaptures: false,
   );
 
   AppSettings copyWith({
@@ -165,6 +173,7 @@ class AppSettings {
     DetailLevel? detailLevel,
     bool? amountsHiddenInRecents,
     bool? redactedLockScreenBanner,
+    bool? autoAcceptCaptures,
   }) {
     return AppSettings(
       name: name ?? this.name,
@@ -174,9 +183,10 @@ class AppSettings {
       homeSections: homeSections ?? this.homeSections,
       detailLevel: detailLevel ?? this.detailLevel,
       amountsHiddenInRecents:
-          amountsHiddenInRecents ?? this.amountsHiddenInRecents,
+      amountsHiddenInRecents ?? this.amountsHiddenInRecents,
       redactedLockScreenBanner:
-          redactedLockScreenBanner ?? this.redactedLockScreenBanner,
+      redactedLockScreenBanner ?? this.redactedLockScreenBanner,
+      autoAcceptCaptures: autoAcceptCaptures ?? this.autoAcceptCaptures,
     );
   }
 }

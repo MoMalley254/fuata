@@ -2,12 +2,16 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:fuata/domain/models/transaction.dart';
 import 'package:fuata/domain/models/unit.dart';
+import 'package:fuata/ui/providers/capture_providers.dart';
+import 'package:fuata/ui/screens/review_inbox_screen.dart';
 
 import '../../widgets/activity/empty_activity.dart';
 import '../../widgets/activity/grouped_list.dart';
 import '../../widgets/app_chips.dart';
 import '../providers/app_providers.dart';
+import '../theme/app_colors.dart';
 import '../theme/app_spacing.dart';
+import '../theme/app_typography.dart';
 
 /// One filter at a time: everything, a transaction type, or a single unit.
 /// (ui-design-brief.md section 7.4: "Filter chips on top: All / Spent /
@@ -51,24 +55,70 @@ class _ActivityScreenState extends ConsumerState<ActivityScreen> {
   Widget build(BuildContext context) {
     final txAsync = ref.watch(transactionsProvider);
     final unitsAsync = ref.watch(unitsProvider);
+    final pendingCount = ref.watch(pendingTransactionsProvider).length;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Activity'),),
+      appBar: AppBar(
+        title: const Text('Activity'),
+        actions: [
+          IconButton(
+            tooltip: 'Caught from my messages',
+            icon: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                const Icon(Icons.inbox_rounded),
+                if (pendingCount > 0)
+                  Positioned(
+                    top: -6,
+                    right: -8,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 5,
+                        vertical: 1,
+                      ),
+                      decoration: BoxDecoration(
+                        color: context.colors.primary,
+                        borderRadius: BorderRadius.circular(AppSpacing.pill),
+                      ),
+                      constraints: const BoxConstraints(minWidth: 16),
+                      alignment: Alignment.center,
+                      child: Text(
+                        pendingCount > 99 ? '99+' : '$pendingCount',
+                        style: AppTypography.labelSm.copyWith(
+                          color: context.colors.onPrimary,
+                          height: 1.2,
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const ReviewInboxScreen()),
+            ),
+          ),
+        ],
+      ),
       body: SafeArea(
         child: unitsAsync.when(
-          loading: () => const Center(child: CircularProgressIndicator.adaptive(),) ,
-          error: (e, st) => Center(child: Text('Something went wrong: $e'),),
+          loading: () =>
+              const Center(child: CircularProgressIndicator.adaptive()),
+          error: (e, st) => Center(child: Text('Something went wrong: $e')),
           data: (units) {
-            final unitById = { for (final u in units) u.id: u };
+            final unitById = {for (final u in units) u.id: u};
             return txAsync.when(
-              loading: () => const Center(child: CircularProgressIndicator.adaptive(),),
-              error: (e, st) => Center(child: Text('Something went wrong: $e'),),
+              loading: () =>
+                  const Center(child: CircularProgressIndicator.adaptive()),
+              error: (e, st) => Center(child: Text('Something went wrong: $e')),
               data: (transactions) {
                 // Pending (unconfirmed) captures live in the review inbox
                 // (#21/#22), not built yet, so Activity only shows
                 // confirmed transactions for now.
-                final confirmed = transactions.where((t) => t.isConfirmed).toList();
-                final filtered = confirmed.where(_filter.matches).toList()..sort((a, b) => b.occurredAt.compareTo(a.occurredAt));
+                final confirmed = transactions
+                    .where((t) => t.isConfirmed)
+                    .toList();
+                final filtered = confirmed.where(_filter.matches).toList()
+                  ..sort((a, b) => b.occurredAt.compareTo(a.occurredAt));
 
                 return Column(
                   children: [
@@ -82,15 +132,18 @@ class _ActivityScreenState extends ConsumerState<ActivityScreen> {
                     Expanded(
                       child: filtered.isEmpty
                           ? const EmptyActivity()
-                          : GroupedList(transactions: filtered, unitById: unitById),
+                          : GroupedList(
+                              transactions: filtered,
+                              unitById: unitById,
+                            ),
                     ),
                   ],
                 );
-              }
+              },
             );
-          }
+          },
         ),
-      )
+      ),
     );
   }
 }
@@ -99,7 +152,12 @@ class FilterBar extends StatelessWidget {
   final List<MoneyUnit> units;
   final Filter selected;
   final ValueChanged<Filter> onSelected;
-  const FilterBar({super.key, required this.units, required this.selected, required this.onSelected});
+  const FilterBar({
+    super.key,
+    required this.units,
+    required this.selected,
+    required this.onSelected,
+  });
 
   bool _isSelected(Filter f) {
     if (f is _AllFilter) return selected is _AllFilter;
@@ -119,14 +177,18 @@ class FilterBar extends StatelessWidget {
       const MapEntry('Spent', _TypeFilter(TxType.spent)),
       const MapEntry('Got', _TypeFilter(TxType.got)),
       const MapEntry('Moved', _TypeFilter(TxType.moved)),
-      for (final u in units) MapEntry('${u.iconEmoji} ${u.name}', _UnitFilter(u.id)),
+      for (final u in units)
+        MapEntry('${u.iconEmoji} ${u.name}', _UnitFilter(u.id)),
     ];
 
     return SizedBox(
       height: 52,
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.margin, vertical: AppSpacing.sm),
+        padding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.margin,
+          vertical: AppSpacing.sm,
+        ),
         itemCount: chips.length,
         separatorBuilder: (_, _) => const SizedBox(width: AppSpacing.sm),
         itemBuilder: (context, i) {
@@ -141,7 +203,3 @@ class FilterBar extends StatelessWidget {
     );
   }
 }
-
-
-
-

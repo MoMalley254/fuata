@@ -7,6 +7,7 @@ import '../../domain/models/settings.dart';
 import '../../widgets/sheets/add_transaction_sheet.dart';
 import '../../widgets/sheets/edit_unit_sheet.dart';
 import '../providers/app_providers.dart';
+import '../providers/capture_providers.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_spacing.dart';
 import '../theme/app_typography.dart';
@@ -17,12 +18,20 @@ import '../../widgets/transaction_row.dart';
 class HomeScreen extends ConsumerWidget {
   final VoidCallback? onSeeAllActivity;
 
-  const HomeScreen({super.key, required this.onSeeAllActivity});
+  /// Opens the review inbox (#21) — e.g. from the "N waiting for your
+  /// check" nudge that design.md's status rule asks Home to show.
+  final VoidCallback? onOpenInbox;
+  const HomeScreen({
+    super.key,
+    required this.onSeeAllActivity,
+    this.onOpenInbox,
+  });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final homeAsync = ref.watch(homeStateProvider);
     final settings = ref.watch(currentSettingsProvider);
+    final pendingCount = ref.watch(pendingTransactionsProvider).length;
 
     return Scaffold(
       appBar: AppBar(
@@ -37,10 +46,12 @@ class HomeScreen extends ConsumerWidget {
           data: (state) => state.units.isEmpty
               ? const EmptyHome()
               : HomeContent(
-            state: state,
-            settings: settings,
-            onSeeAllActivity: onSeeAllActivity,
-          ),
+                  state: state,
+                  settings: settings,
+                  pendingCount: pendingCount,
+                  onSeeAllActivity: onSeeAllActivity,
+                  onOpenInbox: onOpenInbox,
+                ),
         ),
       ),
       floatingActionButton: FloatingActionButton(
@@ -54,12 +65,16 @@ class HomeScreen extends ConsumerWidget {
 class HomeContent extends StatelessWidget {
   final HomeState state;
   final AppSettings settings;
+  final int pendingCount;
   final VoidCallback? onSeeAllActivity;
+  final VoidCallback? onOpenInbox;
   const HomeContent({
     super.key,
     required this.state,
     required this.settings,
+    this.pendingCount = 0,
     this.onSeeAllActivity,
+    this.onOpenInbox,
   });
 
   @override
@@ -76,11 +91,20 @@ class HomeContent extends StatelessWidget {
       ),
       children: [
         Greeting(name: settings.name),
+        if (pendingCount > 0) ...[
+          const SizedBox(height: AppSpacing.md),
+          _InboxNudge(count: pendingCount, onTap: onOpenInbox),
+        ],
         const SizedBox(height: AppSpacing.lg),
         HeroSection(state: state, headline: settings.homeHeadline),
         if (showUnits) ...[
           const SizedBox(height: AppSpacing.lg),
-          Text('My money', style: AppTypography.headlineSm.copyWith(color: context.colors.onSurface)),
+          Text(
+            'My money',
+            style: AppTypography.headlineSm.copyWith(
+              color: context.colors.onSurface,
+            ),
+          ),
           const SizedBox(height: AppSpacing.gutterSm),
           UnitRow(state: state),
         ],
@@ -89,8 +113,16 @@ class HomeContent extends StatelessWidget {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text('Lately', style: AppTypography.headlineSm.copyWith(color: context.colors.onSurface)),
-              TextButton(onPressed: onSeeAllActivity, child: const Text('See all')),
+              Text(
+                'Lately',
+                style: AppTypography.headlineSm.copyWith(
+                  color: context.colors.onSurface,
+                ),
+              ),
+              TextButton(
+                onPressed: onSeeAllActivity,
+                child: const Text('See all'),
+              ),
             ],
           ),
           if (state.lately.isEmpty)
@@ -98,18 +130,28 @@ class HomeContent extends StatelessWidget {
               padding: const EdgeInsets.symmetric(vertical: AppSpacing.md),
               child: Text(
                 'Nothing yet today. Nice and calm.',
-                style: AppTypography.bodyMd.copyWith(color: context.colors.onSurfaceVariant),
+                style: AppTypography.bodyMd.copyWith(
+                  color: context.colors.onSurfaceVariant,
+                ),
               ),
             )
           else
-            ...state.lately.map((t) => TransactionRow(
-              title: t.counterparty ?? state.units.firstWhere((u) => u.id == t.unitId).name,
-              subtitle: _friendlyTime(t.occurredAt),
-              amount: Money(t.amountMinor, state.units.firstWhere((u) => u.id == t.unitId).currencyCode)
-                  .majorValue,
-              emoji: state.units.firstWhere((u) => u.id == t.unitId).iconEmoji,
-              accent: state.units.firstWhere((u) => u.id == t.unitId).color,
-            )),
+            ...state.lately.map(
+              (t) => TransactionRow(
+                title:
+                    t.counterparty ??
+                    state.units.firstWhere((u) => u.id == t.unitId).name,
+                subtitle: _friendlyTime(t.occurredAt),
+                amount: Money(
+                  t.amountMinor,
+                  state.units.firstWhere((u) => u.id == t.unitId).currencyCode,
+                ).majorValue,
+                emoji: state.units
+                    .firstWhere((u) => u.id == t.unitId)
+                    .iconEmoji,
+                accent: state.units.firstWhere((u) => u.id == t.unitId).color,
+              ),
+            ),
         ],
       ],
     );
@@ -117,13 +159,60 @@ class HomeContent extends StatelessWidget {
 
   String _friendlyTime(DateTime t) {
     final now = DateTime.now();
-    final isToday = t.year == now.year && t.month == now.month && t.day == now.day;
+    final isToday =
+        t.year == now.year && t.month == now.month && t.day == now.day;
     if (isToday) return DateFormat('h:mm a').format(t);
     final yesterday = now.subtract(const Duration(days: 1));
     final isYesterday =
-        t.year == yesterday.year && t.month == yesterday.month && t.day == yesterday.day;
+        t.year == yesterday.year &&
+        t.month == yesterday.month &&
+        t.day == yesterday.day;
     if (isYesterday) return 'yesterday';
     return DateFormat('EEE, d MMM').format(t);
+  }
+}
+
+/// design.md's status field rule: Home shows "N waiting to confirm" when
+/// captures are sitting in the review inbox (#21). Tapping opens it.
+class _InboxNudge extends StatelessWidget {
+  final int count;
+  final VoidCallback? onTap;
+  const _InboxNudge({required this.count, this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(AppSpacing.unitTileRadius),
+        child: Container(
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.md,
+            vertical: AppSpacing.sm,
+          ),
+          decoration: BoxDecoration(
+            color: c.primary.withValues(alpha: 0.10),
+            borderRadius: BorderRadius.circular(AppSpacing.unitTileRadius),
+            border: Border.all(color: c.primary.withValues(alpha: 0.35)),
+          ),
+          child: Row(
+            children: [
+              Icon(Icons.mark_email_unread_rounded, color: c.primary, size: 20),
+              const SizedBox(width: AppSpacing.sm),
+              Expanded(
+                child: Text(
+                  '$count waiting for your check',
+                  style: AppTypography.bodyMd.copyWith(color: c.onSurface),
+                ),
+              ),
+              Icon(Icons.chevron_right_rounded, color: c.primary),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }
 
@@ -141,8 +230,14 @@ class Greeting extends StatelessWidget {
         Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Hi $name 👋', style: AppTypography.headlineLg.copyWith(color: c.onSurface)),
-            Text(today, style: AppTypography.bodySm.copyWith(color: c.onSurfaceVariant)),
+            Text(
+              'Hi $name 👋',
+              style: AppTypography.headlineLg.copyWith(color: c.onSurface),
+            ),
+            Text(
+              today,
+              style: AppTypography.bodySm.copyWith(color: c.onSurfaceVariant),
+            ),
           ],
         ),
         CircleAvatar(
@@ -161,12 +256,18 @@ class Greeting extends StatelessWidget {
 class HeroSection extends StatelessWidget {
   final HomeState state;
   final HomeHeadline headline;
-  const HeroSection({super.key, required this.state, this.headline = HomeHeadline.leftToday});
+  const HeroSection({
+    super.key,
+    required this.state,
+    this.headline = HomeHeadline.leftToday,
+  });
 
   @override
   Widget build(BuildContext context) {
     final limit = state.dailyLimit;
-    final currency = state.units.isNotEmpty ? state.units.first.currencyCode : 'KES';
+    final currency = state.units.isNotEmpty
+        ? state.units.first.currencyCode
+        : 'KES';
     final symbol = currencySymbol(currency);
     final total = state.balanceByUnit.values.fold(0, (a, b) => a + b);
 
@@ -180,21 +281,21 @@ class HeroSection extends StatelessWidget {
       final c = context.colors;
       final (label, amountMinor, caption) = switch (headline) {
         HomeHeadline.leftToday => (
-        'Altogether you have',
-        total,
-        'Set a daily limit to see how today is going.',
+          'Altogether you have',
+          total,
+          'Set a daily limit to see how today is going.',
         ),
         HomeHeadline.totalIHave => (
-        'Altogether you have',
-        total,
-        'Across everything you\'ve told Fuata about.',
+          'Altogether you have',
+          total,
+          'Across everything you\'ve told Fuata about.',
         ),
         HomeHeadline.spentToday => (
-        'Spent today',
-        state.spentToday,
-        limit == null
-            ? 'Set a daily limit to see how today is going.'
-            : 'of ${Money(limit.amountMinor, currency).format()} · resets at midnight',
+          'Spent today',
+          state.spentToday,
+          limit == null
+              ? 'Set a daily limit to see how today is going.'
+              : 'of ${Money(limit.amountMinor, currency).format()} · resets at midnight',
         ),
       };
       return Container(
@@ -208,14 +309,22 @@ class HeroSection extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(label, style: AppTypography.bodyMd.copyWith(color: c.onSurfaceVariant)),
+            Text(
+              label,
+              style: AppTypography.bodyMd.copyWith(color: c.onSurfaceVariant),
+            ),
             const SizedBox(height: AppSpacing.xs),
             Text(
               Money(amountMinor, currency).format(),
-              style: AppTypography.displayHeroMobile.copyWith(color: c.onSurface),
+              style: AppTypography.displayHeroMobile.copyWith(
+                color: c.onSurface,
+              ),
             ),
             const SizedBox(height: AppSpacing.xs),
-            Text(caption, style: AppTypography.bodySm.copyWith(color: c.onSurfaceVariant)),
+            Text(
+              caption,
+              style: AppTypography.bodySm.copyWith(color: c.onSurfaceVariant),
+            ),
           ],
         ),
       );
