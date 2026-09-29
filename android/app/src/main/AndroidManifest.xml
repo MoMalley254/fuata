@@ -40,13 +40,15 @@
             android:name="flutterEmbedding"
             android:value="2" />
 
-        <!-- Issue #18 spike: throwaway notification listener, no allow-list
-             yet (#22). Requires the user to grant special access in
-             Settings > Notification access; MainActivity's
-             openNotificationAccessSettings() opens that screen directly. -->
+        <!-- Issue #22: notification listener. Only apps on the person's
+             allow-list are ever read (US-10); everything else is dropped
+             in NotificationListener.kt before any text is touched.
+             Requires the user to grant special access in
+             Settings > Notification access; the Auto-catch screen opens
+             that page directly. -->
         <service
             android:name=".NotificationListener"
-            android:label="Fuata capture (spike)"
+            android:label="Fuata"
             android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"
             android:exported="true">
             <intent-filter>
@@ -63,6 +65,13 @@
         <intent>
             <action android:name="android.intent.action.PROCESS_TEXT"/>
             <data android:mimeType="text/plain"/>
+        </intent>
+        <!-- Issue #22: lets the Auto-catch picker list launchable apps on
+             Android 11+ without QUERY_ALL_PACKAGES. Fuata never sees
+             non-launchable apps and never asks for the broad permission. -->
+        <intent>
+            <action android:name="android.intent.action.MAIN"/>
+            <category android:name="android.intent.category.LAUNCHER"/>
         </intent>
     </queries>
 </manifest>

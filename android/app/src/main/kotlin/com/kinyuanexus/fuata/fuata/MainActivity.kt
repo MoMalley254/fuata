@@ -1,44 +1,39 @@
 package com.kinyuanexus.fuata.fuata
 
 import android.content.Intent
-import android.provider.Settings
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
-import io.flutter.plugin.common.MethodChannel
 
 /**
- * `fuata/listener_spike` channel: issue #18 only. Stores the Dart callback
- * handle NotificationListener.kt needs, and opens Android's notification
- * access settings. Throwaway — removed or replaced by real plugin wiring
- * once #22 lands.
+ * Hosts the UI engine and wires its native channels:
+ *  - `fuata/share_intake` (issue #21): text shared in from other apps.
+ *  - `fuata/capture` (issue #22): notification-access status, the
+ *    allow-list mirror, the installed-apps picker, and the "captures
+ *    changed" ping. Replaces the #18 spike's `fuata/listener_spike`.
  */
 class MainActivity : FlutterActivity() {
     private var shareIntake: ShareIntakeChannel? = null
+    private var captureChannel: CaptureChannel? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
 
-        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "fuata/listener_spike")
-            .setMethodCallHandler { call, result ->
-                when (call.method) {
-                    "setCallbackHandle" -> {
-                        val handle = (call.arguments as Number).toLong()
-                        NotificationListener.writeCallbackHandle(applicationContext, handle)
-                        result.success(null)
-                    }
-                    "openNotificationAccessSettings" -> {
-                        startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
-                        result.success(null)
-                    }
-                    else -> result.notImplemented()
-                }
-            }
+        captureChannel = CaptureChannel(
+            applicationContext,
+            flutterEngine.dartExecutor.binaryMessenger,
+        )
 
         shareIntake = ShareIntakeChannel(flutterEngine.dartExecutor.binaryMessenger)
 
         // The intent that started (or restarted) this activity may be a
         // share; route it now that the channel exists.
         shareIntake?.handleShareIntent(intent)
+    }
+
+    override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
+        captureChannel?.dispose()
+        captureChannel = null
+        super.cleanUpFlutterEngine(flutterEngine)
     }
 
     override fun onNewIntent(intent: Intent) {

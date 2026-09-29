@@ -1,104 +1,46 @@
 package com.kinyuanexus.fuata.fuata
 
+import android.util.Log
 import android.app.Notification
-import android.content.Context
-import android.content.SharedPreferences
-import android.os.Handler
-import android.os.Looper
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
-import android.util.Log
-import io.flutter.embedding.engine.FlutterEngine
-import io.flutter.embedding.engine.dart.DartExecutor
-import io.flutter.embedding.engine.loader.FlutterLoader
-import io.flutter.plugin.common.MethodChannel
-import io.flutter.view.FlutterCallbackInformation
 
 /**
- * Issue #18 — SPIKE, throwaway, time-boxed to 2 hours.
+ * Issue #22 — the real listener; replaces the #18 spike.
  *
- * On *every* notification (no allow-list yet — that's #22), spins up a
- * headless FlutterEngine, runs the Dart entry point registered by
- * MainActivity, and asks it to write one row to fuata.sqlite. This proves
- * (or disproves) that a background isolate can safely touch the same
- * database file the UI isolate might have open at the same moment.
+ * The privacy gate is the first thing that happens: a notification from
+ * any app that is not on the person's allow-list is dropped right here —
+ * no text is read, no engine is started, nothing is stored (US-10,
+ * requirements.md Privacy row). Only allow-listed notifications continue,
+ * and even then their text goes straight to the capture pipeline in
+ * memory; only what the parser extracts, or an unreadable message the
+ * person can teach Fuata to read, is ever written.
  *
- * Findings go in docs/design.md section 5, not here. This class is
- * replaced by the real listener in #22.
+ * design.md 5.1: on some phones (confirmed on MIUI) this service is only
+ * bound after the notification-access switch is toggled off and on in
+ * Android's own settings screen. The Auto-catch screen says so.
  */
-class NotificationListener: NotificationListenerService() {
+class NotificationListener : NotificationListenerService() {
 
     override fun onNotificationPosted(sbn: StatusBarNotification) {
-        val handle = readCallbackHandle(applicationContext)
-        if (handle == null) {
-            Log.w(TAG, "No callback handle registered — open the app once first.")
-            return
-        }
+        Log.d("fuata_capture", "onNotificationPosted pkg=${sbn.packageName}")
+        val packageName = sbn.packageName ?: return
 
-        val packageName = sbn.packageName
-        val extras = sbn.notification.extras
-        val text = extras?.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString()
-            ?: extras?.getCharSequence(Notification.EXTRA_TEXT)?.toString()
-            ?: ""
+        // Never read our own notifications (the banner, #16).
+        if (packageName == applicationContext.packageName) return
 
-        val loader = FlutterLoader()
-        loader.startInitialization(applicationContext)
-        loader.ensureInitializationCompleteAsync(
-            applicationContext,
-            null,
-            Handler(Looper.getMainLooper()),
-        ) {
-            val callbackInfo = FlutterCallbackInformation.lookupCallbackInformation(handle)
-            if (callbackInfo == null) {
-                Log.e(TAG, "Callback lookup failed for handle $handle")
-                return@ensureInitializationCompleteAsync
-            }
+        // The gate. Everything below only runs for allowed apps.
+        if (!CaptureStore.isAllowed(applicationContext, packageName)) return
 
-            val engine = FlutterEngine(applicationContext)
-            val dartCallback = DartExecutor.DartCallback(
-                applicationContext.assets,
-                loader.findAppBundlePath(),
-                callbackInfo,
-            )
-            engine.dartExecutor.executeDartCallback(dartCallback)
+        val notification = sbn.notification ?: return
 
-            val bgChannel = MethodChannel(
-                engine.dartExecutor.binaryMessenger,
-                "fuata/listener_spike_bg",
-            )
+        // A group summary is a container for children the app posts as
+        // separate notifications (Android's bundling contract); reading it
+        // would just produce unreadable "3 new messages" entries.
+        if ((notification.flags and Notification.FLAG_GROUP_SUMMARY) != 0) return
 
-            bgChannel.setMethodCallHandler { call, result ->
-                if (call.method == "backgroundIsolateReady") {
-                    bgChannel.invokeMethod(
-                        "onNotification",
-                        mapOf("packageName" to packageName, "text" to text),
-                    )
-                    result.success(null)
-                    // Spike, not a long-lived worker — give the write a
-                    // moment then tear the engine down.
-                    Handler(Looper.getMainLooper()).postDelayed({ engine.destroy() }, 3000)
-                } else {
-                    result.notImplemented()
-                }
-            }
-        }
-    }
+        val text = NotificationText.extract(notification) ?: return
 
-    companion object {
-        private const val TAG = "listener_spike"
-        private const val PREFS = "fuata_listener_spike"
-        private const val KEY_HANDLE = "callback_handle"
-
-        fun writeCallbackHandle(context: Context, handle: Long) {
-            prefs(context).edit().putLong(KEY_HANDLE, handle).apply()
-        }
-
-        private fun readCallbackHandle(context: Context): Long? {
-            val v = prefs(context).getLong(KEY_HANDLE, -1L)
-            return if (v == -1L) null else v
-        }
-
-        private fun prefs(context: Context): SharedPreferences =
-            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        CaptureEngine.submit(applicationContext, packageName, text)
     }
 }
