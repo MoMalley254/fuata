@@ -61,6 +61,17 @@ extension HomeSectionsLabel on HomeSection {
   };
 }
 
+///#17 The big number in the banner's collapsed line (ui-design-brief.md 7.9).
+enum BannerHeadline { leftToday, spentToday, totalIHave }
+
+extension BannerHeadlineLabel on BannerHeadline {
+  String get label => switch (this) {
+    BannerHeadline.leftToday => 'Left today',
+    BannerHeadline.spentToday => 'Spent today',
+    BannerHeadline.totalIHave => 'Total I have',
+  };
+}
+
 /// Light / dark / follow system (design brief section 3). A dedicated
 /// enum, rather than reusing Flutter's ThemeMode directly, keeps the
 /// domain model independent of *which* widget toolkit reads it.
@@ -140,6 +151,13 @@ class AppSettings {
   // eyeballed at least once.
   final bool autoAcceptCaptures;
 
+  // Banner options (issue #17). Empty bannerUnitIds means "all units".
+  final bool bannerEnabled;
+  final BannerHeadline bannerHeadline;
+  final Set<String> bannerUnitIds;
+  final bool bannerShowProgress;
+  final bool bannerShowQuickAdd;
+
   const AppSettings({
     required this.name,
     required this.accent,
@@ -150,6 +168,11 @@ class AppSettings {
     required this.amountsHiddenInRecents,
     required this.redactedLockScreenBanner,
     required this.autoAcceptCaptures,
+    required this.bannerEnabled,
+    required this.bannerHeadline,
+    required this.bannerUnitIds,
+    required this.bannerShowProgress,
+    required this.bannerShowQuickAdd,
   });
 
   static final defaults = AppSettings(
@@ -162,6 +185,11 @@ class AppSettings {
     amountsHiddenInRecents: false,
     redactedLockScreenBanner: true,
     autoAcceptCaptures: false,
+    bannerEnabled: false, // turned on by onboarding (#7) or this screen
+    bannerHeadline: BannerHeadline.leftToday,
+    bannerUnitIds: <String>{},
+    bannerShowProgress: true,
+    bannerShowQuickAdd: true,
   );
 
   AppSettings copyWith({
@@ -174,6 +202,11 @@ class AppSettings {
     bool? amountsHiddenInRecents,
     bool? redactedLockScreenBanner,
     bool? autoAcceptCaptures,
+    bool? bannerEnabled,
+    BannerHeadline? bannerHeadline,
+    Set<String>? bannerUnitIds,
+    bool? bannerShowProgress,
+    bool? bannerShowQuickAdd,
   }) {
     return AppSettings(
       name: name ?? this.name,
@@ -187,6 +220,11 @@ class AppSettings {
       redactedLockScreenBanner:
       redactedLockScreenBanner ?? this.redactedLockScreenBanner,
       autoAcceptCaptures: autoAcceptCaptures ?? this.autoAcceptCaptures,
+      bannerEnabled: bannerEnabled ?? this.bannerEnabled,
+      bannerHeadline: bannerHeadline ?? this.bannerHeadline,
+      bannerUnitIds: bannerUnitIds ?? this.bannerUnitIds,
+      bannerShowProgress: bannerShowProgress ?? this.bannerShowProgress,
+      bannerShowQuickAdd: bannerShowQuickAdd ?? this.bannerShowQuickAdd
     );
   }
 }
