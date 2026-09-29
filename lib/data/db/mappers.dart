@@ -19,31 +19,34 @@ import 'package:fuata/domain/models/template.dart';
 import '../../domain/models/limit_rule.dart';
 import '../../domain/models/transaction.dart';
 import '../../domain/models/unit.dart';
+import '../../domain/models/unparsed_capture.dart';
 import 'app_database.dart';
 
-UnitKind _unitKindFromText(String s) =>
-    UnitKind.values.firstWhere((e) => e.name == s, orElse: () => UnitKind.other);
+UnitKind _unitKindFromText(String s) => UnitKind.values.firstWhere(
+  (e) => e.name == s,
+  orElse: () => UnitKind.other,
+);
 
 TxType _txTypeFromText(String s) =>
     TxType.values.firstWhere((e) => e.name == s, orElse: () => TxType.spent);
 
 TxSource _txSourceFromText(String s) => TxSource.values.firstWhere(
-      (e) => e.name == s,
+  (e) => e.name == s,
   orElse: () => TxSource.manual,
 );
 
 TxStatus _txStatusFromText(String s) => TxStatus.values.firstWhere(
-      (e) => e.name == s,
+  (e) => e.name == s,
   orElse: () => TxStatus.confirmed,
 );
 
 LimitScope _limitScopeFromText(String s) => LimitScope.values.firstWhere(
-      (e) => e.name == s,
+  (e) => e.name == s,
   orElse: () => LimitScope.overall,
 );
 
 LimitPeriod _limitPeriodFromText(String s) => LimitPeriod.values.firstWhere(
-      (e) => e.name == s,
+  (e) => e.name == s,
   orElse: () => LimitPeriod.day,
 );
 
@@ -194,5 +197,18 @@ TemplatesCompanion templateToCompanion(CaptureTemplate t) {
     sampleText: t.sampleText,
     version: Value(t.version),
     enabled: Value(t.enabled),
+  );
+}
+
+// --- UnparsedCapture -------------------------------------------------------
+
+/// Straight pass-through — the row and the domain model have exactly the
+/// same four fields (tables.dart's UnparsedCaptures).
+UnparsedCapture unparsedCaptureFromRow(UnparsedCaptureRow row) {
+  return UnparsedCapture(
+    id: row.id,
+    receivedAt: row.receivedAt,
+    sourcePackage: row.sourcePackage,
+    rawText: row.rawText,
   );
 }

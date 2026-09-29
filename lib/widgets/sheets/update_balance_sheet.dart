@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
 
 import '../../domain/models/money.dart';
 import '../../domain/models/transaction.dart';
@@ -13,15 +14,19 @@ import '../../ui/theme/app_typography.dart';
 /// true amount; the app records the DIFFERENCE as an adjustment entry
 /// rather than overwriting anything (design.md field rules table —
 /// balances are always derived from the ledger, never stored directly).
-Future<void> showUpdateBalanceSheet(
-  BuildContext context, {
+///
+/// Uses flutter_smart_dialog rather than showModalBottomSheet because the
+/// caller's BuildContext may be disposed by the time the sheet is opened
+/// (the review inbox's PendingCard is unmounted the moment the row it
+/// shows gets confirmed — see _confirm in pending_card.dart).
+Future<void> showUpdateBalanceSheet({
   required MoneyUnit unit,
   required int currentBalanceMinor,
 }) {
-  return showModalBottomSheet(
-    context: context,
-    isScrollControlled: true,
-    backgroundColor: Colors.transparent,
+  return SmartDialog.show(
+    alignment: Alignment.bottomCenter,
+    clickMaskDismiss: true,
+    animationType: SmartAnimationType.scale,
     builder: (_) => UpdateBalanceSheet(
       unit: unit,
       currentBalanceMinor: currentBalanceMinor,
@@ -87,7 +92,7 @@ class _UpdateBalanceSheetState extends ConsumerState<UpdateBalanceSheet> {
       await ref
           .read(unitRepositoryProvider)
           .updateUnit(widget.unit.copyWith(lastVerifiedAt: DateTime.now()));
-      if (mounted) Navigator.of(context).pop();
+      SmartDialog.dismiss();
     } catch (error) {
       setState(() {
         _saving = false;
@@ -107,7 +112,11 @@ class _UpdateBalanceSheetState extends ConsumerState<UpdateBalanceSheet> {
     final c = context.colors;
     final symbol = currencySymbol(widget.unit.currencyCode);
 
-    return SafeArea(
+    // SmartDialog renders outside the app's Scaffold/Material hierarchy,
+    // so the sheet supplies its own Material + theme access.
+
+    return Material(
+      color: Colors.transparent,
       child: Container(
         decoration: BoxDecoration(
           color: c.surface,
@@ -115,75 +124,84 @@ class _UpdateBalanceSheetState extends ConsumerState<UpdateBalanceSheet> {
             top: Radius.circular(AppSpacing.cardRadiusHero),
           ),
         ),
-        child: Padding(
-          padding: EdgeInsets.only(
-            bottom: MediaQuery.of(context).viewInsets.bottom,
-          ),
+        child: SafeArea(
+          top: false,
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(
-              AppSpacing.lg,
-              AppSpacing.md,
-              AppSpacing.lg,
-              AppSpacing.lg,
+            padding: EdgeInsets.only(
+              bottom: MediaQuery.of(context).viewInsets.bottom,
             ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Center(
-                  child: Container(
-                    width: 40,
-                    height: 4,
-                    margin: const EdgeInsets.only(bottom: AppSpacing.md),
-                    decoration: BoxDecoration(
-                      color: c.outlineVariant,
-                      borderRadius: BorderRadius.circular(AppSpacing.pill),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(
+                AppSpacing.lg,
+                AppSpacing.md,
+                AppSpacing.lg,
+                AppSpacing.lg,
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Center(
+                    child: Container(
+                      width: 40,
+                      height: 4,
+                      margin: const EdgeInsets.only(bottom: AppSpacing.md),
+                      decoration: BoxDecoration(
+                        color: c.outlineVariant,
+                        borderRadius: BorderRadius.circular(AppSpacing.pill),
+                      ),
                     ),
                   ),
-                ),
-                Text(
-                  'Update ${widget.unit.name}',
-                  style: AppTypography.headlineSm.copyWith(color: c.onSurface),
-                ),
-                const SizedBox(height: AppSpacing.xs),
-                Text(
-                  "What's the true balance right now?",
-                  style: AppTypography.bodySm.copyWith(
-                    color: c.onSurfaceVariant,
-                  ),
-                ),
-                const SizedBox(height: AppSpacing.md),
-                TextField(
-                  controller: _controller,
-                  autofocus: true,
-                  keyboardType: const TextInputType.numberWithOptions(
-                    decimal: true,
-                  ),
-                  decoration: InputDecoration(prefixText: symbol),
-                  style: AppTypography.headlineLg.copyWith(color: c.onSurface),
-                ),
-                if (_error != null) ...[
-                  const SizedBox(height: AppSpacing.sm),
                   Text(
-                    _error!,
-                    style: AppTypography.bodySm.copyWith(color: c.statusDanger),
+                    'Update ${widget.unit.name}',
+                    style: AppTypography.headlineSm.copyWith(
+                      color: c.onSurface,
+                    ),
+                  ),
+                  const SizedBox(height: AppSpacing.xs),
+                  Text(
+                    "What's the true balance right now?",
+                    style: AppTypography.bodySm.copyWith(
+                      color: c.onSurfaceVariant,
+                    ),
+                  ),
+                  const SizedBox(height: AppSpacing.md),
+                  TextField(
+                    controller: _controller,
+                    autofocus: true,
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                    decoration: InputDecoration(prefixText: symbol),
+                    style: AppTypography.headlineLg.copyWith(
+                      color: c.onSurface,
+                    ),
+                  ),
+                  if (_error != null) ...[
+                    const SizedBox(height: AppSpacing.sm),
+                    Text(
+                      _error!,
+                      style: AppTypography.bodySm.copyWith(
+                        color: c.statusDanger,
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: AppSpacing.lg),
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton(
+                      onPressed: _saving ? null : _save,
+                      child: _saving
+                          ? const SizedBox(
+                              height: 18,
+                              width: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Text('Update'),
+                    ),
                   ),
                 ],
-                const SizedBox(height: AppSpacing.lg),
-                SizedBox(
-                  width: double.infinity,
-                  child: FilledButton(
-                    onPressed: _saving ? null : _save,
-                    child: _saving
-                        ? const SizedBox(
-                            height: 18,
-                            width: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Text('Update'),
-                  ),
-                ),
-              ],
+              ),
             ),
           ),
         ),

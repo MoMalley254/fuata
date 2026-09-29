@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:fuata/ui/providers/capture_providers.dart';
+import 'package:fuata/ui/screens/review_inbox_screen.dart';
 import 'package:fuata/ui/screens/rule_builder_screen.dart';
 
 import '../../domain/models/settings.dart';
@@ -25,9 +27,10 @@ import '../../widgets/app_chips.dart';
 /// `MockSettingsRepository`, an in-memory store, same as units/
 /// transactions/limits until #13).
 ///
-/// Limits & alerts, Banner, and Message reading each get their own
-/// dedicated screens in later issues (#15/#17, #16/#17, #19-#22) — shown
-/// here as `ComingSoonRow`s that link out, rather than half-built here.
+/// Limits & alerts and Banner each get their own dedicated screens in
+/// later issues (#15/#17, #16/#17) — shown here as `ComingSoonRow`s that
+/// link out, rather than half-built here. Message reading is live as of
+/// #20 (rules) and #21 (share/paste capture + review inbox).
 class MeScreen extends ConsumerWidget {
   const MeScreen({super.key});
 
@@ -36,6 +39,7 @@ class MeScreen extends ConsumerWidget {
     final c = context.colors;
     final settings = ref.watch(currentSettingsProvider);
     final repo = ref.read(settingsRepositoryProvider);
+    final pendingCount = ref.watch(pendingTransactionsProvider).length;
 
     void update(AppSettings Function(AppSettings) fn) {
       repo.updateSettings(fn(settings));
@@ -46,7 +50,10 @@ class MeScreen extends ConsumerWidget {
       body: SafeArea(
         child: ListView(
           padding: const EdgeInsets.fromLTRB(
-            AppSpacing.margin, AppSpacing.sm, AppSpacing.margin, AppSpacing.xl,
+            AppSpacing.margin,
+            AppSpacing.sm,
+            AppSpacing.margin,
+            AppSpacing.xl,
           ),
           children: [
             ProfileBlock(settings: settings, onChanged: update),
@@ -107,7 +114,9 @@ class MeScreen extends ConsumerWidget {
                 const SizedBox(height: AppSpacing.md),
                 Text(
                   settings.detailLevel.description,
-                  style: AppTypography.bodySm.copyWith(color: c.onSurfaceVariant),
+                  style: AppTypography.bodySm.copyWith(
+                    color: c.onSurfaceVariant,
+                  ),
                 ),
                 const SizedBox(height: AppSpacing.sm),
                 DetailLevelExample(level: settings.detailLevel),
@@ -120,17 +129,32 @@ class MeScreen extends ConsumerWidget {
                 ActionRow(
                   icon: Icons.notifications_active_outlined,
                   title: 'Notification access',
-                  subtitle:
-                  'Grant Fuata permission to read bank/mobile-money notifications.',
+                  subtitle: 'Grant Fuata permission to read bank/mobile-money notifications.',
                   onTap: openNotificationAccessSettings,
+                ),
+                const SizedBox(height: AppSpacing.sm),
+                ActionRow(
+                  icon: Icons.inbox_rounded,
+                  title: 'Caught from your messages',
+                  subtitle: pendingCount == 0
+                      ? 'Nothing waiting for your check'
+                      : '$pendingCount waiting for your check',
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => const ReviewInboxScreen(),
+                    ),
+                  ),
                 ),
                 const SizedBox(height: AppSpacing.sm),
                 ActionRow(
                   icon: Icons.mark_email_read_outlined,
                   title: 'Message reading rules',
-                  subtitle: 'Teach Fuata to read a bank or mobile-money message',
+                  subtitle:
+                      'Teach Fuata to read a bank or mobile-money message',
                   onTap: () => Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => const RuleBuilderScreen()),
+                    MaterialPageRoute(
+                      builder: (_) => const RuleBuilderScreen(),
+                    ),
                   ),
                 ),
                 const SizedBox(height: AppSpacing.sm),
@@ -149,13 +173,14 @@ class MeScreen extends ConsumerWidget {
                 ComingSoonRow(
                   icon: Icons.mark_email_read_outlined,
                   title: 'Message reading',
-                  subtitle: 'Rules and allowed apps for auto-catch — coming in #19-#22',
+                  subtitle: 'Allowed apps for auto-catch — coming in #22',
                 ),
                 SizedBox(height: AppSpacing.sm),
                 ComingSoonRow(
                   icon: Icons.sell_outlined,
                   title: 'Categories',
-                  subtitle: 'Rename or add category names and icons — coming soon',
+                  subtitle:
+                      'Rename or add category names and icons — coming soon',
                 ),
               ],
             ),
@@ -169,7 +194,13 @@ class MeScreen extends ConsumerWidget {
                   children: AppThemeMode.values.map((mode) {
                     return AppChoiceChip(
                       label: mode.label,
-                      leading: Icon(mode.icon, size: 16, color: settings.themeMode == mode ? c.primary : c.onSurfaceVariant),
+                      leading: Icon(
+                        mode.icon,
+                        size: 16,
+                        color: settings.themeMode == mode
+                            ? c.primary
+                            : c.onSurfaceVariant,
+                      ),
                       selected: settings.themeMode == mode,
                       onTap: () => update((s) => s.copyWith(themeMode: mode)),
                     );
@@ -185,12 +216,3 @@ class MeScreen extends ConsumerWidget {
     );
   }
 }
-
-
-
-
-
-
-
-
-

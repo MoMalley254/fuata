@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// The real repositories (issue #13). Same four interfaces the mock repos in
+// The real repositories (issue #13). Same interfaces the mock repos in
 // data/mock/mock_repositories.dart already implement — screens don't know
 // or care which one they're wired to (design.md, "UI-first approach").
 //
@@ -15,6 +15,7 @@ import '../../domain/models/settings.dart';
 import '../../domain/models/template.dart';
 import '../../domain/models/transaction.dart';
 import '../../domain/models/unit.dart';
+import '../../domain/models/unparsed_capture.dart';
 import '../../domain/repositories/repositories.dart';
 import 'app_database.dart';
 import 'mappers.dart';
@@ -74,6 +75,17 @@ class DriftTransactionRepository implements TransactionRepository {
   }
 
   @override
+  Future<void> updateTransaction(MoneyTransaction transaction) {
+    // insertOnConflictUpdate by primary key — the same statement as add;
+    // the name just records what the caller means (the review inbox's
+    // Fix action, #21). Balances pick the change up automatically since
+    // they're always derived (ADR-004).
+    return _db
+        .into(_db.transactions)
+        .insertOnConflictUpdate(transactionToCompanion(transaction));
+  }
+
+  @override
   Future<void> confirmTransaction(String transactionId) {
     return (_db.update(
       _db.transactions,
@@ -124,6 +136,7 @@ class DriftSettingsRepository implements SettingsRepository {
   static const _kDetailLevel = 'detailLevel';
   static const _kAmountsHidden = 'amountsHiddenInRecents';
   static const _kRedactedBanner = 'redactedLockScreenBanner';
+  static const _kAutoAccept = 'autoAcceptCaptures';
 
   @override
   Stream<AppSettings> watchSettings() {
@@ -169,6 +182,10 @@ class DriftSettingsRepository implements SettingsRepository {
       SettingsEntriesCompanion.insert(
         key: _kRedactedBanner,
         value: s.redactedLockScreenBanner.toString(),
+      ),
+      SettingsEntriesCompanion.insert(
+        key: _kAutoAccept,
+        value: s.autoAcceptCaptures.toString(),
       ),
     ];
   }
@@ -227,6 +244,10 @@ class DriftSettingsRepository implements SettingsRepository {
         map[_kRedactedBanner],
         defaults.redactedLockScreenBanner,
       ),
+      autoAcceptCaptures: boolOr(
+        map[_kAutoAccept],
+        defaults.autoAcceptCaptures,
+      ),
     );
   }
 }
@@ -258,5 +279,51 @@ class DriftTemplateRepository implements TemplateRepository {
     return (_db.delete(
       _db.templates,
     )..where((t) => t.id.equals(templateId))).go();
+  }
+}
+
+/// Unparsed captures (#21): the review inbox's "Couldn't read these"
+/// list. Insert and 7-day purge run in one transaction so the table can
+/// never grow without bound, whichever happens first.
+class DriftCaptureRepository implements CaptureRepository {
+  DriftCaptureRepository(this._db);
+  final AppDatabase _db;
+
+  @override
+  Stream<List<UnparsedCapture>> watchUnparsed() {
+    final query = _db.select(_db.unparsedCaptures)
+      ..orderBy([(u) => OrderingTerm.desc(u.receivedAt)]);
+    return query.watch().map(
+          (rows) => rows.map(unparsedCaptureFromRow).toList(),
+    );
+  }
+
+  @override
+  Future<void> recordUnparsed({
+    required String id,
+    required String sourcePackage,
+    required String rawText,
+  }) {
+    return _db.transaction(() async {
+      await _db.into(_db.unparsedCaptures).insert(
+        UnparsedCapturesCompanion.insert(
+          id: id,
+          receivedAt: DateTime.now().toUtc(),
+          sourcePackage: sourcePackage,
+          rawText: rawText,
+        ),
+      );
+      final cutoff = DateTime.now().toUtc().subtract(const Duration(days: 7));
+      await (_db.delete(_db.unparsedCaptures)
+        ..where((u) => u.receivedAt.isSmallerThanValue(cutoff)))
+          .go();
+    });
+  }
+
+  @override
+  Future<void> deleteUnparsed(String captureId) {
+    return (_db.delete(
+      _db.unparsedCaptures,
+    )..where((u) => u.id.equals(captureId))).go();
   }
 }

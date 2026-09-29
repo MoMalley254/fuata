@@ -13,8 +13,11 @@ import io.flutter.plugin.common.MethodChannel
  * once #22 lands.
  */
 class MainActivity : FlutterActivity() {
+    private var shareIntake: ShareIntakeChannel? = null
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "fuata/listener_spike")
             .setMethodCallHandler { call, result ->
                 when (call.method) {
@@ -30,5 +33,17 @@ class MainActivity : FlutterActivity() {
                     else -> result.notImplemented()
                 }
             }
+
+        shareIntake = ShareIntakeChannel(flutterEngine.dartExecutor.binaryMessenger)
+
+        // The intent that started (or restarted) this activity may be a
+        // share; route it now that the channel exists.
+        shareIntake?.handleShareIntent(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        // singleTop: shares into a running activity arrive here.
+        shareIntake?.handleShareIntent(intent)
     }
 }

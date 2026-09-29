@@ -107,6 +107,58 @@ void main() {
     expect(await txs.watchTransactions().first, hasLength(1));
   });
 
+  test('updateTransaction edits a row in place by id', () async {
+    final units = DriftUnitRepository(db);
+    final txs = DriftTransactionRepository(db);
+    await units.addUnit(
+      MoneyUnit(
+        id: 'u1',
+        name: 'Cash',
+        kind: UnitKind.cash,
+        currencyCode: 'KES',
+        iconEmoji: '💵',
+        color: const Color(0xFF000000),
+        openingBalanceMinor: 0,
+        sortOrder: 0,
+        createdAt: DateTime(2026, 9, 21),
+      ),
+    );
+    await txs.addTransaction(
+      MoneyTransaction(
+        id: 't1',
+        unitId: 'u1',
+        type: TxType.spent,
+        amountMinor: -35000,
+        counterparty: 'JAVA HSE',
+        occurredAt: DateTime(2026, 9, 27, 13, 12),
+        createdAt: DateTime(2026, 9, 27, 13, 12),
+        status: TxStatus.pending,
+        source: TxSource.shared,
+      ),
+    );
+
+    // The review inbox's Fix (#21): same id, new fields, still pending.
+    await txs.updateTransaction(
+      MoneyTransaction(
+        id: 't1',
+        unitId: 'u1',
+        type: TxType.spent,
+        amountMinor: -3500,
+        counterparty: 'Java House',
+        occurredAt: DateTime(2026, 9, 27, 13, 12),
+        createdAt: DateTime(2026, 9, 27, 13, 12),
+        status: TxStatus.pending,
+        source: TxSource.shared,
+      ),
+    );
+
+    final all = await txs.watchTransactions().first;
+    expect(all, hasLength(1)); // upsert, not a second row
+    expect(all.single.amountMinor, -3500);
+    expect(all.single.counterparty, 'Java House');
+    expect(all.single.status, TxStatus.pending);
+  });
+
   test('limit round-trips and setLimit upserts by id', () async {
     final repo = DriftLimitRepository(db);
     final daily = LimitRule(
@@ -131,11 +183,13 @@ void main() {
     final repo = DriftSettingsRepository(db);
 
     expect((await repo.watchSettings().first).name, AppSettings.defaults.name);
+    expect((await repo.watchSettings().first).autoAcceptCaptures, isFalse);
 
     final updated = AppSettings.defaults.copyWith(
       name: 'Amina',
       detailLevel: DetailLevel.detailed,
       homeSections: {HomeSection.lately},
+      autoAcceptCaptures: true,
     );
     await repo.updateSettings(updated);
 
@@ -143,5 +197,35 @@ void main() {
     expect(saved.name, 'Amina');
     expect(saved.detailLevel, DetailLevel.detailed);
     expect(saved.homeSections, {HomeSection.lately});
+    expect(saved.autoAcceptCaptures, isTrue);
+  });
+
+  test('unparsed captures round-trip and purge after 7 days', () async {
+    final repo = DriftCaptureRepository(db);
+
+    // Seed an old row directly, as if recorded a week ago.
+    await db.into(db.unparsedCaptures).insert(
+      UnparsedCapturesCompanion.insert(
+        id: 'old',
+        receivedAt:
+        DateTime.now().toUtc().subtract(const Duration(days: 8)),
+        sourcePackage: 'shared',
+        rawText: 'an old unreadable message',
+      ),
+    );
+
+    await repo.recordUnparsed(
+      id: 'new',
+      sourcePackage: 'shared',
+      rawText: 'Confirmed. Ksh350.00 paid to JAVA HOUSE...',
+    );
+
+    final rows = await repo.watchUnparsed().first;
+    expect(rows, hasLength(1)); // the old one was purged on the way in
+    expect(rows.single.id, 'new');
+    expect(rows.single.rawText, contains('JAVA HOUSE'));
+
+    await repo.deleteUnparsed('new');
+    expect(await repo.watchUnparsed().first, isEmpty);
   });
 }
