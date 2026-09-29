@@ -31,6 +31,7 @@ class HomeScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final homeAsync = ref.watch(homeStateProvider);
     final settings = ref.watch(currentSettingsProvider);
+    final inboxCount = ref.watch(reviewInboxCountProvider);
     final pendingCount = ref.watch(pendingTransactionsProvider).length;
 
     return Scaffold(
@@ -46,11 +47,12 @@ class HomeScreen extends ConsumerWidget {
           data: (state) => state.units.isEmpty
               ? const EmptyHome()
               : HomeContent(
-                  state: state,
-                  settings: settings,
-                  pendingCount: pendingCount,
-                  onSeeAllActivity: onSeeAllActivity,
-                  onOpenInbox: onOpenInbox,
+            state: state,
+            settings: settings,
+            inboxCount: inboxCount,
+            pendingCount: pendingCount,
+            onSeeAllActivity: onSeeAllActivity,
+            onOpenInbox: onOpenInbox,
                 ),
         ),
       ),
@@ -65,6 +67,7 @@ class HomeScreen extends ConsumerWidget {
 class HomeContent extends StatelessWidget {
   final HomeState state;
   final AppSettings settings;
+  final int inboxCount;
   final int pendingCount;
   final VoidCallback? onSeeAllActivity;
   final VoidCallback? onOpenInbox;
@@ -72,6 +75,7 @@ class HomeContent extends StatelessWidget {
     super.key,
     required this.state,
     required this.settings,
+    this.inboxCount = 0,
     this.pendingCount = 0,
     this.onSeeAllActivity,
     this.onOpenInbox,
@@ -91,9 +95,13 @@ class HomeContent extends StatelessWidget {
       ),
       children: [
         Greeting(name: settings.name),
-        if (pendingCount > 0) ...[
+        if (inboxCount > 0) ...[
           const SizedBox(height: AppSpacing.md),
-          _InboxNudge(count: pendingCount, onTap: onOpenInbox),
+          _InboxNudge(
+            inboxCount: inboxCount,
+            pendingCount: pendingCount,
+            onTap: onOpenInbox,
+          ),
         ],
         const SizedBox(height: AppSpacing.lg),
         HeroSection(state: state, headline: settings.homeHeadline),
@@ -175,13 +183,23 @@ class HomeContent extends StatelessWidget {
 /// design.md's status field rule: Home shows "N waiting to confirm" when
 /// captures are sitting in the review inbox (#21). Tapping opens it.
 class _InboxNudge extends StatelessWidget {
-  final int count;
+  final int inboxCount;
+  final int pendingCount;
   final VoidCallback? onTap;
-  const _InboxNudge({required this.count, this.onTap});
+  const _InboxNudge({required this.inboxCount,
+    required this.pendingCount,
+    this.onTap,});
 
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
+
+    // Two voices, because "waiting for your check" is a lie when the only
+    // thing in there is a message Fuata couldn't read.
+    final message = pendingCount > 0
+        ? '$inboxCount caught from your messages — tap to check'
+        : "$inboxCount I couldn't read — tap to teach me";
+
     return Material(
       color: Colors.transparent,
       child: InkWell(
@@ -203,7 +221,7 @@ class _InboxNudge extends StatelessWidget {
               const SizedBox(width: AppSpacing.sm),
               Expanded(
                 child: Text(
-                  '$count waiting for your check',
+                  message,
                   style: AppTypography.bodyMd.copyWith(color: c.onSurface),
                 ),
               ),
