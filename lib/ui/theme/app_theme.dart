@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+
 import 'app_colors.dart';
 import 'app_spacing.dart';
 import 'app_typography.dart';
@@ -8,12 +9,16 @@ class AppTheme {
   /// default `AppAccents.teal`). Omit it to get the original fixed
   /// palette — used by tests/tooling that don't care about accents.
   static ThemeData light({Color? accent}) => _build(
-    accent == null ? AppColors.light : AppColors.light.withAccent(accent, Brightness.light),
+    accent == null
+        ? AppColors.light
+        : AppColors.light.withAccent(accent, Brightness.light),
     Brightness.light,
   );
 
   static ThemeData dark({Color? accent}) => _build(
-    accent == null ? AppColors.dark : AppColors.dark.withAccent(accent, Brightness.dark),
+    accent == null
+        ? AppColors.dark
+        : AppColors.dark.withAccent(accent, Brightness.dark),
     Brightness.dark,
   );
 
@@ -130,11 +135,15 @@ class AppTheme {
         ),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(16),
-          borderSide: BorderSide(color: c.outlineVariant.withValues(alpha: 0.4)),
+          borderSide: BorderSide(
+            color: c.outlineVariant.withValues(alpha: 0.4),
+          ),
         ),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(16),
-          borderSide: BorderSide(color: c.outlineVariant.withValues(alpha: 0.4)),
+          borderSide: BorderSide(
+            color: c.outlineVariant.withValues(alpha: 0.4),
+          ),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(16),
@@ -165,6 +174,8 @@ class AppTheme {
         contentTextStyle: AppTypography.bodyMd.copyWith(color: c.onSurface),
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        actionTextColor: c.primary,
+        elevation: 0,
       ),
     );
   }
