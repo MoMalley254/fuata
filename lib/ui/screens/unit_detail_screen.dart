@@ -183,7 +183,7 @@ class UnitDetailScreen extends ConsumerWidget {
                     const ComingSoonRow(
                       icon: Icons.speed_rounded,
                       title: 'Limit for this unit',
-                      subtitle: 'Set a spending limit just for this one — coming in #15/#17',
+                      subtitle: 'Set a spending limit just for this one — coming later',
                     ),
                     const SizedBox(height: AppSpacing.sm),
                     Builder(

@@ -120,6 +120,12 @@ class DriftLimitRepository implements LimitRepository {
         .into(_db.limitRules)
         .insertOnConflictUpdate(limitRuleToCompanion(limit));
   }
+
+  @override
+  Future<void> deleteLimit(String limitId) {
+    return (_db.delete(_db.limitRules)
+      ..where((l) => l.id.equals(limitId))).go();
+  }
 }
 
 /// Settings are stored as key/value rows (design.md), so this repository

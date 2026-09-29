@@ -55,4 +55,27 @@ class LimitRule {
     if (ratio >= warnAt) return SpendStatus.warning;
     return SpendStatus.safe;
   }
+
+  LimitRule copyWith({
+    LimitScope? scope,
+    String? unitId,
+    LimitPeriod? period,
+    int? amountMinor,
+    String? currencyCode,
+    double? warnAt,
+    double? dangerAt,
+    bool? enabled,
+  }) {
+    return LimitRule(
+      id: id,
+      scope: scope ?? this.scope,
+      unitId: unitId ?? this.unitId,
+      period: period ?? this.period,
+      amountMinor: amountMinor ?? this.amountMinor,
+      currencyCode: currencyCode ?? this.currencyCode,
+      warnAt: warnAt ?? this.warnAt,
+      dangerAt: dangerAt ?? this.dangerAt,
+      enabled: enabled ?? this.enabled,
+    );
+  }
 }
