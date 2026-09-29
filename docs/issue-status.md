@@ -1,4 +1,4 @@
-# Issue status (generated 2026-09-26T21:18Z)
+# Issue status (generated 2026-09-29T06:07Z)
 
 Source of truth: GitHub. Regenerate with `scripts/refresh-issue-status.sh`.
 
@@ -25,18 +25,18 @@ Source of truth: GitHub. Regenerate with `scripts/refresh-issue-status.sh`.
 | #23 | OPEN | v0.1 MVP | feat(insight): Today/Week/Month summaries |
 | #22 | OPEN | v0.1 MVP | feat(capture): notification listener with app allow-list and dedupe |
 | #21 | OPEN | v0.1 MVP | feat(capture): share/paste to review inbox |
-| #20 | OPEN | v0.1 MVP | feat(capture): rule builder UI |
+| #20 | CLOSED | v0.1 MVP | feat(capture): rule builder UI |
 | #19 | CLOSED | v0.1 MVP | feat(capture): template model and parser |
 | #18 | CLOSED | v0.1 MVP | spike: notification listener with app closed |
 | #17 | OPEN | v0.1 MVP | feat(banner): banner setup screen with live preview |
 | #16 | OPEN | v0.1 MVP | feat(banner): ongoing notification banner |
-| #15 | OPEN | v0.1 MVP | feat(limits): limit engine and status |
-| #14 | OPEN | v0.1 MVP | feat(ledger): computed balances, transfers, fees |
+| #15 | CLOSED | v0.1 MVP | feat(limits): limit engine and status |
+| #14 | CLOSED | v0.1 MVP | feat(ledger): computed balances, transfers, fees |
 | #13 | CLOSED | v0.1 MVP | feat(data): local database and repositories |
 | #12 | CLOSED | v0.1 MVP | feat(ui): Me and personalisation settings |
 | #11 | CLOSED | v0.1 MVP | feat(ui): My money and unit pages |
 | #10 | CLOSED | v0.1 MVP | feat(ui): Activity screen and transaction detail |
-| #9 | OPEN | v0.1 MVP | feat(ui): add-transaction sheet |
+| #9 | CLOSED | v0.1 MVP | feat(ui): add-transaction sheet |
 | #8 | CLOSED | v0.1 MVP | feat(ui): Home (Today) screen |
 | #7 | OPEN | v0.1 MVP | feat(ui): onboarding flow |
 | #6 | CLOSED | v0.1 MVP | feat(ui): app theme, tokens and personalisation shell |
