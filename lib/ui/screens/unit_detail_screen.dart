@@ -3,11 +3,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:fuata/domain/logic/ledger.dart';
 import 'package:intl/intl.dart';
 
+import '../../domain/models/limit_rule.dart';
 import '../../domain/models/money.dart';
 import '../../widgets/activity/empty_activity.dart';
 import '../../widgets/activity/grouped_list.dart';
-import '../../widgets/coming_soon_row.dart';
+import '../../widgets/limits/unit_limit_summary.dart';
 import '../../widgets/personalization/action_row.dart';
+import '../../widgets/sheets/edit_unit_limits_sheet.dart';
 import '../../widgets/sheets/edit_unit_sheet.dart';
 import '../../widgets/sheets/update_balance_sheet.dart';
 import '../providers/app_providers.dart';
@@ -21,8 +23,8 @@ import 'manage_rules_screen.dart';
 /// reusing GroupedList/showTransactionDetail from the Activity screen
 /// rather than a second implementation.
 ///
-/// The per-unit limit row is still a "coming soon" placeholder (#15/#17);
-/// the message-reading row is live as of #20 — it opens the rule builder
+/// The per-unit limit row is live as of #63 (it opens the same sheet as
+/// Limits & alerts > More); the message-reading row is live as of #20 — it opens the rule builder
 /// pre-set to this unit and shows how many rules the unit already has.
 
 class UnitDetailScreen extends ConsumerWidget {
@@ -30,11 +32,11 @@ class UnitDetailScreen extends ConsumerWidget {
   const UnitDetailScreen({super.key, required this.unitId});
 
   void _confirmArchive(
-    BuildContext context,
-    WidgetRef ref,
-    String unitId,
-    String name,
-  ) {
+      BuildContext context,
+      WidgetRef ref,
+      String unitId,
+      String name,
+      ) {
     showDialog(
       context: context,
       builder: (dialogContext) => AlertDialog(
@@ -85,15 +87,15 @@ class UnitDetailScreen extends ConsumerWidget {
 
         return txAsync.when(
           loading: () =>
-              const Center(child: CircularProgressIndicator.adaptive()),
+          const Center(child: CircularProgressIndicator.adaptive()),
           error: (e, st) => Center(child: Text('Something went wrong: $e')),
           data: (allTransactions) {
             final balance = Ledger.balanceOf(unit, allTransactions);
             final unitTransactions =
-                allTransactions
-                    .where((t) => t.unitId == unit.id && t.isConfirmed)
-                    .toList()
-                  ..sort((a, b) => b.occurredAt.compareTo(a.occurredAt));
+            allTransactions
+                .where((t) => t.unitId == unit.id && t.isConfirmed)
+                .toList()
+              ..sort((a, b) => b.occurredAt.compareTo(a.occurredAt));
 
             return Scaffold(
               appBar: AppBar(
@@ -180,17 +182,21 @@ class UnitDetailScreen extends ConsumerWidget {
                       ),
                     ),
                     const SizedBox(height: AppSpacing.lg),
-                    const ComingSoonRow(
+                    ActionRow(
                       icon: Icons.speed_rounded,
                       title: 'Limit for this unit',
-                      subtitle: 'Set a spending limit just for this one — coming later',
+                      subtitle: unitLimitSummary(
+                        ref.watch(limitsProvider).value ?? const <LimitRule>[],
+                        unit,
+                      ),
+                      onTap: () => showEditUnitLimitsSheet(unit: unit),
                     ),
                     const SizedBox(height: AppSpacing.sm),
                     Builder(
                       builder: (context) {
                         final templates =
                             ref.watch(unitTemplatesProvider(unit.id)).value ??
-                            [];
+                                [];
                         return ActionRow(
                           icon: Icons.mark_email_read_outlined,
                           title: 'Reading messages',

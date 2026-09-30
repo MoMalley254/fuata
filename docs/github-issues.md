@@ -107,3 +107,9 @@ did not build (both need a domain-model addition, so are out of scope for #20):
     `TemplateFieldType` values are labelable. Needs a template-owned
     custom field type, `ParsedFields.custom` (a `Map<String, String>`),
     and UI in `FieldPalette` to name one.
+
+## Post-#16 follow-up
+
+63. **feat(limits): remaining 7.8 gaps — per-unit, alert levels, quiet hours, preview, firing alerts** `type: feature` `area: limits` `area: ui`
+    #15/#16 shipped the minimum for the banner: one overall limit per period. This finishes ui-design-brief.md 7.8 and US-06: per-unit limits under "More", alert-level sliders, quiet hours, a live banner preview, and alert notifications that actually fire (once per threshold per period, on the separate alert channel, from both isolates).
+

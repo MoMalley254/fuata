@@ -10,6 +10,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fuata/data/db/app_database.dart';
 import 'package:fuata/data/db/drift_repositories.dart';
+import 'package:fuata/domain/logic/alert_service.dart';
+import 'package:fuata/domain/models/limit_alert.dart';
 import 'package:fuata/domain/models/limit_rule.dart';
 import 'package:fuata/domain/models/settings.dart';
 import 'package:fuata/domain/models/transaction.dart';
@@ -227,5 +229,222 @@ void main() {
 
     await repo.deleteUnparsed('new');
     expect(await repo.watchUnparsed().first, isEmpty);
+  });
+
+  group('limit alerts (#63)', () {
+    const key = AlertKey('l_overall_day', '2026-09-30', AlertLevel.warning);
+    final at = DateTime(2026, 9, 30, 12);
+
+    test('a key can be claimed exactly once', () async {
+      final log = DriftAlertLogRepository(db);
+      expect(await log.claim(key, at), isTrue);
+      expect(await log.claim(key, at), isFalse);
+      expect(await log.firedKeys(), {key});
+    });
+
+    test('purgeBefore drops old rows and keeps recent ones', () async {
+      final log = DriftAlertLogRepository(db);
+      await log.claim(key, DateTime(2026, 6, 1));
+      await log.claim(
+        const AlertKey('l_overall_day', '2026-09-30', AlertLevel.danger),
+        at,
+      );
+      await log.purgeBefore(DateTime(2026, 7, 1));
+      final left = await log.firedKeys();
+      expect(left.map((k) => k.level), [AlertLevel.danger]);
+    });
+
+    LimitRule dayLimit({int amount = 100000, double warn = 0.7}) => LimitRule(
+      id: 'l_overall_day',
+      scope: LimitScope.overall,
+      period: LimitPeriod.day,
+      amountMinor: amount,
+      currencyCode: 'KES',
+      warnAt: warn,
+    );
+
+    test('changing a limit\'s amount clears what was already announced',
+            () async {
+          final limits = DriftLimitRepository(db);
+          final log = DriftAlertLogRepository(db);
+          await limits.setLimit(dayLimit());
+          await log.claim(key, at);
+
+          await limits.setLimit(dayLimit(amount: 500000));
+          expect(await log.firedKeys(), isEmpty);
+        });
+
+    test('editing only the alert levels keeps what was announced', () async {
+      final limits = DriftLimitRepository(db);
+      final log = DriftAlertLogRepository(db);
+      await limits.setLimit(dayLimit());
+      await log.claim(key, at);
+
+      await limits.setLimit(dayLimit(warn: 0.6));
+      expect(await log.firedKeys(), {key});
+    });
+
+    test('deleting a limit clears its announcements', () async {
+      final limits = DriftLimitRepository(db);
+      final log = DriftAlertLogRepository(db);
+      await limits.setLimit(dayLimit());
+      await log.claim(key, at);
+
+      await limits.deleteLimit('l_overall_day');
+      expect(await log.firedKeys(), isEmpty);
+    });
+
+    test('claimDueAlerts announces a crossing once, then stays quiet',
+            () async {
+          final units = DriftUnitRepository(db);
+          final txs = DriftTransactionRepository(db);
+          final limits = DriftLimitRepository(db);
+          final settings = DriftSettingsRepository(db);
+          final log = DriftAlertLogRepository(db);
+
+          await units.addUnit(MoneyUnit(
+            id: 'u1',
+            name: 'Cash',
+            kind: UnitKind.cash,
+            currencyCode: 'KES',
+            iconEmoji: '💵',
+            color: const Color(0xFF000000),
+            openingBalanceMinor: 0,
+            sortOrder: 0,
+            createdAt: DateTime(2026, 9, 1),
+          ));
+          await limits.setLimit(dayLimit());
+          await txs.addTransaction(MoneyTransaction(
+            id: 't1',
+            unitId: 'u1',
+            type: TxType.spent,
+            amountMinor: -75000,
+            occurredAt: at,
+            createdAt: at,
+          ));
+
+          Future<AlertBatch> run() => claimDueAlerts(
+            units: units,
+            transactions: txs,
+            limits: limits,
+            settings: settings,
+            log: log,
+            now: () => at,
+          );
+
+          final first = await run();
+          expect(first.alerts, hasLength(1));
+          expect(first.alerts.single.level, AlertLevel.warning);
+          expect(first.quiet, isFalse);
+
+          // Same data, evaluated again (the other isolate, or a re-run):
+          // nothing more to say.
+          expect((await run()).alerts, isEmpty);
+        });
+
+    test('alerts off means nothing is claimed', () async {
+      final units = DriftUnitRepository(db);
+      final txs = DriftTransactionRepository(db);
+      final limits = DriftLimitRepository(db);
+      final settings = DriftSettingsRepository(db);
+      final log = DriftAlertLogRepository(db);
+
+      await settings.updateSettings(
+        AppSettings.defaults.copyWith(alertsEnabled: false),
+      );
+      await units.addUnit(MoneyUnit(
+        id: 'u1',
+        name: 'Cash',
+        kind: UnitKind.cash,
+        currencyCode: 'KES',
+        iconEmoji: '💵',
+        color: const Color(0xFF000000),
+        openingBalanceMinor: 0,
+        sortOrder: 0,
+        createdAt: DateTime(2026, 9, 1),
+      ));
+      await limits.setLimit(dayLimit());
+      await txs.addTransaction(MoneyTransaction(
+        id: 't1',
+        unitId: 'u1',
+        type: TxType.spent,
+        amountMinor: -95000,
+        occurredAt: at,
+        createdAt: at,
+      ));
+
+      final batch = await claimDueAlerts(
+        units: units,
+        transactions: txs,
+        limits: limits,
+        settings: settings,
+        log: log,
+        now: () => at,
+      );
+      expect(batch.alerts, isEmpty);
+      // And it must not have quietly used the alert up.
+      expect(await log.firedKeys(), isEmpty);
+    });
+
+    test('quiet hours and the new settings round-trip', () async {
+      final settings = DriftSettingsRepository(db);
+      await settings.updateSettings(
+        AppSettings.defaults.copyWith(
+          alertsEnabled: false,
+          quietHoursEnabled: true,
+          quietStartMinute: 21 * 60 + 30,
+          quietEndMinute: 6 * 60,
+        ),
+      );
+      final saved = await settings.watchSettings().first;
+      expect(saved.alertsEnabled, isFalse);
+      expect(saved.quietHoursEnabled, isTrue);
+      expect(saved.quietStartMinute, 21 * 60 + 30);
+      expect(saved.quietEndMinute, 6 * 60);
+    });
+
+    test('a quiet-hours alert is flagged quiet', () async {
+      final units = DriftUnitRepository(db);
+      final txs = DriftTransactionRepository(db);
+      final limits = DriftLimitRepository(db);
+      final settings = DriftSettingsRepository(db);
+      final log = DriftAlertLogRepository(db);
+      final lateNight = DateTime(2026, 9, 30, 23, 15);
+
+      await settings.updateSettings(
+        AppSettings.defaults.copyWith(quietHoursEnabled: true),
+      );
+      await units.addUnit(MoneyUnit(
+        id: 'u1',
+        name: 'Cash',
+        kind: UnitKind.cash,
+        currencyCode: 'KES',
+        iconEmoji: '💵',
+        color: const Color(0xFF000000),
+        openingBalanceMinor: 0,
+        sortOrder: 0,
+        createdAt: DateTime(2026, 9, 1),
+      ));
+      await limits.setLimit(dayLimit());
+      await txs.addTransaction(MoneyTransaction(
+        id: 't1',
+        unitId: 'u1',
+        type: TxType.spent,
+        amountMinor: -95000,
+        occurredAt: lateNight,
+        createdAt: lateNight,
+      ));
+
+      final batch = await claimDueAlerts(
+        units: units,
+        transactions: txs,
+        limits: limits,
+        settings: settings,
+        log: log,
+        now: () => lateNight,
+      );
+      expect(batch.alerts, hasLength(1));
+      expect(batch.quiet, isTrue);
+    });
   });
 }

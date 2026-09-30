@@ -17,6 +17,7 @@ flowchart TB
     Models["Models"]
     Ledger["Ledger: balances and totals"]
     Limits["Limit engine: status"]
+    Alerts["Alert engine: what's due"]
     Parser["Template parser"]
     Repos["Repository interfaces"]
   end
@@ -32,6 +33,9 @@ flowchart TB
   Providers --> Ledger
   Providers --> Limits
   Providers --> Repos
+  Providers --> Alerts
+  Alerts --> Repos
+  Repos -->AlertsPlatform["Limit alerts(US-06)"]
   Repos -.->|implemented by| Mock
   Repos -.->|implemented by| Drift
   Listener --> Parser
@@ -154,9 +158,20 @@ erDiagram
     text displayName
     bool enabled
   }
+  ALERT_FIRING {
+    text limitId PK
+    text periodKey PK
+    text level PK
+    int firedAt
+  }
 ```
 
-Supporting tables (not drawn): `unparsed_capture` (id, receivedAt, sourcePackage, text; auto-purged after 7 days) and `settings` (key/value: name, accent colour, detail level, Home headline and sections, banner options, theme).
+Supporting tables (not drawn): `unparsed_capture` (id, receivedAt,
+sourcePackage, text; auto-purged after 7 days), `settings` (key/value:
+name, accent colour, detail level, Home headline and sections, banner
+options, theme, alert switches, quiet hours), and `alert_firing` (the
+log behind "once per threshold per period" — its composite key of
+limit id + period key + level is the atomic claim described in §5.4).
 
 ### Field rules
 
@@ -280,7 +295,7 @@ Replaces the #18 spike (`listener_spike.dart`, the spike `NotificationListener.k
 
 **One engine, not one per notification.** `CaptureEngine.kt` keeps a single headless engine alive while notifications keep arriving (20 s idle teardown, 90 s watchdog) and feeds it in order. The spike started an engine per notification and destroyed it after a fixed 3 s whether or not the write had finished.
 
-**The UI does not hear the background isolate's writes.** Each isolate opens its own drift connection, and drift only re-runs a stream for writes made through the same database instance. So a capture written in the background would not appear in an open Home/Inbox until something else touched the table. Fix: after each write the native side pings the UI engine (`onCapturesChanged`) and `main.dart` calls `markTablesUpdated([transactions, unparsedCaptures])`; the same call runs on `AppLifecycleState.resumed`. When the banner (#16) lands it must be re-posted from the background isolate too — that is where "DB → banner" in the §1 sequence has to hook in.
+**The UI does not hear the background isolate's writes.** Each isolate opens its own drift connection, and drift only re-runs a stream for writes made through the same database instance. So a capture written in the background would not appear in an open Home/Inbox until something else touched the table. Fix: after each write the native side pings the UI engine (`onCapturesChanged`) and `main.dart` calls `markTablesUpdated([transactions, unparsedCaptures])`; the same call runs on `AppLifecycleState.resumed`. When the banner (#16) landed, it was re-posted from the background isolate too — notification_capture.dart calls _refreshBanner right after _captureOne writes. #63 extended that same post-write hook to also call fireDueAlerts, so a limit crossed by a captured notification alerts from the background isolate as well as the UI isolate.
 
 **Text extraction (the §5.1 known gap).** `NotificationText.kt` walks `EXTRA_BIG_TEXT`, `EXTRA_TEXT`, `EXTRA_TEXT_LINES`, `EXTRA_SUB_TEXT`, `tickerText`, then `EXTRA_TITLE` as a last resort, first non-blank wins, and never reads `sbn.tag` or `sbn.key`. The title is *not* prepended to the body, so the parser sees what a pasted SMS gives it. **Not yet verified on the MIUI device that showed the original symptom.** Group-summary notifications (`FLAG_GROUP_SUMMARY`) are skipped: they are containers for children posted separately, and reading them only produces unreadable "3 new messages" entries. If a device turns out to post only a summary, this is the line to revisit.
 
@@ -298,14 +313,19 @@ rather than re-deriving it.
 channel created at `Importance.low` is treated as "silent" and hidden
 from the lock screen entirely on MIUI — regardless of the notification's
 own `vis=PUBLIC` flag, and regardless of the per-app lock-screen toggle
-being on. Raising the importance on the *existing* channel does nothing:
-Android locks a channel's importance after creation. The fix is a new
-channel id at `Importance.defaultImportance`; existing installs need a
-reinstall (or `pm clear`) once. The banner channel ships as
-`fuata_banner_v2` for exactly this reason. `onlyAlertOnce` +
-`playSound: false` + `enableVibration: false` keep it quiet despite the
-higher importance — the banner never buzzes, it just becomes eligible
-to appear on the lock screen.
+being on. The banner channel therefore ships at
+`Importance.defaultImportance`; the silence that low used to buy comes
+from `onlyAlertOnce` + `playSound: false` + `enableVibration: false` in
+`_androidDetails()`, which don't affect lock-screen display.
+
+The Android channel system locks a channel's importance after creation:
+raising it in code has no effect on an install that already has the old
+channel. v0.1.0 has not shipped, so the current `fuata_banner` id is
+created fresh on every install and the fix takes on first launch. If
+the LOW-importance version ever reaches a real install before release,
+bumping the id (and deleting the old channel) is the only fix — this is
+why the id is worth keeping in mind if the channel's importance ever
+needs to change again after rollout.
 
 **Small icon must be a monochrome drawable.** `_androidDetails()` sets
 `icon: '@mipmap/ic_launcher'` — a full-colour PNG. Android's small
@@ -316,3 +336,10 @@ referenced by bare name; Android then tints it via the existing
 `setColor()` per status. **Deferred for v0.1** — the banner is legible
 without it, and it's a polish item rather than a correctness bug. See
 `docs/github-issues.md` Post-#20 follow-ups for the tracking issue.
+
+### 5.4 Limit alerts (issue #63)
+
+`AlertEngine.due` (pure) decides what is due; `claimDueAlerts` records it in `alert_firings` (primary key = limit + period key + level) *before* `BannerPlatform.showAlert` displays it. The claim, not a read-then-write check, is what keeps the UI isolate and the listener's background isolate from announcing the same crossing twice. Period keys: date (day), Monday's date (week), `yyyy-MM` (month). Rows older than 90 days are purged. `DriftLimitRepository.setLimit`/`deleteLimit` clear a limit's rows when its amount changes or it is removed.
+
+Alerts use `fuata_alerts` (high). Inside quiet hours they use `fuata_alerts_quiet` (low, no sound), because per-notification sound overrides are ignored on Android 8+. Notification id is derived from the limit id, so a later level replaces an earlier one. Not done: the banner/Home status ignores per-unit limits; there is no alert when a period ends.
+MockAlertLogRepository in data/mock/ mirrors the same contract in memory for widget tests and previews — same "claim once" semantics, no DB.

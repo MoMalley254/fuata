@@ -22,10 +22,11 @@
 import 'dart:async';
 import 'dart:ui';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
+import '../domain/logic/alert_engine.dart';
 import '../domain/logic/banner_content.dart';
+import '../domain/models/limit_alert.dart';
 import '../domain/models/limit_rule.dart';
 
 /// What the person did with the banner: opened it, or hit + Add (US-07).
@@ -38,8 +39,12 @@ class BannerPlatform {
   /// Fixed id: the banner is one ongoing notification, updated in place.
   static const bannerId = 1001;
 
-  /// Ongoing status banner. `Importance.low` on purpose — the banner is
-  /// glanceable, not something that should buzz on every data change.
+  /// Ongoing status banner. Default importance, not low: MIUI hides a
+  /// low-importance channel from the lock screen entirely (design.md
+  /// 5.3), and Android locks a channel's importance after creation. The
+  /// silence that `Importance.low` used to buy comes from
+  /// `onlyAlertOnce` + `playSound: false` + `enableVibration: false` in
+  /// `_androidDetails()` instead, which don't affect lock-screen display.
   static const bannerChannelId = 'fuata_banner';
   static const bannerChannelName = 'Status banner';
   static const bannerChannelDescription =
@@ -52,6 +57,15 @@ class BannerPlatform {
   static const alertChannelName = 'Limit alerts';
   static const alertChannelDescription =
       'Nudges when you approach or pass a limit.';
+
+  /// Same alerts, delivered during quiet hours (issue #63). Android fixes
+  /// a channel's sound and importance when it is created and ignores
+  /// per-notification overrides, so "arrive without a buzz" needs its own
+  /// low-importance channel rather than a flag on the loud one.
+  static const quietAlertChannelId = 'fuata_alerts_quiet';
+  static const quietAlertChannelName = 'Limit alerts (quiet hours)';
+  static const quietAlertChannelDescription =
+      'Limit alerts that arrive during your quiet hours, without sound.';
 
   final _plugin = FlutterLocalNotificationsPlugin();
   final _actions = StreamController<BannerAction>.broadcast();
@@ -102,6 +116,16 @@ class BannerPlatform {
         importance: Importance.high,
       ),
     );
+    await android.createNotificationChannel(
+      const AndroidNotificationChannel(
+        quietAlertChannelId,
+        quietAlertChannelName,
+        description: quietAlertChannelDescription,
+        importance: Importance.low,
+        playSound: false,
+        enableVibration: false,
+      ),
+    );
   }
 
   BannerAction? _pending;
@@ -148,6 +172,53 @@ class BannerPlatform {
     );
   }
 
+  /// Show one limit alert (US-06). Its notification id is derived from the
+  /// limit, so a later "almost at your limit" *replaces* the earlier "easy
+  /// now" for the same limit instead of stacking beside it. [quiet] posts
+  /// it on the silent channel (quiet hours).
+  Future<void> showAlert(
+      LimitAlert alert, {
+        required bool quiet,
+        required bool redactOnLockScreen,
+      }) async {
+    await init();
+    await _requestPermissionOnce();
+    final text = AlertText.build(alert);
+    await _plugin.show(
+      id: alertIdFor(alert.limit.id),
+      title: text.title,
+      body: text.body,
+      notificationDetails: NotificationDetails(
+        android: AndroidNotificationDetails(
+          quiet ? quietAlertChannelId : alertChannelId,
+          quiet ? quietAlertChannelName : alertChannelName,
+          channelDescription:
+          quiet ? quietAlertChannelDescription : alertChannelDescription,
+          importance: quiet ? Importance.low : Importance.high,
+          priority: quiet ? Priority.low : Priority.high,
+          autoCancel: true,
+          visibility: redactOnLockScreen
+              ? NotificationVisibility.private
+              : NotificationVisibility.public,
+          icon: '@mipmap/ic_launcher',
+          color: _statusColor(alert.level.status),
+          styleInformation: BigTextStyleInformation(text.body),
+        ),
+      ),
+    );
+  }
+
+  /// Stable across runs and isolates (String.hashCode is not guaranteed
+  /// to be), and clear of [bannerId]. FNV-1a, folded into a positive
+  /// 31-bit range above 2000.
+  static int alertIdFor(String limitId) {
+    var h = 0x811c9dc5;
+    for (final unit in limitId.codeUnits) {
+      h = ((h ^ unit) * 0x01000193) & 0x7fffffff;
+    }
+    return 2000 + (h % 1000000);
+  }
+
   Future<void> cancel() async {
     await init();
     await _plugin.cancel(id: bannerId);
@@ -160,7 +231,7 @@ class BannerPlatform {
     _permissionAsked = true;
     final android = _plugin.resolvePlatformSpecificImplementation<
         AndroidFlutterLocalNotificationsPlugin>();
-    final granted = await android?.requestNotificationsPermission();
+    await android?.requestNotificationsPermission();
   }
 
   AndroidNotificationDetails _androidDetails(

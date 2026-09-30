@@ -1,4 +1,5 @@
 import '../models/capture_source.dart';
+import '../models/limit_alert.dart';
 import '../models/limit_rule.dart';
 import '../models/settings.dart';
 import '../models/template.dart';
@@ -77,4 +78,19 @@ abstract class CaptureSourceRepository {
 
   /// Upsert by id — use [CaptureSource.idFor] so one package is one row.
   Future<void> saveSource(CaptureSource source);
+}
+
+/// Which limit alerts have already been shown (issue #63, US-06: "fires
+/// once per threshold per period"). Lives in the database, not memory,
+/// because two isolates raise alerts and the answer has to survive the
+/// app being killed.
+abstract class AlertLogRepository {
+  Future<Set<AlertKey>> firedKeys();
+
+  /// Atomically records [key] as shown. True for exactly one caller ever;
+  /// false if it was already claimed (by anyone, including another
+  /// isolate) or could not be recorded — in both cases: do not show it.
+  Future<bool> claim(AlertKey key, DateTime at);
+
+  Future<void> purgeBefore(DateTime cutoff);
 }

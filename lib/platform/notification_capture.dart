@@ -29,6 +29,7 @@ import '../data/db/drift_repositories.dart';
 import '../domain/logic/banner_loader.dart';
 import '../domain/logic/capture_pipeline.dart';
 import '../domain/logic/serial_queue.dart';
+import 'alerts.dart';
 import 'banner.dart';
 
 const _channel = MethodChannel(captureMethodName);
@@ -197,6 +198,20 @@ Future<bool> _captureOne(String packageName, String text) async {
         await _refreshBanner(db);
       } catch (e) {
         debugPrint('[capture] banner re-post failed: ${e.runtimeType}');
+      }
+      // Issue #63: same reasoning for limit alerts — the UI isolate can't
+      // see this write when the app is closed. Independent try/catch: a
+      // banner failure must not swallow an alert, or the reverse.
+      try {
+        await fireDueAlerts(
+          units: DriftUnitRepository(db),
+          transactions: DriftTransactionRepository(db),
+          limits: DriftLimitRepository(db),
+          settings: DriftSettingsRepository(db),
+          log: DriftAlertLogRepository(db),
+        );
+      } catch (e) {
+        debugPrint('[capture] alert failed: ${e.runtimeType}');
       }
     }
     return wrote;

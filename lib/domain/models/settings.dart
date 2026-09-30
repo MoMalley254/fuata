@@ -158,6 +158,14 @@ class AppSettings {
   final bool bannerShowProgress;
   final bool bannerShowQuickAdd;
 
+  // Limit alerts (issue #63, US-06). Alert *levels* live on each LimitRule
+  // (warnAt / dangerAt); these are the switches around them. Quiet hours
+  // are minutes after local midnight and may wrap (22:00 -> 07:00).
+  final bool alertsEnabled;
+  final bool quietHoursEnabled;
+  final int quietStartMinute;
+  final int quietEndMinute;
+
   const AppSettings({
     required this.name,
     required this.accent,
@@ -173,6 +181,10 @@ class AppSettings {
     required this.bannerUnitIds,
     required this.bannerShowProgress,
     required this.bannerShowQuickAdd,
+    this.alertsEnabled = true,
+    this.quietHoursEnabled = false,
+    this.quietStartMinute = 22 * 60,
+    this.quietEndMinute = 7 * 60,
   });
 
   static final defaults = AppSettings(
@@ -190,6 +202,10 @@ class AppSettings {
     bannerUnitIds: <String>{},
     bannerShowProgress: true,
     bannerShowQuickAdd: true,
+    alertsEnabled: true,
+    quietHoursEnabled: false,
+    quietStartMinute: 22 * 60,
+    quietEndMinute: 7 * 60,
   );
 
   AppSettings copyWith({
@@ -207,6 +223,10 @@ class AppSettings {
     Set<String>? bannerUnitIds,
     bool? bannerShowProgress,
     bool? bannerShowQuickAdd,
+    bool? alertsEnabled,
+    bool? quietHoursEnabled,
+    int? quietStartMinute,
+    int? quietEndMinute,
   }) {
     return AppSettings(
       name: name ?? this.name,
@@ -224,7 +244,11 @@ class AppSettings {
       bannerHeadline: bannerHeadline ?? this.bannerHeadline,
       bannerUnitIds: bannerUnitIds ?? this.bannerUnitIds,
       bannerShowProgress: bannerShowProgress ?? this.bannerShowProgress,
-      bannerShowQuickAdd: bannerShowQuickAdd ?? this.bannerShowQuickAdd
+      bannerShowQuickAdd: bannerShowQuickAdd ?? this.bannerShowQuickAdd,
+      alertsEnabled: alertsEnabled ?? this.alertsEnabled,
+      quietHoursEnabled: quietHoursEnabled ?? this.quietHoursEnabled,
+      quietStartMinute: quietStartMinute ?? this.quietStartMinute,
+      quietEndMinute: quietEndMinute ?? this.quietEndMinute,
     );
   }
 }
