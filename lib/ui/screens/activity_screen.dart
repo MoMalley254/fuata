@@ -4,6 +4,7 @@ import 'package:fuata/domain/models/transaction.dart';
 import 'package:fuata/domain/models/unit.dart';
 import 'package:fuata/ui/providers/capture_providers.dart';
 import 'package:fuata/ui/screens/review_inbox_screen.dart';
+import 'package:fuata/ui/screens/summary_screen.dart';
 
 import '../../widgets/activity/empty_activity.dart';
 import '../../widgets/activity/grouped_list.dart';
@@ -62,6 +63,13 @@ class _ActivityScreenState extends ConsumerState<ActivityScreen> {
         title: const Text('Activity'),
         actions: [
           IconButton(
+            tooltip: 'Summaries',
+            icon: const Icon(Icons.insights_rounded),
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const SummaryScreen()),
+            ),
+          ),
+          IconButton(
             tooltip: 'Caught from my messages',
             icon: Stack(
               clipBehavior: Clip.none,
@@ -102,13 +110,13 @@ class _ActivityScreenState extends ConsumerState<ActivityScreen> {
       body: SafeArea(
         child: unitsAsync.when(
           loading: () =>
-              const Center(child: CircularProgressIndicator.adaptive()),
+          const Center(child: CircularProgressIndicator.adaptive()),
           error: (e, st) => Center(child: Text('Something went wrong: $e')),
           data: (units) {
             final unitById = {for (final u in units) u.id: u};
             return txAsync.when(
               loading: () =>
-                  const Center(child: CircularProgressIndicator.adaptive()),
+              const Center(child: CircularProgressIndicator.adaptive()),
               error: (e, st) => Center(child: Text('Something went wrong: $e')),
               data: (transactions) {
                 // Pending (unconfirmed) captures live in the review inbox
@@ -133,9 +141,9 @@ class _ActivityScreenState extends ConsumerState<ActivityScreen> {
                       child: filtered.isEmpty
                           ? const EmptyActivity()
                           : GroupedList(
-                              transactions: filtered,
-                              unitById: unitById,
-                            ),
+                        transactions: filtered,
+                        unitById: unitById,
+                      ),
                     ),
                   ],
                 );

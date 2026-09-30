@@ -6,6 +6,7 @@ import '../../domain/models/money.dart';
 import '../../domain/models/settings.dart';
 import '../../widgets/sheets/add_transaction_sheet.dart';
 import '../../widgets/sheets/edit_unit_sheet.dart';
+import 'summary_screen.dart';
 import '../providers/app_providers.dart';
 import '../providers/capture_providers.dart';
 import '../theme/app_colors.dart';
@@ -53,7 +54,7 @@ class HomeScreen extends ConsumerWidget {
             pendingCount: pendingCount,
             onSeeAllActivity: onSeeAllActivity,
             onOpenInbox: onOpenInbox,
-                ),
+          ),
         ),
       ),
       floatingActionButton: FloatingActionButton(
@@ -145,9 +146,9 @@ class HomeContent extends StatelessWidget {
             )
           else
             ...state.lately.map(
-              (t) => TransactionRow(
+                  (t) => TransactionRow(
                 title:
-                    t.counterparty ??
+                t.counterparty ??
                     state.units.firstWhere((u) => u.id == t.unitId).name,
                 subtitle: _friendlyTime(t.occurredAt),
                 amount: Money(
@@ -161,6 +162,17 @@ class HomeContent extends StatelessWidget {
               ),
             ),
         ],
+        const SizedBox(height: AppSpacing.sm),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton.icon(
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const SummaryScreen()),
+            ),
+            icon: const Icon(Icons.insights_rounded),
+            label: const Text('See my summaries'),
+          ),
+        ),
       ],
     );
   }
@@ -173,8 +185,8 @@ class HomeContent extends StatelessWidget {
     final yesterday = now.subtract(const Duration(days: 1));
     final isYesterday =
         t.year == yesterday.year &&
-        t.month == yesterday.month &&
-        t.day == yesterday.day;
+            t.month == yesterday.month &&
+            t.day == yesterday.day;
     if (isYesterday) return 'yesterday';
     return DateFormat('EEE, d MMM').format(t);
   }
@@ -299,21 +311,21 @@ class HeroSection extends StatelessWidget {
       final c = context.colors;
       final (label, amountMinor, caption) = switch (headline) {
         HomeHeadline.leftToday => (
-          'Altogether you have',
-          total,
-          'Set a daily limit to see how today is going.',
+        'Altogether you have',
+        total,
+        'Set a daily limit to see how today is going.',
         ),
         HomeHeadline.totalIHave => (
-          'Altogether you have',
-          total,
-          'Across everything you\'ve told Fuata about.',
+        'Altogether you have',
+        total,
+        'Across everything you\'ve told Fuata about.',
         ),
         HomeHeadline.spentToday => (
-          'Spent today',
-          state.spentToday,
-          limit == null
-              ? 'Set a daily limit to see how today is going.'
-              : 'of ${Money(limit.amountMinor, currency).format()} · resets at midnight',
+        'Spent today',
+        state.spentToday,
+        limit == null
+            ? 'Set a daily limit to see how today is going.'
+            : 'of ${Money(limit.amountMinor, currency).format()} · resets at midnight',
         ),
       };
       return Container(
