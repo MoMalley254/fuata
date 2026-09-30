@@ -53,6 +53,7 @@ android/
             kinyuanexus/
               fuata/
                 fuata/
+                  BackupFilesChannel.kt
                   CaptureChannel.kt
                   CaptureEngine.kt
                   CaptureStore.kt
@@ -88,6 +89,7 @@ lib/
       rule_builder_constants.dart
     db/
       app_database.dart
+      backup_repository.dart
       drift_repositories.dart
       mappers.dart
       tables.dart
@@ -97,6 +99,9 @@ lib/
     logic/
       alert_engine.dart
       alert_service.dart
+      backup_codec.dart
+      backup_import.dart
+      backup_service.dart
       banner_content.dart
       banner_loader.dart
       capture_pipeline.dart
@@ -106,6 +111,7 @@ lib/
       serial_queue.dart
       summary.dart
     models/
+      backup_snapshot.dart
       capture_source.dart
       limit_alert.dart
       limit_rule.dart
@@ -119,6 +125,7 @@ lib/
       repositories.dart
   platform/
     alerts.dart
+    backup_files.dart
     banner.dart
     notification_capture.dart
     share_intake.dart
@@ -126,6 +133,7 @@ lib/
     providers/
       alert_providers.dart
       app_providers.dart
+      backup_providers.dart
       banner_providers.dart
       capture_providers.dart
       summary_providers.dart
@@ -133,6 +141,7 @@ lib/
       activity_screen.dart
       auto_catch_screen.dart
       banner_setup_screen.dart
+      data_backup_screen.dart
       home_screen.dart
       limits_screen.dart
       manage_rules_screen.dart
@@ -154,6 +163,8 @@ lib/
     activity/
       empty_activity.dart
       grouped_list.dart
+    backup/
+      import_preview_card.dart
     banner/
       banner_preview.dart
     capture_review/
@@ -212,9 +223,13 @@ test/
   data/
     db/
       app_database_test.dart
+      backup_repository_test.dart
       capture_source_repository_test.dart
   domain/
     alert_engine_test.dart
+    backup_codec_test.dart
+    backup_import_test.dart
+    backup_test_data.dart
     banner_content_test.dart
     capture_pipeline_test.dart
     dedupe_test.dart
@@ -238,6 +253,177 @@ This section contains the contents of the repository's files.
     -->
     <uses-permission android:name="android.permission.INTERNET"/>
 </manifest>
+</file>
+
+<file path="android/app/src/main/kotlin/com/kinyuanexus/fuata/fuata/BackupFilesChannel.kt">
+package com.kinyuanexus.fuata.fuata
+
+import android.app.Activity
+import android.content.Intent
+import io.flutter.plugin.common.BinaryMessenger
+import io.flutter.plugin.common.MethodChannel
+import java.io.ByteArrayOutputStream
+
+/**
+ * `fuata/backup_files` channel: issue #24 (US-15, "export/import a JSON file
+ * to any location the user chooses").
+ *
+ * Uses the system file picker (Storage Access Framework), so Fuata needs no
+ * storage permission and never sees any file the person didn't pick. Both
+ * calls hand a whole UTF-8 text file across the channel; the JSON is built
+ * and validated on the Dart side.
+ *
+ *  - `saveText {name, content}` -> true if written, false if cancelled
+ *  - `pickText`                 -> the file's text, or null if cancelled
+ *
+ * Errors come back as PlatformException codes: `busy`, `bad_args`,
+ * `write_failed`, `read_failed`, `too_large`.
+ */
+class BackupFilesChannel(
+    private val activity: Activity,
+    messenger: BinaryMessenger,
+) {
+    private val channel = MethodChannel(messenger, CHANNEL)
+
+    // Only one picker can be up at a time; the result is completed from
+    // handleActivityResult.
+    private var pending: MethodChannel.Result? = null
+    private var pendingContent: String? = null
+
+    init {
+        channel.setMethodCallHandler { call, result ->
+            when (call.method) {
+                "saveText" -> {
+                    val name = call.argument<String>("name") ?: "fuata-backup.json"
+                    val content = call.argument<String>("content")
+                    if (content == null) {
+                        result.error("bad_args", "Missing content", null)
+                        return@setMethodCallHandler
+                    }
+                    if (!claim(result)) return@setMethodCallHandler
+                    pendingContent = content
+                    val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+                        addCategory(Intent.CATEGORY_OPENABLE)
+                        type = "application/json"
+                        putExtra(Intent.EXTRA_TITLE, name)
+                    }
+                    activity.startActivityForResult(intent, REQ_SAVE)
+                }
+
+                "pickText" -> {
+                    if (!claim(result)) return@setMethodCallHandler
+                    // Providers often label .json files as text/plain or
+                    // octet-stream, so accept all three rather than
+                    // hiding a perfectly good backup.
+                    val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                        addCategory(Intent.CATEGORY_OPENABLE)
+                        type = "*/*"
+                        putExtra(
+                            Intent.EXTRA_MIME_TYPES,
+                            arrayOf(
+                                "application/json",
+                                "text/plain",
+                                "application/octet-stream",
+                            ),
+                        )
+                    }
+                    activity.startActivityForResult(intent, REQ_OPEN)
+                }
+
+                else -> result.notImplemented()
+            }
+        }
+    }
+
+    private fun claim(result: MethodChannel.Result): Boolean {
+        if (pending != null) {
+            result.error("busy", "A file picker is already open", null)
+            return false
+        }
+        pending = result
+        return true
+    }
+
+    /** Returns true if [requestCode] was ours (and so is now handled). */
+    fun handleActivityResult(requestCode: Int, resultCode: Int, data: Intent?): Boolean {
+        if (requestCode != REQ_SAVE && requestCode != REQ_OPEN) return false
+
+        val result = pending
+        val content = pendingContent
+        pending = null
+        pendingContent = null
+        if (result == null) return true
+
+        val uri = data?.data
+        if (resultCode != Activity.RESULT_OK || uri == null) {
+            // Cancelled: not an error.
+            result.success(if (requestCode == REQ_SAVE) false else null)
+            return true
+        }
+
+        // Disk and provider I/O off the main thread; result back on it.
+        Thread {
+            try {
+                if (requestCode == REQ_SAVE) {
+                    // "wt" truncates: overwriting a picked file must not
+                    // leave the tail of a longer old one behind.
+                    activity.contentResolver.openOutputStream(uri, "wt")!!.use {
+                        it.write((content ?: "").toByteArray(Charsets.UTF_8))
+                    }
+                    activity.runOnUiThread { result.success(true) }
+                } else {
+                    val text = readLimited(uri)
+                    activity.runOnUiThread {
+                        if (text == null) {
+                            result.error(
+                                "too_large",
+                                "That file is too big to be a Fuata backup",
+                                null,
+                            )
+                        } else {
+                            result.success(text)
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                val code = if (requestCode == REQ_SAVE) "write_failed" else "read_failed"
+                activity.runOnUiThread { result.error(code, e.message, null) }
+            }
+        }.start()
+        return true
+    }
+
+    /** Whole file as UTF-8, or null if it exceeds [MAX_IMPORT_BYTES]. */
+    private fun readLimited(uri: android.net.Uri): String? {
+        val out = ByteArrayOutputStream()
+        activity.contentResolver.openInputStream(uri)!!.use { input ->
+            val buffer = ByteArray(64 * 1024)
+            while (true) {
+                val n = input.read(buffer)
+                if (n < 0) break
+                out.write(buffer, 0, n)
+                if (out.size() > MAX_IMPORT_BYTES) return null
+            }
+        }
+        return out.toString(Charsets.UTF_8.name())
+    }
+
+    fun dispose() {
+        channel.setMethodCallHandler(null)
+        pending = null
+        pendingContent = null
+    }
+
+    companion object {
+        const val CHANNEL = "fuata/backup_files"
+        private const val REQ_SAVE = 41001
+        private const val REQ_OPEN = 41002
+
+        // A backup of years of daily use is a few MB; anything past this is
+        // not one, and reading it would only risk running out of memory.
+        private const val MAX_IMPORT_BYTES = 32 * 1024 * 1024
+    }
+}
 </file>
 
 <file path="android/app/src/main/kotlin/com/kinyuanexus/fuata/fuata/CaptureChannel.kt">
@@ -844,6 +1030,142 @@ String describePattern({
 }
 </file>
 
+<file path="lib/data/db/backup_repository.dart">
+// ---------------------------------------------------------------------------
+// Export/import storage (issue #24). Reads every table a backup carries,
+// and writes an import in one transaction: either all of it lands or none
+// of it does, so a failure half-way can never leave the ledger with some of
+// a file's transactions but not others.
+//
+// Written against the same tables and mappers as drift_repositories.dart,
+// so there is exactly one place that knows how each record is stored.
+// ---------------------------------------------------------------------------
+
+import 'package:drift/drift.dart';
+
+import '../../domain/models/backup_snapshot.dart';
+import '../../domain/models/settings.dart';
+import '../../domain/repositories/repositories.dart';
+import 'app_database.dart';
+import 'drift_repositories.dart';
+import 'mappers.dart';
+
+class DriftBackupRepository implements BackupRepository {
+  DriftBackupRepository(this._db);
+  final AppDatabase _db;
+
+  @override
+  Future<BackupSnapshot> readAll() async {
+    // Every table is read in a fixed order, so the same data always
+    // exports to the same file (and two exports can be compared).
+    final categories = await (_db.select(
+      _db.categories,
+    )..orderBy([(c) => OrderingTerm(expression: c.id)])).get();
+    final units =
+        await (_db.select(_db.units)..orderBy([
+              (u) => OrderingTerm(expression: u.sortOrder),
+              (u) => OrderingTerm(expression: u.id),
+            ]))
+            .get();
+    final sources = await (_db.select(
+      _db.captureSources,
+    )..orderBy([(s) => OrderingTerm(expression: s.id)])).get();
+    final templates = await (_db.select(
+      _db.templates,
+    )..orderBy([(t) => OrderingTerm(expression: t.id)])).get();
+    final transactions =
+        await (_db.select(_db.transactions)..orderBy([
+              (t) => OrderingTerm(expression: t.occurredAt),
+              (t) => OrderingTerm(expression: t.id),
+            ]))
+            .get();
+    final limits = await (_db.select(
+      _db.limitRules,
+    )..orderBy([(l) => OrderingTerm(expression: l.id)])).get();
+    // Empty table (fresh install) yields AppSettings.defaults, which is
+    // exactly what "the phone's current settings" means there.
+    final settings = await DriftSettingsRepository(_db).watchSettings().first;
+
+    return BackupSnapshot(
+      categories: [
+        for (final c in categories)
+          BackupCategory(
+            id: c.id,
+            name: c.name,
+            emoji: c.emoji,
+            colorValue: c.colorValue,
+          ),
+      ],
+      units: units.map(unitFromRow).toList(),
+      captureSources: sources.map(captureSourceFromRow).toList(),
+      templates: templates.map(templateFromRow).toList(),
+      transactions: transactions.map(transactionFromRow).toList(),
+      limits: limits.map(limitRuleFromRow).toList(),
+      settings: settings,
+    );
+  }
+
+  @override
+  Future<void> apply(BackupSnapshot records, {AppSettings? settings}) {
+    return _db.transaction(() async {
+      // Parents before children, so foreign keys hold at every step:
+      // categories, units and apps first; then the rules that point at
+      // units/apps; then transactions, which point at all of them.
+      await _db.batch((b) {
+        if (records.categories.isNotEmpty) {
+          b.insertAllOnConflictUpdate(_db.categories, [
+            for (final c in records.categories)
+              CategoriesCompanion.insert(
+                id: c.id,
+                name: c.name,
+                emoji: c.emoji,
+                colorValue: c.colorValue,
+              ),
+          ]);
+        }
+        if (records.units.isNotEmpty) {
+          b.insertAllOnConflictUpdate(
+            _db.units,
+            records.units.map(unitToCompanion).toList(),
+          );
+        }
+        if (records.captureSources.isNotEmpty) {
+          b.insertAllOnConflictUpdate(
+            _db.captureSources,
+            records.captureSources.map(captureSourceToCompanion).toList(),
+          );
+        }
+        if (records.templates.isNotEmpty) {
+          b.insertAllOnConflictUpdate(
+            _db.templates,
+            records.templates.map(templateToCompanion).toList(),
+          );
+        }
+        if (records.transactions.isNotEmpty) {
+          b.insertAllOnConflictUpdate(
+            _db.transactions,
+            records.transactions.map(transactionToCompanion).toList(),
+          );
+        }
+      });
+
+      // Limits go through the repository so a changed amount clears the
+      // alerts already shown for the old one, exactly as editing does
+      // (#63). Nested transactions become savepoints, so this stays part
+      // of the same all-or-nothing unit.
+      final limits = DriftLimitRepository(_db);
+      for (final l in records.limits) {
+        await limits.setLimit(l);
+      }
+
+      if (settings != null) {
+        await DriftSettingsRepository(_db).updateSettings(settings);
+      }
+    });
+  }
+}
+</file>
+
 <file path="lib/domain/logic/alert_engine.dart">
 // ---------------------------------------------------------------------------
 // Deciding which limit alerts are due (issue #63, US-06).
@@ -1110,6 +1432,1175 @@ Future<AlertBatch> claimDueAlerts({
         ),
     redactOnLockScreen: s.redactedLockScreenBanner,
   );
+}
+</file>
+
+<file path="lib/domain/logic/backup_codec.dart">
+// ---------------------------------------------------------------------------
+// The backup file format (issue #24, US-15).
+//
+//   {
+//     "format": "fuata-backup",
+//     "formatVersion": 1,
+//     "exportedAt": "2026-09-30T09:12:00.000Z",
+//     "includesRawText": false,
+//     "data": { "units": [...], "transactions": [...], ... }
+//   }
+//
+// Pure Dart. `encode` never fails; `decode` never throws — every problem
+// in a file comes back as a readable message, and a file with *any* error
+// is rejected whole (a half-read backup is worse than none: balances are
+// derived from every transaction, so a silently dropped row is a silently
+// wrong balance).
+//
+// Rules the format keeps:
+//  - Enums are written as their `.name`, never an index (same reasoning as
+//    data/db/mappers.dart: reordering a case must not reinterpret old files).
+//  - Times are UTC ISO-8601 strings; money is integer minor units (ADR-003).
+//  - `formatVersion` only ever goes up. A newer file is refused with a
+//    message asking the person to update, rather than half-understood.
+//  - Unknown extra keys are ignored, so a later Fuata can add fields
+//    without breaking an older reader of the same formatVersion.
+// ---------------------------------------------------------------------------
+
+import 'dart:convert';
+import 'dart:ui' show Color;
+
+import '../models/backup_snapshot.dart';
+import '../models/capture_source.dart';
+import '../models/limit_rule.dart';
+import '../models/settings.dart';
+import '../models/template.dart';
+import '../models/transaction.dart';
+import '../models/unit.dart';
+
+/// What [BackupCodec.decode] found. Either [snapshot] is set and [errors]
+/// is empty, or [errors] explains why the file was refused.
+class BackupDecodeResult {
+  final BackupSnapshot? snapshot;
+  final List<String> errors;
+
+  /// Things that were fixed up or ignored without rejecting the file
+  /// (e.g. a limit whose id had to be normalised).
+  final List<String> warnings;
+
+  /// How many further errors were found but not listed.
+  final int moreErrors;
+
+  final DateTime? exportedAt;
+  final bool includesRawText;
+
+  const BackupDecodeResult({
+    required this.snapshot,
+    required this.errors,
+    this.warnings = const [],
+    this.moreErrors = 0,
+    this.exportedAt,
+    this.includesRawText = false,
+  });
+
+  factory BackupDecodeResult.failed(String message) =>
+      BackupDecodeResult(snapshot: null, errors: [message]);
+
+  bool get ok => snapshot != null && errors.isEmpty;
+}
+
+class BackupCodec {
+  BackupCodec._();
+
+  static const formatName = 'fuata-backup';
+  static const currentVersion = 1;
+
+  static const _maxListedErrors = 40;
+  static const _maxListedWarnings = 40;
+
+  // ---------------------------------------------------------------- encode
+
+  /// Serialises [snapshot]. Original message text on transactions is left
+  /// out unless [includeRawText] is true — it is opt-in even when it was
+  /// stored (ADR-009), and a backup file is easier to share by accident
+  /// than a database.
+  static String encode(
+    BackupSnapshot snapshot, {
+    required DateTime exportedAt,
+    bool includeRawText = false,
+  }) {
+    final doc = <String, dynamic>{
+      'format': formatName,
+      'formatVersion': currentVersion,
+      'exportedAt': exportedAt.toUtc().toIso8601String(),
+      'includesRawText': includeRawText,
+      'data': <String, dynamic>{
+        'categories': [for (final c in snapshot.categories) categoryToJson(c)],
+        'units': [for (final u in snapshot.units) unitToJson(u)],
+        'captureSources': [
+          for (final s in snapshot.captureSources) captureSourceToJson(s),
+        ],
+        'templates': [for (final t in snapshot.templates) t.toJson()],
+        'transactions': [
+          for (final t in snapshot.transactions)
+            transactionToJson(t, includeRawText: includeRawText),
+        ],
+        'limits': [for (final l in snapshot.limits) limitToJson(l)],
+        if (snapshot.settings != null)
+          'settings': settingsToJson(snapshot.settings!),
+      },
+    };
+    return const JsonEncoder.withIndent('  ').convert(doc);
+  }
+
+  static String? _iso(DateTime? d) => d?.toUtc().toIso8601String();
+
+  static Map<String, dynamic> categoryToJson(BackupCategory c) => {
+    'id': c.id,
+    'name': c.name,
+    'emoji': c.emoji,
+    'color': c.colorValue,
+  };
+
+  static Map<String, dynamic> unitToJson(MoneyUnit u) => {
+    'id': u.id,
+    'name': u.name,
+    'kind': u.kind.name,
+    'currency': u.currencyCode,
+    'icon': u.iconEmoji,
+    'color': u.color.toARGB32(),
+    'openingBalanceMinor': u.openingBalanceMinor,
+    'sortOrder': u.sortOrder,
+    'archived': u.archived,
+    'lastVerifiedAt': _iso(u.lastVerifiedAt),
+    'createdAt': _iso(u.createdAt),
+  };
+
+  static Map<String, dynamic> captureSourceToJson(CaptureSource s) => {
+    'id': s.id,
+    'packageName': s.packageName,
+    'displayName': s.displayName,
+    'enabled': s.enabled,
+  };
+
+  static Map<String, dynamic> transactionToJson(
+    MoneyTransaction t, {
+    bool includeRawText = false,
+  }) => {
+    'id': t.id,
+    'unitId': t.unitId,
+    'type': t.type.name,
+    'amountMinor': t.amountMinor,
+    'counterparty': t.counterparty,
+    'categoryId': t.categoryId,
+    'note': t.note,
+    'code': t.code,
+    'occurredAt': _iso(t.occurredAt),
+    'createdAt': _iso(t.createdAt),
+    'source': t.source.name,
+    'status': t.status.name,
+    'transferGroupId': t.transferGroupId,
+    'parentId': t.parentId,
+    'templateId': t.templateId,
+    'balanceAfterMinor': t.balanceAfterMinor,
+    if (includeRawText && t.rawText != null) 'rawText': t.rawText,
+  };
+
+  static Map<String, dynamic> limitToJson(LimitRule l) => {
+    'id': l.id,
+    'scope': l.scope.name,
+    'unitId': l.unitId,
+    'period': l.period.name,
+    'amountMinor': l.amountMinor,
+    'currency': l.currencyCode,
+    'warnAt': l.warnAt,
+    'dangerAt': l.dangerAt,
+    'enabled': l.enabled,
+  };
+
+  static Map<String, dynamic> settingsToJson(AppSettings s) => {
+    'name': s.name,
+    'accent': s.accent.toARGB32(),
+    'themeMode': s.themeMode.name,
+    'homeHeadline': s.homeHeadline.name,
+    'homeSections': (s.homeSections.map((e) => e.name).toList()..sort()),
+    'detailLevel': s.detailLevel.name,
+    'amountsHiddenInRecents': s.amountsHiddenInRecents,
+    'redactedLockScreenBanner': s.redactedLockScreenBanner,
+    'autoAcceptCaptures': s.autoAcceptCaptures,
+    'bannerEnabled': s.bannerEnabled,
+    'bannerHeadline': s.bannerHeadline.name,
+    'bannerUnitIds': (s.bannerUnitIds.toList()..sort()),
+    'bannerShowProgress': s.bannerShowProgress,
+    'bannerShowQuickAdd': s.bannerShowQuickAdd,
+    'alertsEnabled': s.alertsEnabled,
+    'quietHoursEnabled': s.quietHoursEnabled,
+    'quietStartMinute': s.quietStartMinute,
+    'quietEndMinute': s.quietEndMinute,
+  };
+
+  // ---------------------------------------------------------------- decode
+
+  static BackupDecodeResult decode(String text) {
+    Object? root;
+    try {
+      root = jsonDecode(text);
+    } on FormatException {
+      return BackupDecodeResult.failed(
+        "This file isn't readable JSON. It may be cut off, or it isn't a "
+        'Fuata backup.',
+      );
+    }
+    if (root is! Map<String, dynamic> || root['format'] != formatName) {
+      return BackupDecodeResult.failed(
+        "This doesn't look like a Fuata backup file.",
+      );
+    }
+
+    final version = root['formatVersion'];
+    if (version is! int || version < 1) {
+      return BackupDecodeResult.failed(
+        "This backup has no valid version number, so it can't be trusted.",
+      );
+    }
+    if (version > currentVersion) {
+      return BackupDecodeResult.failed(
+        'This backup was made by a newer version of Fuata (file format '
+        '$version). Update Fuata, then try again.',
+      );
+    }
+
+    final data = root['data'];
+    if (data is! Map<String, dynamic>) {
+      return BackupDecodeResult.failed('This backup has no data section.');
+    }
+
+    final ctx = _Ctx();
+
+    final categories = _table<BackupCategory>(
+      data,
+      'categories',
+      ctx,
+      (r) => BackupCategory(
+        id: r.nonEmpty('id'),
+        name: r.nonEmpty('name'),
+        emoji: r.str('emoji'),
+        colorValue: r.colorInt('color'),
+      ),
+      (c) => c.id,
+    );
+
+    final units = _table<MoneyUnit>(
+      data,
+      'units',
+      ctx,
+      (r) => MoneyUnit(
+        id: r.nonEmpty('id'),
+        name: r.nonEmpty('name'),
+        kind: r.oneOf('kind', UnitKind.values),
+        currencyCode: r.nonEmpty('currency'),
+        iconEmoji: r.str('icon'),
+        color: Color(r.colorInt('color')),
+        openingBalanceMinor: r.integer('openingBalanceMinor', orElse: 0),
+        sortOrder: r.integer('sortOrder', orElse: 0),
+        archived: r.boolean('archived', orElse: false),
+        lastVerifiedAt: r.dateOrNull('lastVerifiedAt'),
+        createdAt: r.date('createdAt'),
+      ),
+      (u) => u.id,
+    );
+
+    final sources = _table<CaptureSource>(data, 'captureSources', ctx, (r) {
+      final pkg = r.nonEmpty('packageName');
+      final given = r.nonEmpty('id');
+      // One package is one row, by construction (CaptureSource.idFor).
+      final id = CaptureSource.idFor(pkg);
+      if (pkg.isNotEmpty && given != id) {
+        ctx.warn('${r.path}: id tidied to match its app "$pkg".');
+      }
+      return CaptureSource(
+        id: id,
+        packageName: pkg,
+        displayName: r.str('displayName'),
+        enabled: r.boolean('enabled', orElse: true),
+      );
+    }, (s) => s.id);
+
+    final templates = _table<CaptureTemplate>(
+      data,
+      'templates',
+      ctx,
+      (r) => _template(r, ctx),
+      (t) => t.id,
+    );
+
+    final transactions = _table<MoneyTransaction>(
+      data,
+      'transactions',
+      ctx,
+      (r) => MoneyTransaction(
+        id: r.nonEmpty('id'),
+        unitId: r.nonEmpty('unitId'),
+        type: r.oneOf('type', TxType.values),
+        amountMinor: r.integer('amountMinor'),
+        counterparty: r.strOrNull('counterparty'),
+        categoryId: r.strOrNull('categoryId'),
+        note: r.strOrNull('note'),
+        code: r.strOrNull('code'),
+        occurredAt: r.date('occurredAt'),
+        createdAt: r.date('createdAt'),
+        source: r.oneOf('source', TxSource.values, orElse: TxSource.manual),
+        status: r.oneOf('status', TxStatus.values, orElse: TxStatus.confirmed),
+        transferGroupId: r.strOrNull('transferGroupId'),
+        parentId: r.strOrNull('parentId'),
+        templateId: r.strOrNull('templateId'),
+        balanceAfterMinor: r.integerOrNull('balanceAfterMinor'),
+        rawText: r.strOrNull('rawText'),
+      ),
+      (t) => t.id,
+    );
+
+    final limits = _table<LimitRule>(
+      data,
+      'limits',
+      ctx,
+      (r) => _limit(r, ctx),
+      (l) => l.id,
+    );
+
+    AppSettings? settings;
+    final rawSettings = data['settings'];
+    if (rawSettings != null) {
+      if (rawSettings is Map<String, dynamic>) {
+        settings = _settings(rawSettings, ctx);
+      } else {
+        ctx.error('settings: expected an object.');
+      }
+    }
+
+    final exportedAt = root['exportedAt'] is String
+        ? DateTime.tryParse(root['exportedAt'] as String)
+        : null;
+
+    if (ctx.errors.isNotEmpty) {
+      return BackupDecodeResult(
+        snapshot: null,
+        errors: ctx.errors,
+        warnings: ctx.warnings,
+        moreErrors: ctx.droppedErrors,
+        exportedAt: exportedAt,
+      );
+    }
+
+    return BackupDecodeResult(
+      snapshot: BackupSnapshot(
+        categories: categories,
+        units: units,
+        captureSources: sources,
+        templates: templates,
+        transactions: transactions,
+        limits: limits,
+        settings: settings,
+      ),
+      errors: const [],
+      warnings: ctx.warnings,
+      exportedAt: exportedAt,
+      includesRawText: root['includesRawText'] == true,
+    );
+  }
+
+  // -------------------------------------------------------- record readers
+
+  static CaptureTemplate _template(_Rec r, _Ctx ctx) {
+    final fieldMap = <String, TemplateFieldType>{};
+    final rawMap = r.map['fieldMap'];
+    if (rawMap is Map<String, dynamic>) {
+      rawMap.forEach((group, type) {
+        final match = TemplateFieldType.values
+            .where((v) => v.name == type)
+            .firstOrNull;
+        if (match == null) {
+          ctx.error('${r.path}.fieldMap.$group: unknown field type.');
+        } else {
+          fieldMap[group] = match;
+        }
+      });
+    } else {
+      ctx.error('${r.path}.fieldMap: expected an object.');
+    }
+
+    final pattern = r.str('pattern');
+    try {
+      RegExp(pattern, dotAll: true);
+    } on FormatException {
+      ctx.error('${r.path}.pattern: not a valid message pattern.');
+    }
+    for (final group in fieldMap.keys) {
+      if (!pattern.contains('(?<$group>')) {
+        ctx.warn('${r.path}: field "$group" is not in its pattern.');
+      }
+    }
+
+    return CaptureTemplate(
+      id: r.nonEmpty('id'),
+      unitId: r.nonEmpty('unitId'),
+      captureSourceId: r.strOrNull('captureSourceId'),
+      name: r.str('name'),
+      direction: r.oneOf('direction', TemplateDirection.values),
+      pattern: pattern,
+      fieldMap: fieldMap,
+      sampleText: r.str('sampleText'),
+      version: r.integer('version', orElse: 1),
+      enabled: r.boolean('enabled', orElse: true),
+    );
+  }
+
+  static LimitRule _limit(_Rec r, _Ctx ctx) {
+    final scope = r.oneOf('scope', LimitScope.values);
+    final period = r.oneOf('period', LimitPeriod.values);
+    var unitId = r.strOrNull('unitId');
+
+    if (scope == LimitScope.unit && (unitId == null || unitId.isEmpty)) {
+      ctx.error('${r.path}.unitId: a per-unit limit needs a unit.');
+    }
+    if (scope == LimitScope.overall && unitId != null) {
+      ctx.warn('${r.path}: an overall limit has no unit; ignoring it.');
+      unitId = null;
+    }
+
+    final amount = r.integer('amountMinor');
+    if (amount < 0) {
+      ctx.error('${r.path}.amountMinor: a limit cannot be negative.');
+    }
+    final warnAt = r.number('warnAt', orElse: 0.7);
+    final dangerAt = r.number('dangerAt', orElse: 0.9);
+    if (!(warnAt > 0 && warnAt <= dangerAt && dangerAt <= 1)) {
+      ctx.error(
+        '${r.path}: alert levels must satisfy 0 < warn <= danger <= 1.',
+      );
+    }
+
+    // One row per (scope, unit, period), by construction (LimitRule.idFor):
+    // the app edits a limit in place by id, so a file with a differently
+    // named id would otherwise create a second limit for the same slot.
+    final given = r.nonEmpty('id');
+    final id = LimitRule.idFor(scope, period, unitId);
+    if (given.isNotEmpty && given != id) {
+      ctx.warn('${r.path}: id tidied to match its scope and period.');
+    }
+
+    return LimitRule(
+      id: id,
+      scope: scope,
+      unitId: unitId,
+      period: period,
+      amountMinor: amount,
+      currencyCode: r.nonEmpty('currency'),
+      warnAt: warnAt,
+      dangerAt: dangerAt,
+      enabled: r.boolean('enabled', orElse: true),
+    );
+  }
+
+  /// Settings are preferences, so this reader is forgiving: anything
+  /// missing or unrecognised keeps its default (with a warning) instead
+  /// of rejecting an otherwise good backup.
+  static AppSettings _settings(Map<String, dynamic> m, _Ctx ctx) {
+    final d = AppSettings.defaults;
+
+    T pick<T extends Enum>(String key, List<T> values, T fallback) {
+      final raw = m[key];
+      if (raw == null) return fallback;
+      final match = values.where((v) => v.name == raw).firstOrNull;
+      if (match == null) {
+        ctx.warn('settings.$key: unknown value "$raw"; kept the default.');
+        return fallback;
+      }
+      return match;
+    }
+
+    bool flag(String key, bool fallback) {
+      final raw = m[key];
+      if (raw is bool) return raw;
+      if (raw != null) ctx.warn('settings.$key: expected true/false.');
+      return fallback;
+    }
+
+    int minute(String key, int fallback) {
+      final raw = m[key];
+      if (raw is int && raw >= 0 && raw < 24 * 60) return raw;
+      if (raw != null) ctx.warn('settings.$key: not a valid time.');
+      return fallback;
+    }
+
+    List<String> names(String key) {
+      final raw = m[key];
+      if (raw is List) {
+        return [
+          for (final e in raw)
+            if (e is String) e,
+        ];
+      }
+      return const [];
+    }
+
+    final accentRaw = m['accent'];
+    final accent = accentRaw is int && accentRaw >= 0 && accentRaw <= 0xFFFFFFFF
+        ? Color(accentRaw)
+        : d.accent;
+
+    final sections = <HomeSection>{
+      for (final n in names('homeSections'))
+        ...HomeSection.values.where((v) => v.name == n),
+    };
+
+    final rawName = m['name'];
+
+    return AppSettings(
+      name: rawName is String && rawName.trim().isNotEmpty ? rawName : d.name,
+      accent: accent,
+      themeMode: pick('themeMode', AppThemeMode.values, d.themeMode),
+      homeHeadline: pick('homeHeadline', HomeHeadline.values, d.homeHeadline),
+      homeSections: m.containsKey('homeSections') ? sections : d.homeSections,
+      detailLevel: pick('detailLevel', DetailLevel.values, d.detailLevel),
+      amountsHiddenInRecents: flag(
+        'amountsHiddenInRecents',
+        d.amountsHiddenInRecents,
+      ),
+      redactedLockScreenBanner: flag(
+        'redactedLockScreenBanner',
+        d.redactedLockScreenBanner,
+      ),
+      autoAcceptCaptures: flag('autoAcceptCaptures', d.autoAcceptCaptures),
+      bannerEnabled: flag('bannerEnabled', d.bannerEnabled),
+      bannerHeadline: pick(
+        'bannerHeadline',
+        BannerHeadline.values,
+        d.bannerHeadline,
+      ),
+      bannerUnitIds: names('bannerUnitIds').toSet(),
+      bannerShowProgress: flag('bannerShowProgress', d.bannerShowProgress),
+      bannerShowQuickAdd: flag('bannerShowQuickAdd', d.bannerShowQuickAdd),
+      alertsEnabled: flag('alertsEnabled', d.alertsEnabled),
+      quietHoursEnabled: flag('quietHoursEnabled', d.quietHoursEnabled),
+      quietStartMinute: minute('quietStartMinute', d.quietStartMinute),
+      quietEndMinute: minute('quietEndMinute', d.quietEndMinute),
+    );
+  }
+
+  /// Reads one named list from `data`. A missing key is an empty table
+  /// (an older or trimmed file is fine); a present-but-wrong-shaped one is
+  /// an error. Duplicate ids inside a table are an error too — the later
+  /// row would silently replace the earlier one on import.
+  static List<T> _table<T>(
+    Map<String, dynamic> data,
+    String key,
+    _Ctx ctx,
+    T Function(_Rec r) build,
+    String Function(T) idOf,
+  ) {
+    final raw = data[key];
+    if (raw == null) return <T>[];
+    if (raw is! List) {
+      ctx.error('$key: expected a list.');
+      return <T>[];
+    }
+    final out = <T>[];
+    final seen = <String>{};
+    for (var i = 0; i < raw.length; i++) {
+      final item = raw[i];
+      if (item is! Map<String, dynamic>) {
+        ctx.error('$key[$i]: expected an object.');
+        continue;
+      }
+      final built = build(_Rec(item, '$key[$i]', ctx));
+      final id = idOf(built);
+      if (id.isNotEmpty && !seen.add(id)) {
+        ctx.error('$key[$i]: the id "$id" appears more than once.');
+      }
+      out.add(built);
+    }
+    return out;
+  }
+}
+
+class _Ctx {
+  final errors = <String>[];
+  final warnings = <String>[];
+  int droppedErrors = 0;
+
+  void error(String message) {
+    if (errors.length < BackupCodec._maxListedErrors) {
+      errors.add(message);
+    } else {
+      droppedErrors++;
+    }
+  }
+
+  void warn(String message) {
+    if (warnings.length < BackupCodec._maxListedWarnings) {
+      warnings.add(message);
+    }
+  }
+}
+
+/// Typed, error-collecting access to one JSON object. Every getter records
+/// a problem and returns a harmless placeholder rather than throwing, so
+/// one pass reports everything wrong with a file, not just the first thing.
+class _Rec {
+  _Rec(this.map, this.path, this.ctx);
+
+  final Map<String, dynamic> map;
+  final String path;
+  final _Ctx ctx;
+
+  void _bad(String key, String expected) =>
+      ctx.error('$path.$key: expected $expected.');
+
+  String str(String key) {
+    final v = map[key];
+    if (v is String) return v;
+    _bad(key, 'text');
+    return '';
+  }
+
+  String nonEmpty(String key) {
+    final v = str(key);
+    if (v.trim().isEmpty && map[key] is String) {
+      ctx.error('$path.$key: must not be empty.');
+    }
+    return v;
+  }
+
+  String? strOrNull(String key) {
+    final v = map[key];
+    if (v == null) return null;
+    if (v is String) return v;
+    _bad(key, 'text or null');
+    return null;
+  }
+
+  int integer(String key, {int? orElse}) {
+    final v = map[key];
+    if (v is int) return v;
+    if (v == null && orElse != null) return orElse;
+    _bad(key, 'a whole number');
+    return orElse ?? 0;
+  }
+
+  int? integerOrNull(String key) {
+    final v = map[key];
+    if (v == null) return null;
+    if (v is int) return v;
+    _bad(key, 'a whole number or null');
+    return null;
+  }
+
+  /// 32-bit ARGB, as written by `Color.toARGB32()`.
+  int colorInt(String key) {
+    final v = map[key];
+    if (v is int && v >= 0 && v <= 0xFFFFFFFF) return v;
+    _bad(key, 'a colour value');
+    return 0;
+  }
+
+  double number(String key, {double? orElse}) {
+    final v = map[key];
+    if (v is num) return v.toDouble();
+    if (v == null && orElse != null) return orElse;
+    _bad(key, 'a number');
+    return orElse ?? 0;
+  }
+
+  bool boolean(String key, {bool? orElse}) {
+    final v = map[key];
+    if (v is bool) return v;
+    if (v == null && orElse != null) return orElse;
+    _bad(key, 'true or false');
+    return orElse ?? false;
+  }
+
+  DateTime date(String key) {
+    final v = map[key];
+    if (v is String) {
+      final parsed = DateTime.tryParse(v);
+      if (parsed != null) return parsed;
+    }
+    _bad(key, 'a date and time');
+    return DateTime.fromMillisecondsSinceEpoch(0, isUtc: true);
+  }
+
+  DateTime? dateOrNull(String key) {
+    final v = map[key];
+    if (v == null) return null;
+    if (v is String) {
+      final parsed = DateTime.tryParse(v);
+      if (parsed != null) return parsed;
+    }
+    _bad(key, 'a date and time or null');
+    return null;
+  }
+
+  T oneOf<T extends Enum>(String key, List<T> values, {T? orElse}) {
+    final v = map[key];
+    if (v == null && orElse != null) return orElse;
+    final match = values.where((e) => e.name == v).firstOrNull;
+    if (match != null) return match;
+    ctx.error('$path.$key: unknown value "$v".');
+    return orElse ?? values.first;
+  }
+}
+</file>
+
+<file path="lib/domain/logic/backup_import.dart">
+// ---------------------------------------------------------------------------
+// Deciding what an import would do, before it does anything (issue #24,
+// US-15: "import is validated and never overwrites silently").
+//
+// Pure Dart. The planner compares a decoded file with what is already on
+// the phone and sorts every record into one of three piles:
+//
+//   added      - nothing on the phone has that id: safe to add.
+//   identical  - already here, exactly the same: nothing to do.
+//   conflicts  - same id, different content: needs a decision.
+//
+// The person sees those counts (and the conflicts by name) *before*
+// choosing. Nothing is written by planning, and nothing is overwritten
+// unless they pick [ConflictPolicy.useFile] on purpose.
+//
+// It also checks that every reference resolves (a transaction's unit, a
+// template's source, a limit's unit...) against the file *and* the phone
+// together, so a partial backup can be merged into an existing phone but a
+// dangling reference can never reach the database's foreign keys.
+// ---------------------------------------------------------------------------
+
+import 'dart:convert';
+
+import '../models/backup_snapshot.dart';
+import '../models/capture_source.dart';
+import '../models/limit_rule.dart';
+import '../models/settings.dart';
+import '../models/template.dart';
+import '../models/transaction.dart';
+import '../models/unit.dart';
+import 'backup_codec.dart';
+
+/// What to do with a record that exists on both sides but differs.
+enum ConflictPolicy {
+  /// Leave the phone's version alone. The default.
+  keepMine,
+
+  /// Replace the phone's version with the file's.
+  useFile,
+}
+
+class Conflict<T> {
+  final T existing;
+  final T incoming;
+  const Conflict(this.existing, this.incoming);
+}
+
+class TablePlan<T> {
+  final List<T> added;
+  final int identicalCount;
+  final List<Conflict<T>> conflicts;
+
+  const TablePlan({
+    this.added = const [],
+    this.identicalCount = 0,
+    this.conflicts = const [],
+  });
+
+  bool get isEmpty => added.isEmpty && identicalCount == 0 && conflicts.isEmpty;
+}
+
+class ImportPlan {
+  final TablePlan<BackupCategory> categories;
+  final TablePlan<MoneyUnit> units;
+  final TablePlan<CaptureSource> captureSources;
+  final TablePlan<CaptureTemplate> templates;
+  final TablePlan<MoneyTransaction> transactions;
+  final TablePlan<LimitRule> limits;
+
+  /// The file's settings, if it had any. Applied only when the person
+  /// asks for it — never as part of "merge my records".
+  final AppSettings? incomingSettings;
+
+  /// References that don't resolve. Any problem means the import can't run.
+  final List<String> problems;
+  final int moreProblems;
+
+  const ImportPlan({
+    required this.categories,
+    required this.units,
+    required this.captureSources,
+    required this.templates,
+    required this.transactions,
+    required this.limits,
+    required this.incomingSettings,
+    this.problems = const [],
+    this.moreProblems = 0,
+  });
+
+  bool get canApply => problems.isEmpty;
+
+  int get addedCount =>
+      categories.added.length +
+      units.added.length +
+      captureSources.added.length +
+      templates.added.length +
+      transactions.added.length +
+      limits.added.length;
+
+  int get identicalCount =>
+      categories.identicalCount +
+      units.identicalCount +
+      captureSources.identicalCount +
+      templates.identicalCount +
+      transactions.identicalCount +
+      limits.identicalCount;
+
+  int get conflictCount =>
+      categories.conflicts.length +
+      units.conflicts.length +
+      captureSources.conflicts.length +
+      templates.conflicts.length +
+      transactions.conflicts.length +
+      limits.conflicts.length;
+
+  bool get hasConflicts => conflictCount > 0;
+
+  /// True when applying (with either policy) could not change any record.
+  bool get changesNothing => addedCount == 0 && conflictCount == 0;
+
+  /// The records that would be written under [policy]: everything new,
+  /// plus — only for [ConflictPolicy.useFile] — the file's side of each
+  /// conflict. Settings are not included; they are a separate choice.
+  BackupSnapshot recordsToWrite(ConflictPolicy policy) {
+    List<T> pick<T>(TablePlan<T> t) => [
+      ...t.added,
+      if (policy == ConflictPolicy.useFile)
+        for (final c in t.conflicts) c.incoming,
+    ];
+    return BackupSnapshot(
+      categories: pick(categories),
+      units: pick(units),
+      captureSources: pick(captureSources),
+      templates: pick(templates),
+      transactions: pick(transactions),
+      limits: pick(limits),
+    );
+  }
+}
+
+class ImportPlanner {
+  ImportPlanner._();
+
+  static const _maxListedProblems = 20;
+
+  static ImportPlan plan({
+    required BackupSnapshot incoming,
+    required BackupSnapshot existing,
+  }) {
+    final categories = _diff<BackupCategory>(
+      incoming.categories,
+      existing.categories,
+      (c) => c.id,
+      (c) => jsonEncode(BackupCodec.categoryToJson(c)),
+    );
+    final units = _diff<MoneyUnit>(
+      incoming.units,
+      existing.units,
+      (u) => u.id,
+      (u) => jsonEncode(BackupCodec.unitToJson(u)),
+    );
+    final sources = _diff<CaptureSource>(
+      incoming.captureSources,
+      existing.captureSources,
+      (s) => s.id,
+      (s) => jsonEncode(BackupCodec.captureSourceToJson(s)),
+    );
+    final templates = _diff<CaptureTemplate>(
+      incoming.templates,
+      existing.templates,
+      (t) => t.id,
+      (t) => jsonEncode(t.toJson()),
+    );
+    final limits = _diff<LimitRule>(
+      incoming.limits,
+      existing.limits,
+      (l) => l.id,
+      (l) => jsonEncode(BackupCodec.limitToJson(l)),
+    );
+
+    // Original message text is opt-in in a file, so a file without it must
+    // not look "different" from a phone that kept it — and replacing the
+    // phone's version must not throw the kept text away.
+    final rawTx = _diff<MoneyTransaction>(
+      incoming.transactions,
+      existing.transactions,
+      (t) => t.id,
+      (t) => jsonEncode(BackupCodec.transactionToJson(t)),
+    );
+    final transactions = TablePlan<MoneyTransaction>(
+      added: rawTx.added,
+      identicalCount: rawTx.identicalCount,
+      conflicts: [
+        for (final c in rawTx.conflicts)
+          Conflict(
+            c.existing,
+            c.incoming.rawText == null && c.existing.rawText != null
+                ? c.incoming.copyWith(rawText: c.existing.rawText)
+                : c.incoming,
+          ),
+      ],
+    );
+
+    final problems = <String>[];
+    var more = 0;
+    void problem(String m) {
+      if (problems.length < _maxListedProblems) {
+        problems.add(m);
+      } else {
+        more++;
+      }
+    }
+
+    // A reference resolves if the target is in the file or already here.
+    final unitIds = {
+      ...incoming.units.map((u) => u.id),
+      ...existing.units.map((u) => u.id),
+    };
+    final categoryIds = {
+      ...incoming.categories.map((c) => c.id),
+      ...existing.categories.map((c) => c.id),
+    };
+    final sourceIds = {
+      ...incoming.captureSources.map((s) => s.id),
+      ...existing.captureSources.map((s) => s.id),
+    };
+    final templateIds = {
+      ...incoming.templates.map((t) => t.id),
+      ...existing.templates.map((t) => t.id),
+    };
+
+    for (final t in incoming.templates) {
+      if (!unitIds.contains(t.unitId)) {
+        problem(
+          'The rule "${t.name}" belongs to a money unit that is neither in '
+          'the file nor on this phone.',
+        );
+      }
+      final src = t.captureSourceId;
+      if (src != null && !sourceIds.contains(src)) {
+        problem(
+          'The rule "${t.name}" points at an app that is neither in the '
+          'file nor on this phone.',
+        );
+      }
+    }
+    for (final l in incoming.limits) {
+      final u = l.unitId;
+      if (u != null && !unitIds.contains(u)) {
+        problem(
+          'A ${l.period.name} limit belongs to a money unit that is '
+          'neither in the file nor on this phone.',
+        );
+      }
+    }
+    for (final t in incoming.transactions) {
+      final label = _txLabel(t);
+      if (!unitIds.contains(t.unitId)) {
+        problem(
+          '$label belongs to a money unit that is neither in the file nor '
+          'on this phone.',
+        );
+      }
+      final cat = t.categoryId;
+      if (cat != null && !categoryIds.contains(cat)) {
+        problem('$label uses a category that is not in the file or here.');
+      }
+      final tpl = t.templateId;
+      if (tpl != null && !templateIds.contains(tpl)) {
+        problem('$label points at a rule that is not in the file or here.');
+      }
+    }
+
+    return ImportPlan(
+      categories: categories,
+      units: units,
+      captureSources: sources,
+      templates: templates,
+      transactions: transactions,
+      limits: limits,
+      incomingSettings: incoming.settings,
+      problems: problems,
+      moreProblems: more,
+    );
+  }
+
+  static String _txLabel(MoneyTransaction t) {
+    final who = t.counterparty;
+    final base = who == null || who.isEmpty
+        ? 'A transaction'
+        : 'The "$who" entry';
+    return base;
+  }
+
+  static TablePlan<T> _diff<T>(
+    List<T> incoming,
+    List<T> existing,
+    String Function(T) idOf,
+    String Function(T) fingerprint,
+  ) {
+    final byId = {for (final e in existing) idOf(e): e};
+    final added = <T>[];
+    final conflicts = <Conflict<T>>[];
+    var identical = 0;
+    for (final item in incoming) {
+      final match = byId[idOf(item)];
+      if (match == null) {
+        added.add(item);
+      } else if (fingerprint(match) == fingerprint(item)) {
+        identical++;
+      } else {
+        conflicts.add(Conflict(match, item));
+      }
+    }
+    return TablePlan(
+      added: added,
+      identicalCount: identical,
+      conflicts: conflicts,
+    );
+  }
+}
+</file>
+
+<file path="lib/domain/logic/backup_service.dart">
+// ---------------------------------------------------------------------------
+// The three things the Back up & restore screen does (issue #24), with no
+// UI and no file access in the way so they can be tested end to end
+// against an in-memory database:
+//
+//   buildExport - read everything, encode it.
+//   preview     - decode a file, compare it with the phone. Writes nothing.
+//   apply       - write what the person confirmed, in one transaction.
+// ---------------------------------------------------------------------------
+
+import '../models/backup_snapshot.dart';
+import '../repositories/repositories.dart';
+import 'backup_codec.dart';
+import 'backup_import.dart';
+
+/// What opening a backup file found: either [errors] (nothing can be
+/// imported) or a [plan] the person can review.
+class ImportPreview {
+  final BackupDecodeResult decoded;
+  final ImportPlan? plan;
+
+  /// Whether the phone already has any money units. Decides whether "also
+  /// restore my settings" starts switched on (fresh phone) or off (there
+  /// is something to lose).
+  final bool phoneHasData;
+
+  const ImportPreview({
+    required this.decoded,
+    required this.plan,
+    required this.phoneHasData,
+  });
+
+  /// Every reason this file can't be imported, file problems first.
+  List<String> get blockers => [
+    ...decoded.errors,
+    if (plan != null) ...plan!.problems,
+  ];
+
+  int get moreBlockers =>
+      decoded.moreErrors + (plan == null ? 0 : plan!.moreProblems);
+
+  bool get canImport => decoded.ok && plan != null && plan!.canApply;
+
+  bool get hasSettings => plan?.incomingSettings != null;
+}
+
+/// What actually happened, for the "Done" message.
+class ImportOutcome {
+  final int added;
+  final int replaced;
+  final int skipped;
+  final bool settingsRestored;
+
+  const ImportOutcome({
+    required this.added,
+    required this.replaced,
+    required this.skipped,
+    required this.settingsRestored,
+  });
+}
+
+class BackupService {
+  BackupService(this._repo, {DateTime Function()? clock})
+    : _now = clock ?? DateTime.now;
+
+  final BackupRepository _repo;
+  final DateTime Function() _now;
+
+  /// A friendly default file name, e.g. `fuata-backup-2026-09-30.json`.
+  String suggestedFileName() {
+    final d = _now();
+    String two(int n) => n.toString().padLeft(2, '0');
+    return 'fuata-backup-${d.year}-${two(d.month)}-${two(d.day)}.json';
+  }
+
+  Future<({String json, BackupSnapshot snapshot})> buildExport({
+    bool includeRawText = false,
+  }) async {
+    final snapshot = await _repo.readAll();
+    final json = BackupCodec.encode(
+      snapshot,
+      exportedAt: _now(),
+      includeRawText: includeRawText,
+    );
+    return (json: json, snapshot: snapshot);
+  }
+
+  Future<ImportPreview> preview(String fileText) async {
+    final decoded = BackupCodec.decode(fileText);
+    final incoming = decoded.snapshot;
+    final existing = await _repo.readAll();
+    if (!decoded.ok || incoming == null) {
+      return ImportPreview(
+        decoded: decoded,
+        plan: null,
+        phoneHasData: existing.units.isNotEmpty,
+      );
+    }
+    return ImportPreview(
+      decoded: decoded,
+      plan: ImportPlanner.plan(incoming: incoming, existing: existing),
+      phoneHasData: existing.units.isNotEmpty,
+    );
+  }
+
+  /// Applies [preview] under [policy]. Throws [StateError] if the preview
+  /// was not importable — the screen never offers the button in that case,
+  /// but this is the last line of defence against writing a bad file.
+  Future<ImportOutcome> apply(
+    ImportPreview preview, {
+    required ConflictPolicy policy,
+    required bool restoreSettings,
+  }) async {
+    final plan = preview.plan;
+    if (!preview.canImport || plan == null) {
+      throw StateError('This backup cannot be imported.');
+    }
+    final restore = restoreSettings ? plan.incomingSettings : null;
+    await _repo.apply(plan.recordsToWrite(policy), settings: restore);
+
+    final replaced = policy == ConflictPolicy.useFile ? plan.conflictCount : 0;
+    return ImportOutcome(
+      added: plan.addedCount,
+      replaced: replaced,
+      skipped: policy == ConflictPolicy.keepMine ? plan.conflictCount : 0,
+      settingsRestored: restore != null,
+    );
+  }
 }
 </file>
 
@@ -1972,6 +3463,88 @@ class _Acc {
 }
 </file>
 
+<file path="lib/domain/models/backup_snapshot.dart">
+// ---------------------------------------------------------------------------
+// Everything a backup file carries, as plain domain objects (issue #24).
+//
+// Pure Dart, no I/O. The codec (logic/backup_codec.dart) turns one of these
+// into JSON and back; the planner (logic/backup_import.dart) compares one
+// read from a file with one read from the database; the repository
+// (data/db/backup_repository.dart) reads and writes them.
+//
+// What is deliberately NOT in here:
+//  - Unparsed captures: raw message text kept for 7 days by design (US-11),
+//    never worth carrying to another phone.
+//  - Alert firings: derived state. Importing limits on a new phone should
+//    not silence alerts for a period that phone never showed.
+//  - Balances: always computed from the opening balance plus transactions
+//    (ADR-004), so there is nothing to store.
+// ---------------------------------------------------------------------------
+
+import 'package:fuata/domain/models/settings.dart';
+import 'package:fuata/domain/models/template.dart';
+import 'package:fuata/domain/models/transaction.dart';
+import 'package:fuata/domain/models/unit.dart';
+
+import 'capture_source.dart';
+import 'limit_rule.dart';
+
+/// A row of the `categories` table. The table exists (transactions can
+/// point at it) but no domain model or repository does yet — Me ->
+/// Categories is "coming soon" — so backups carry the raw shape. Nothing
+/// is lost, and a future categories screen picks the rows up as they are.
+class BackupCategory {
+  final String id;
+  final String name;
+  final String emoji;
+  final int colorValue;
+
+  const BackupCategory({
+    required this.id,
+    required this.name,
+    required this.emoji,
+    required this.colorValue,
+  });
+}
+
+class BackupSnapshot {
+  final List<BackupCategory> categories;
+  final List<MoneyUnit> units;
+  final List<CaptureSource> captureSources;
+  final List<CaptureTemplate> templates;
+  final List<MoneyTransaction> transactions;
+  final List<LimitRule> limits;
+
+  /// Null when the file has no settings section (or the caller left them
+  /// out). Settings are preferences, not money, so they are handled
+  /// separately from the records above on import.
+  final AppSettings? settings;
+
+  const BackupSnapshot({
+    this.categories = const [],
+    this.units = const [],
+    this.captureSources = const [],
+    this.templates = const [],
+    this.transactions = const [],
+    this.limits = const [],
+    this.settings,
+  });
+
+  static const empty = BackupSnapshot();
+
+  /// Number of money records (settings not counted).
+  int get recordCount =>
+      categories.length +
+      units.length +
+      captureSources.length +
+      templates.length +
+      transactions.length +
+      limits.length;
+
+  bool get isEmpty => recordCount == 0;
+}
+</file>
+
 <file path="lib/domain/models/capture_source.dart">
 /// design.md CAPTURE_SOURCE: one app whose notifications Fuata is allowed
 /// to read (US-10). The set of *enabled* sources is the allow-list —
@@ -2217,6 +3790,85 @@ Future<void> fireDueAlerts({
 }
 </file>
 
+<file path="lib/platform/backup_files.dart">
+// ---------------------------------------------------------------------------
+// Saving and opening backup files (issue #24). A thin wrapper over the
+// `fuata/backup_files` channel (android/.../BackupFilesChannel.kt), behind
+// an interface so the screen can be tested without a platform.
+// ---------------------------------------------------------------------------
+
+import 'package:flutter/services.dart';
+
+import '../data/constants/method_channels_constants.dart';
+
+/// A file problem with a message fit to show the person.
+class BackupFileException implements Exception {
+  final String message;
+  const BackupFileException(this.message);
+
+  @override
+  String toString() => message;
+}
+
+abstract class BackupFilePlatform {
+  /// Asks the person where to save, then writes [content] there.
+  /// False if they backed out.
+  Future<bool> saveText({
+    required String suggestedName,
+    required String content,
+  });
+
+  /// Asks the person to pick a file and returns its text. Null if they
+  /// backed out.
+  Future<String?> pickText();
+}
+
+class AndroidBackupFiles implements BackupFilePlatform {
+  AndroidBackupFiles() : _channel = const MethodChannel(backupFilesMethodName);
+  final MethodChannel _channel;
+
+  @override
+  Future<bool> saveText({
+    required String suggestedName,
+    required String content,
+  }) async {
+    try {
+      final saved = await _channel.invokeMethod<bool>('saveText', {
+        'name': suggestedName,
+        'content': content,
+      });
+      return saved ?? false;
+    } on PlatformException catch (e) {
+      throw BackupFileException(switch (e.code) {
+        'busy' => 'A file window is already open.',
+        _ => "Couldn't save the file there. Try another location.",
+      });
+    } on MissingPluginException {
+      throw const BackupFileException(
+        "This device can't save files from Fuata.",
+      );
+    }
+  }
+
+  @override
+  Future<String?> pickText() async {
+    try {
+      return await _channel.invokeMethod<String>('pickText');
+    } on PlatformException catch (e) {
+      throw BackupFileException(switch (e.code) {
+        'busy' => 'A file window is already open.',
+        'too_large' => "That file is too big to be a Fuata backup.",
+        _ => "Couldn't read that file. Try another one.",
+      });
+    } on MissingPluginException {
+      throw const BackupFileException(
+        "This device can't open files from Fuata.",
+      );
+    }
+  }
+}
+</file>
+
 <file path="lib/platform/share_intake.dart">
 import 'dart:async';
 
@@ -2336,6 +3988,19 @@ final alertSyncProvider = Provider<void>((ref) {
       debugPrint('[alerts] failed: ${e.runtimeType}');
     }
   });
+});
+</file>
+
+<file path="lib/ui/providers/backup_providers.dart">
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../../platform/backup_files.dart';
+
+/// The file picker/saver behind the Back up & restore screen (issue #24).
+/// A provider so widget tests can override it with a fake and never touch
+/// a platform channel.
+final backupFilesProvider = Provider<BackupFilePlatform>((ref) {
+  return AndroidBackupFiles();
 });
 </file>
 
@@ -2957,6 +4622,321 @@ class _BannerSetupScreenState extends ConsumerState<BannerSetupScreen> {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+</file>
+
+<file path="lib/ui/screens/data_backup_screen.dart">
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../../domain/logic/backup_import.dart';
+import '../../domain/logic/backup_service.dart';
+import '../../platform/backup_files.dart';
+import '../../widgets/backup/import_preview_card.dart';
+import '../../widgets/personalization/section_card.dart';
+import '../../widgets/personalization/toggle_row.dart';
+import '../providers/app_providers.dart';
+import '../providers/backup_providers.dart';
+import '../theme/app_colors.dart';
+import '../theme/app_spacing.dart';
+import '../theme/app_typography.dart';
+
+/// Back up & restore (issue #24, US-15, ui-design-brief.md 7.12 "Privacy &
+/// data"). Two jobs, both by file and both on the person's terms:
+///
+///  - Save: everything Fuata knows, as one JSON file, wherever they pick.
+///  - Restore: read a file, show exactly what it would do, and only then —
+///    on their say-so — do it. Nothing is written while previewing, a file
+///    with any problem changes nothing, and records that already exist but
+///    differ are kept as they are unless the person chooses otherwise.
+class DataBackupScreen extends ConsumerStatefulWidget {
+  const DataBackupScreen({super.key});
+
+  @override
+  ConsumerState<DataBackupScreen> createState() => _DataBackupScreenState();
+}
+
+class _DataBackupScreenState extends ConsumerState<DataBackupScreen> {
+  bool _busy = false;
+  bool _includeRawText = false;
+
+  ImportPreview? _preview;
+  ConflictPolicy _policy = ConflictPolicy.keepMine;
+  bool _restoreSettings = false;
+
+  ({String text, bool isError})? _message;
+
+  void _say(String text, {bool isError = false}) =>
+      _message = (text: text, isError: isError);
+
+  Future<void> _export() async {
+    setState(() {
+      _busy = true;
+      _message = null;
+    });
+    try {
+      final service = ref.read(backupServiceProvider);
+      final built = await service.buildExport(includeRawText: _includeRawText);
+      final saved = await ref
+          .read(backupFilesProvider)
+          .saveText(
+            suggestedName: service.suggestedFileName(),
+            content: built.json,
+          );
+      if (!mounted) return;
+      setState(() {
+        if (saved) {
+          final s = built.snapshot;
+          _say(
+            'Saved: ${s.units.length} money unit${s.units.length == 1 ? '' : 's'}, '
+            '${s.transactions.length} transaction${s.transactions.length == 1 ? '' : 's'}. '
+            'Keep the file somewhere safe — it holds your money history.',
+          );
+        }
+      });
+    } on BackupFileException catch (e) {
+      if (mounted) setState(() => _say(e.message, isError: true));
+    } catch (_) {
+      if (mounted) {
+        setState(() => _say("Couldn't create the backup.", isError: true));
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _choose() async {
+    setState(() {
+      _busy = true;
+      _message = null;
+    });
+    try {
+      final text = await ref.read(backupFilesProvider).pickText();
+      if (text == null) return; // backed out
+      final preview = await ref.read(backupServiceProvider).preview(text);
+      if (!mounted) return;
+      setState(() {
+        _preview = preview;
+        _policy = ConflictPolicy.keepMine;
+        // On a fresh phone the whole point of restoring is to get the old
+        // setup back; on one with data, replacing settings must be asked for.
+        _restoreSettings = preview.hasSettings && !preview.phoneHasData;
+      });
+    } on BackupFileException catch (e) {
+      if (mounted) setState(() => _say(e.message, isError: true));
+    } catch (_) {
+      if (mounted) {
+        setState(
+          () => _say(
+            "Couldn't read that file. Nothing was changed.",
+            isError: true,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _import() async {
+    final preview = _preview;
+    final plan = preview?.plan;
+    if (preview == null || plan == null) return;
+
+    // Replacing is the one destructive path: say so, once, plainly.
+    if (_policy == ConflictPolicy.useFile && plan.hasConflicts) {
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Replace what’s on this phone?'),
+          content: Text(
+            '${plan.conflictCount} item${plan.conflictCount == 1 ? '' : 's'} '
+            'on this phone will be replaced by the file’s version. '
+            'This can’t be undone.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text('Replace'),
+            ),
+          ],
+        ),
+      );
+      if (ok != true) return;
+    }
+
+    setState(() {
+      _busy = true;
+      _message = null;
+    });
+    try {
+      final outcome = await ref
+          .read(backupServiceProvider)
+          .apply(preview, policy: _policy, restoreSettings: _restoreSettings);
+      if (!mounted) return;
+      setState(() {
+        _preview = null;
+        _say(_outcomeText(outcome));
+      });
+    } catch (_) {
+      // The write is one transaction, so a failure changed nothing.
+      if (mounted) {
+        setState(
+          () =>
+              _say('The import failed, so nothing was changed.', isError: true),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  String _outcomeText(ImportOutcome o) {
+    final parts = <String>[
+      if (o.added > 0) 'added ${o.added}',
+      if (o.replaced > 0) 'replaced ${o.replaced}',
+      if (o.skipped > 0) 'kept ${o.skipped} of yours as they were',
+      if (o.settingsRestored) 'restored your settings',
+    ];
+    if (parts.isEmpty) return 'Done — there was nothing to change.';
+    final joined = parts.join(', ');
+    return 'Done: ${joined[0].toUpperCase()}${joined.substring(1)}.';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    final unitCount = ref.watch(unitsProvider).value?.length ?? 0;
+    final txCount = ref.watch(transactionsProvider).value?.length ?? 0;
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('Back up & restore')),
+      body: SafeArea(
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(
+            AppSpacing.margin,
+            AppSpacing.sm,
+            AppSpacing.margin,
+            AppSpacing.xl,
+          ),
+          children: [
+            if (_message != null) ...[
+              _MessageBanner(message: _message!),
+              const SizedBox(height: AppSpacing.lg),
+            ],
+            SectionCard(
+              title: 'Save a backup',
+              children: [
+                Text(
+                  'One file with your money units, transactions, limits, '
+                  'message rules and settings ($unitCount unit'
+                  '${unitCount == 1 ? '' : 's'}, $txCount transaction'
+                  '${txCount == 1 ? '' : 's'} right now). You choose where it goes; '
+                  'Fuata never sends it anywhere.',
+                  style: AppTypography.bodySm.copyWith(
+                    color: c.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.md),
+                ToggleRow(
+                  title: 'Include original message text',
+                  subtitle: 'Off by default. Only matters for messages you chose to keep in full.',
+                  value: _includeRawText,
+                  onChanged: (v) => setState(() => _includeRawText = v),
+                ),
+                const SizedBox(height: AppSpacing.md),
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton.icon(
+                    onPressed: _busy ? null : _export,
+                    icon: const Icon(Icons.file_download_outlined),
+                    label: const Text('Save backup file'),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: AppSpacing.lg),
+            SectionCard(
+              title: 'Restore from a backup',
+              children: [
+                Text(
+                  'Pick a Fuata backup file. You’ll see what it would do '
+                  'first — nothing changes until you say so, and anything '
+                  'already on this phone is kept unless you choose otherwise.',
+                  style: AppTypography.bodySm.copyWith(
+                    color: c.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.md),
+                if (_preview == null)
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed: _busy ? null : _choose,
+                      icon: const Icon(Icons.file_open_outlined),
+                      label: const Text('Choose a backup file'),
+                    ),
+                  )
+                else
+                  ImportPreviewCard(
+                    preview: _preview!,
+                    policy: _policy,
+                    restoreSettings: _restoreSettings,
+                    busy: _busy,
+                    onPolicy: (p) => setState(() => _policy = p),
+                    onRestoreSettings: (v) =>
+                        setState(() => _restoreSettings = v),
+                    onImport: _import,
+                    onCancel: () => setState(() => _preview = null),
+                  ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _MessageBanner extends StatelessWidget {
+  const _MessageBanner({required this.message});
+  final ({String text, bool isError}) message;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    final error = message.isError;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(AppSpacing.md),
+      decoration: BoxDecoration(
+        color: error ? c.statusDangerContainer : c.statusSafeContainer,
+        borderRadius: BorderRadius.circular(AppSpacing.unitTileRadius),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(
+            error
+                ? Icons.error_outline_rounded
+                : Icons.check_circle_outline_rounded,
+            color: error ? c.statusDanger : c.statusSafe,
+          ),
+          const SizedBox(width: AppSpacing.sm),
+          Expanded(
+            child: Text(
+              message.text,
+              style: AppTypography.bodySm.copyWith(color: c.onSurface),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -3643,6 +5623,350 @@ class EmptyActivity extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+</file>
+
+<file path="lib/widgets/backup/import_preview_card.dart">
+import 'package:flutter/material.dart';
+
+import '../../domain/logic/backup_import.dart';
+import '../../domain/logic/backup_service.dart';
+import '../../ui/theme/app_colors.dart';
+import '../../ui/theme/app_spacing.dart';
+import '../../ui/theme/app_typography.dart';
+import '../app_chips.dart';
+import '../personalization/label.dart';
+import '../personalization/toggle_row.dart';
+
+/// What opening a backup file found, and the choices around importing it
+/// (issue #24, ui-design-brief.md 7.12 "Privacy & data").
+///
+/// Shown only after the file has been read and compared with the phone;
+/// nothing has been written yet. The two things that could surprise the
+/// person are laid out before the button: which records already exist but
+/// differ (and that "keep mine" is the default), and whether their
+/// settings would be replaced.
+class ImportPreviewCard extends StatelessWidget {
+  const ImportPreviewCard({
+    super.key,
+    required this.preview,
+    required this.policy,
+    required this.restoreSettings,
+    required this.busy,
+    required this.onPolicy,
+    required this.onRestoreSettings,
+    required this.onImport,
+    required this.onCancel,
+  });
+
+  final ImportPreview preview;
+  final ConflictPolicy policy;
+  final bool restoreSettings;
+  final bool busy;
+  final ValueChanged<ConflictPolicy> onPolicy;
+  final ValueChanged<bool> onRestoreSettings;
+  final VoidCallback onImport;
+  final VoidCallback onCancel;
+
+  @override
+  Widget build(BuildContext context) {
+    return preview.canImport
+        ? _ReadyBody(this)
+        : _RefusedBody(preview: preview, onCancel: onCancel);
+  }
+}
+
+String? _count(int n, String one, String many) =>
+    n == 0 ? null : '$n ${n == 1 ? one : many}';
+
+String _list(List<String?> parts) => parts.whereType<String>().join(', ');
+
+/// Names of records that exist on both sides but differ, for the
+/// "different from what's on this phone" list. Transactions are counted,
+/// not listed — there can be hundreds.
+List<String> _conflictNames(ImportPlan p) => [
+  for (final c in p.units.conflicts) '“${c.incoming.name}” (money unit)',
+  for (final c in p.limits.conflicts) 'Your ${c.incoming.period.name} limit',
+  for (final c in p.templates.conflicts) '“${c.incoming.name}” (message rule)',
+  for (final c in p.captureSources.conflicts)
+    '“${c.incoming.displayName}” (watched app)',
+  for (final c in p.categories.conflicts) '“${c.incoming.name}” (category)',
+];
+
+class _RefusedBody extends StatelessWidget {
+  const _RefusedBody({required this.preview, required this.onCancel});
+  final ImportPreview preview;
+  final VoidCallback onCancel;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    final blockers = preview.blockers;
+    final hidden =
+        (blockers.length > 6 ? blockers.length - 6 : 0) + preview.moreBlockers;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(AppSpacing.md),
+      decoration: BoxDecoration(
+        color: c.statusDangerContainer,
+        borderRadius: BorderRadius.circular(AppSpacing.unitTileRadius),
+        border: Border.all(color: c.statusDangerBorder),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.error_outline_rounded, color: c.statusDanger),
+              const SizedBox(width: AppSpacing.sm),
+              Expanded(
+                child: Text(
+                  "This file can't be imported",
+                  style: AppTypography.bodyMd.copyWith(color: c.onSurface),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          Text(
+            'Nothing on your phone was changed.',
+            style: AppTypography.bodySm.copyWith(color: c.onSurfaceVariant),
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          for (final b in blockers.take(6))
+            Padding(
+              padding: const EdgeInsets.only(bottom: AppSpacing.xs),
+              child: Text(
+                '• $b',
+                style: AppTypography.bodySm.copyWith(color: c.onSurface),
+              ),
+            ),
+          if (hidden > 0)
+            Text(
+              'and $hidden more.',
+              style: AppTypography.bodySm.copyWith(color: c.onSurfaceVariant),
+            ),
+          const SizedBox(height: AppSpacing.sm),
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton(onPressed: onCancel, child: const Text('Close')),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ReadyBody extends StatelessWidget {
+  const _ReadyBody(this.card);
+  final ImportPreviewCard card;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    final plan = card.preview.plan!;
+    final decoded = card.preview.decoded;
+
+    final added = _list([
+      _count(plan.units.added.length, 'money unit', 'money units'),
+      _count(plan.transactions.added.length, 'transaction', 'transactions'),
+      _count(plan.templates.added.length, 'message rule', 'message rules'),
+      _count(plan.limits.added.length, 'limit', 'limits'),
+      _count(plan.captureSources.added.length, 'watched app', 'watched apps'),
+      _count(plan.categories.added.length, 'category', 'categories'),
+    ]);
+
+    final names = _conflictNames(plan);
+    final txConflicts = plan.transactions.conflicts.length;
+    final shownNames = names.take(5).toList();
+    final hiddenNames = names.length - shownNames.length;
+
+    final exportedAt = decoded.exportedAt?.toLocal();
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(AppSpacing.md),
+      decoration: BoxDecoration(
+        color: c.surfaceContainer,
+        borderRadius: BorderRadius.circular(AppSpacing.unitTileRadius),
+        border: Border.all(color: c.outlineVariant.withValues(alpha: 0.35)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            exportedAt == null
+                ? 'Backup file'
+                : 'Backup from ${_date(exportedAt)}',
+            style: AppTypography.bodyMd.copyWith(color: c.onSurface),
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          _Line(
+            icon: Icons.add_circle_outline_rounded,
+            color: c.statusSafe,
+            text: added.isEmpty
+                ? 'Nothing new to add'
+                : 'New to this phone: $added',
+          ),
+          if (plan.identicalCount > 0)
+            _Line(
+              icon: Icons.check_circle_outline_rounded,
+              color: c.onSurfaceVariant,
+              text:
+                  '${plan.identicalCount} already here and the same — skipped',
+            ),
+          if (plan.hasConflicts)
+            _Line(
+              icon: Icons.difference_outlined,
+              color: c.statusWarning,
+              text:
+                  '${plan.conflictCount} already here but different from the file',
+            ),
+          if (plan.hasConflicts) ...[
+            const SizedBox(height: AppSpacing.xs),
+            for (final n in shownNames)
+              Padding(
+                padding: const EdgeInsets.only(left: 28, bottom: 2),
+                child: Text(
+                  n,
+                  style: AppTypography.bodySm.copyWith(
+                    color: c.onSurfaceVariant,
+                  ),
+                ),
+              ),
+            if (txConflicts > 0)
+              Padding(
+                padding: const EdgeInsets.only(left: 28, bottom: 2),
+                child: Text(
+                  '$txConflicts transaction${txConflicts == 1 ? '' : 's'}',
+                  style: AppTypography.bodySm.copyWith(
+                    color: c.onSurfaceVariant,
+                  ),
+                ),
+              ),
+            if (hiddenNames > 0)
+              Padding(
+                padding: const EdgeInsets.only(left: 28, bottom: 2),
+                child: Text(
+                  'and $hiddenNames more',
+                  style: AppTypography.bodySm.copyWith(
+                    color: c.onSurfaceVariant,
+                  ),
+                ),
+              ),
+            const SizedBox(height: AppSpacing.md),
+            Label('For those, what should win?'),
+            const SizedBox(height: AppSpacing.sm),
+            Wrap(
+              spacing: AppSpacing.sm,
+              runSpacing: AppSpacing.sm,
+              children: [
+                AppChoiceChip(
+                  label: 'Keep what’s on my phone',
+                  selected: card.policy == ConflictPolicy.keepMine,
+                  onTap: () => card.onPolicy(ConflictPolicy.keepMine),
+                ),
+                AppChoiceChip(
+                  label: 'Use the file’s version',
+                  selected: card.policy == ConflictPolicy.useFile,
+                  onTap: () => card.onPolicy(ConflictPolicy.useFile),
+                ),
+              ],
+            ),
+            const SizedBox(height: AppSpacing.xs),
+            Text(
+              card.policy == ConflictPolicy.keepMine
+                  ? 'Your phone’s versions stay exactly as they are.'
+                  : 'The file’s versions replace yours. This can’t be undone.',
+              style: AppTypography.bodySm.copyWith(color: c.onSurfaceVariant),
+            ),
+          ],
+          if (card.preview.hasSettings) ...[
+            const SizedBox(height: AppSpacing.md),
+            ToggleRow(
+              title: 'Also restore my settings',
+              subtitle: card.preview.phoneHasData
+                  ? 'Replaces your name, colours, banner and alert choices with the file’s.'
+                  : 'Name, colours, banner and alert choices from the file.',
+              value: card.restoreSettings,
+              onChanged: card.onRestoreSettings,
+            ),
+          ],
+          if (decoded.warnings.isNotEmpty) ...[
+            const SizedBox(height: AppSpacing.sm),
+            Text(
+              '${decoded.warnings.length} small thing${decoded.warnings.length == 1 ? ' was' : 's were'} tidied while reading the file.',
+              style: AppTypography.bodySm.copyWith(color: c.onSurfaceVariant),
+            ),
+          ],
+          const SizedBox(height: AppSpacing.md),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              TextButton(
+                onPressed: card.busy ? null : card.onCancel,
+                child: const Text('Cancel'),
+              ),
+              const SizedBox(width: AppSpacing.sm),
+              FilledButton(
+                onPressed:
+                    card.busy || (plan.changesNothing && !card.restoreSettings)
+                    ? null
+                    : card.onImport,
+                child: Text(card.busy ? 'Importing…' : 'Import'),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  static String _date(DateTime d) {
+    const months = [
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
+    ];
+    return '${d.day} ${months[d.month - 1]} ${d.year}';
+  }
+}
+
+class _Line extends StatelessWidget {
+  const _Line({required this.icon, required this.color, required this.text});
+  final IconData icon;
+  final Color color;
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: AppSpacing.xs),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 20, color: color),
+          const SizedBox(width: AppSpacing.sm),
+          Expanded(
+            child: Text(
+              text,
+              style: AppTypography.bodySm.copyWith(color: c.onSurface),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -4736,99 +7060,6 @@ class Label extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Text(text, style: AppTypography.labelMd.copyWith(color: context.colors.onSurfaceVariant));
-  }
-}
-</file>
-
-<file path="lib/widgets/personalization/privayc_card.dart">
-import 'package:flutter/material.dart';
-import 'package:fuata/widgets/personalization/section_card.dart';
-import 'package:fuata/widgets/personalization/toggle_row.dart';
-
-import '../../domain/models/settings.dart';
-import '../../ui/theme/app_colors.dart';
-import '../../ui/theme/app_spacing.dart';
-import '../../ui/theme/app_typography.dart';
-import '../coming_soon_row.dart';
-
-class PrivacyCard extends StatelessWidget {
-  final AppSettings settings;
-  final void Function(AppSettings Function(AppSettings)) onChanged;
-  const PrivacyCard({super.key, required this.settings, required this.onChanged});
-
-  @override
-  Widget build(BuildContext context) {
-    final c = context.colors;
-    return SectionCard(
-      title: 'Privacy & data',
-      children: [
-        Container(
-          padding: const EdgeInsets.all(AppSpacing.md),
-          decoration: BoxDecoration(
-            color: c.statusSafeContainer,
-            borderRadius: BorderRadius.circular(AppSpacing.unitTileRadius),
-          ),
-          child: Row(
-            children: [
-              Icon(Icons.lock_outline_rounded, color: c.statusSafe),
-              const SizedBox(width: AppSpacing.sm),
-              Expanded(
-                child: Text(
-                  'Everything stays on this phone. No account, no server, no internet permission in the release build.',
-                  style: AppTypography.bodySm.copyWith(color: c.onSurface),
-                ),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: AppSpacing.md),
-        ToggleRow(
-          title: 'Hide amounts in Recents',
-          subtitle: 'Blurs amounts when the app switcher shows Fuata. Turns on the OS-level hook in a later issue.',
-          value: settings.amountsHiddenInRecents,
-          onChanged: (v) => onChanged((s) => s.copyWith(amountsHiddenInRecents: v)),
-        ),
-        const SizedBox(height: AppSpacing.sm),
-        ToggleRow(
-          title: 'Redact banner on lock screen',
-          subtitle: 'Hides amounts in the notification banner until the phone is unlocked.',
-          value: settings.redactedLockScreenBanner,
-          onChanged: (v) => onChanged((s) => s.copyWith(redactedLockScreenBanner: v)),
-        ),
-        const SizedBox(height: AppSpacing.md),
-        const ComingSoonRow(
-          icon: Icons.import_export_rounded,
-          title: 'Export / Import',
-          subtitle: 'Back up or move your data as a JSON file — coming in #24',
-        ),
-        const SizedBox(height: AppSpacing.sm),
-        ComingSoonRow(
-          icon: Icons.delete_outline_rounded,
-          title: 'Erase everything',
-          subtitle: 'Wipe all data from this phone — coming once export (#24) can back it up first',
-          onTap: () => _confirmEraseUnavailable(context),
-        ),
-      ],
-    );
-  }
-
-  void _confirmEraseUnavailable(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Not yet'),
-        content: const Text(
-          "Erasing everything isn't wired up yet, so there's no way to get your data back first. "
-              "It'll land once export/import (#24) does.",
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(),
-            child: const Text('Got it'),
-          ),
-        ],
-      ),
-    );
   }
 }
 </file>
@@ -7986,6 +10217,281 @@ done
 echo "Done."
 </file>
 
+<file path="test/data/db/backup_repository_test.dart">
+// Issue #24: export and import against a real (in-memory) database — the
+// round trip, "never overwrites silently", and all-or-nothing writes.
+//
+// Needs code generation first: dart run build_runner build
+
+import 'package:drift/native.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:fuata/data/db/app_database.dart';
+import 'package:fuata/data/db/backup_repository.dart';
+import 'package:fuata/data/db/drift_repositories.dart';
+import 'package:fuata/domain/logic/backup_codec.dart';
+import 'package:fuata/domain/logic/backup_import.dart';
+import 'package:fuata/domain/logic/backup_service.dart';
+import 'package:fuata/domain/models/backup_snapshot.dart';
+import 'package:fuata/domain/models/limit_alert.dart';
+import 'package:fuata/domain/models/settings.dart';
+
+import '../../domain/backup_test_data.dart';
+
+void main() {
+  late AppDatabase db;
+  late DriftBackupRepository repo;
+  late BackupService service;
+
+  setUp(() {
+    db = AppDatabase(NativeDatabase.memory());
+    repo = DriftBackupRepository(db);
+    service = BackupService(repo, clock: () => exportedAt);
+  });
+
+  tearDown(() => db.close());
+
+  /// Fill a database the way the app would, through its own repositories.
+  /// Fill a database the way the app would, through its own repositories.
+  Future<void> seed(AppDatabase target) async {
+    final snap = fullSnapshot();
+
+    // Categories don't have a repository yet, so we insert them directly.
+    for (final c in snap.categories) {
+      await target.into(target.categories).insert(
+        CategoriesCompanion.insert(
+          id: c.id,
+          name: c.name,
+          emoji: c.emoji,
+          colorValue: c.colorValue,
+        ),
+      );
+    }
+
+    final units = DriftUnitRepository(target);
+    for (final u in snap.units) {
+      await units.addUnit(u);
+    }
+    for (final s in snap.captureSources) {
+      await DriftCaptureSourceRepository(target).saveSource(s);
+    }
+    for (final t in snap.templates) {
+      await DriftTemplateRepository(target).saveTemplate(t);
+    }
+    final txs = DriftTransactionRepository(target);
+    for (final t in snap.transactions) {
+      await txs.addTransaction(t);
+    }
+    for (final l in snap.limits) {
+      await DriftLimitRepository(target).setLimit(l);
+    }
+    await DriftSettingsRepository(target).updateSettings(snap.settings!);
+  }
+
+  Future<String> exportOf(AppDatabase target) async =>
+      (await BackupService(DriftBackupRepository(target), clock: () => exportedAt)
+          .buildExport())
+          .json;
+
+  test('a fresh phone exports an empty, valid backup', () async {
+    final built = await service.buildExport();
+    final decoded = BackupCodec.decode(built.json);
+
+    expect(decoded.ok, isTrue);
+    expect(decoded.snapshot!.units, isEmpty);
+    expect(decoded.snapshot!.transactions, isEmpty);
+  });
+
+  test('export from one phone, import into another: identical data', () async {
+    await seed(db);
+    final json = await exportOf(db);
+
+    final other = AppDatabase(NativeDatabase.memory());
+    addTearDown(other.close);
+    final otherService = BackupService(
+      DriftBackupRepository(other),
+      clock: () => exportedAt,
+    );
+
+    final preview = await otherService.preview(json);
+    expect(preview.canImport, isTrue);
+    expect(preview.phoneHasData, isFalse);
+    expect(preview.plan!.hasConflicts, isFalse);
+
+    final outcome = await otherService.apply(
+      preview,
+      policy: ConflictPolicy.keepMine,
+      restoreSettings: true,
+    );
+
+    expect(outcome.added, fullSnapshot().recordCount);
+    expect(outcome.settingsRestored, isTrue);
+    // The strongest check: exporting the second phone gives the same file.
+    expect(await exportOf(other), json);
+  });
+
+  test('importing the same file again changes nothing', () async {
+    await seed(db);
+    final json = await exportOf(db);
+
+    final preview = await service.preview(json);
+
+    expect(preview.plan!.changesNothing, isTrue);
+    expect(preview.plan!.identicalCount, fullSnapshot().recordCount);
+    expect(preview.plan!.hasConflicts, isFalse);
+  });
+
+  test('a file with a problem is refused and nothing is written', () async {
+    final preview = await service.preview('definitely not a backup');
+
+    expect(preview.canImport, isFalse);
+    expect(preview.plan, isNull);
+    await expectLater(
+          () => service.apply(
+        preview,
+        policy: ConflictPolicy.useFile,
+        restoreSettings: true,
+      ),
+      throwsStateError,
+    );
+    expect((await repo.readAll()).units, isEmpty);
+  });
+
+  test('a transaction for a unit that exists nowhere is refused', () async {
+    final json = BackupCodec.encode(
+      BackupSnapshot(transactions: [tx('t1', unitId: 'ghost')]),
+      exportedAt: exportedAt,
+    );
+
+    final preview = await service.preview(json);
+
+    expect(preview.canImport, isFalse);
+    expect(preview.blockers.single, contains('money unit'));
+  });
+
+  group('never overwrites silently', () {
+    Future<String> fileWithUnitNamed(String name) async => BackupCodec.encode(
+      BackupSnapshot(units: [unit('u1', name: name)]),
+      exportedAt: exportedAt,
+    );
+
+    test('the phone\'s version is kept by default', () async {
+      await DriftUnitRepository(db).addUnit(unit('u1', name: 'Wallet'));
+
+      final preview = await service.preview(await fileWithUnitNamed('Cash'));
+      expect(preview.plan!.units.conflicts, hasLength(1));
+
+      final outcome = await service.apply(
+        preview,
+        policy: ConflictPolicy.keepMine,
+        restoreSettings: false,
+      );
+
+      expect((await repo.readAll()).units.single.name, 'Wallet');
+      expect(outcome.skipped, 1);
+      expect(outcome.replaced, 0);
+    });
+
+    test('the file\'s version replaces it only when asked', () async {
+      await DriftUnitRepository(db).addUnit(unit('u1', name: 'Wallet'));
+
+      final preview = await service.preview(await fileWithUnitNamed('Cash'));
+      final outcome = await service.apply(
+        preview,
+        policy: ConflictPolicy.useFile,
+        restoreSettings: false,
+      );
+
+      expect((await repo.readAll()).units.single.name, 'Cash');
+      expect(outcome.replaced, 1);
+    });
+
+    test('new records are added alongside the phone\'s own', () async {
+      await DriftUnitRepository(db).addUnit(unit('u1', name: 'Wallet'));
+      final json = BackupCodec.encode(
+        BackupSnapshot(units: [unit('u2', name: 'M-Pesa', sortOrder: 1)]),
+        exportedAt: exportedAt,
+      );
+
+      final preview = await service.preview(json);
+      await service.apply(
+        preview,
+        policy: ConflictPolicy.keepMine,
+        restoreSettings: false,
+      );
+
+      expect((await repo.readAll()).units.map((u) => u.name), ['Wallet', 'M-Pesa']);
+    });
+
+    test('settings are left alone unless restoring them is chosen', () async {
+      await DriftSettingsRepository(db)
+          .updateSettings(AppSettings.defaults.copyWith(name: 'Mine'));
+      final json = BackupCodec.encode(
+        BackupSnapshot(units: [unit('u1')], settings: customSettings()),
+        exportedAt: exportedAt,
+      );
+
+      final preview = await service.preview(json);
+      await service.apply(
+        preview,
+        policy: ConflictPolicy.keepMine,
+        restoreSettings: false,
+      );
+      expect((await repo.readAll()).settings!.name, 'Mine');
+
+      await service.apply(
+        preview,
+        policy: ConflictPolicy.keepMine,
+        restoreSettings: true,
+      );
+      expect((await repo.readAll()).settings!.name, 'Wanjiru');
+    });
+  });
+
+  test('a write that fails half-way leaves the database untouched', () async {
+    // Bypasses the planner on purpose: this is the repository's own
+    // guarantee. The unit is valid, the transaction after it points at a
+    // unit that does not exist, so the foreign key rejects it — and the
+    // unit written just before must not survive.
+    final bad = BackupSnapshot(
+      units: [unit('u1')],
+      transactions: [tx('t1', unitId: 'ghost')],
+    );
+
+    await expectLater(repo.apply(bad), throwsA(anything));
+
+    final after = await repo.readAll();
+    expect(after.units, isEmpty);
+    expect(after.transactions, isEmpty);
+  });
+
+  test('raising a limit on import clears the alerts shown for the old amount', () async {
+    final limits = DriftLimitRepository(db);
+    await DriftUnitRepository(db).addUnit(unit('u1'));
+    await limits.setLimit(overallDayLimit(amount: 100000));
+    final alerts = DriftAlertLogRepository(db);
+    final key = AlertKey(
+      overallDayLimit().id,
+      '2026-09-30',
+      AlertLevel.warning,
+    );
+    expect(await alerts.claim(key, DateTime.utc(2026, 9, 30)), isTrue);
+
+    final json = BackupCodec.encode(
+      BackupSnapshot(limits: [overallDayLimit(amount: 500000)]),
+      exportedAt: exportedAt,
+    );
+    final preview = await service.preview(json);
+    await service.apply(
+      preview,
+      policy: ConflictPolicy.useFile,
+      restoreSettings: false,
+    );
+
+    expect(await alerts.firedKeys(), isEmpty);
+  });
+}
+</file>
+
 <file path="test/data/db/capture_source_repository_test.dart">
 // Issue #22: the allow-list's storage. In-memory database, real repository.
 //
@@ -8392,6 +10898,582 @@ void main() {
     });
   });
 }
+</file>
+
+<file path="test/domain/backup_codec_test.dart">
+// Issue #24: the backup file format. Pure Dart, no database.
+
+import 'dart:convert';
+
+import 'package:flutter_test/flutter_test.dart';
+import 'package:fuata/domain/logic/backup_codec.dart';
+import 'package:fuata/domain/models/limit_rule.dart';
+import 'package:fuata/domain/models/settings.dart';
+
+import 'backup_test_data.dart';
+
+void main() {
+  String encodeFull({bool includeRawText = false}) => BackupCodec.encode(
+    fullSnapshot(),
+    exportedAt: exportedAt,
+    includeRawText: includeRawText,
+  );
+
+  /// Encode a valid file, let [mutate] break it, decode the result.
+  BackupDecodeResult decodeMutated(void Function(Map<String, dynamic> root) mutate) {
+    final root = jsonDecode(encodeFull()) as Map<String, dynamic>;
+    mutate(root);
+    return BackupCodec.decode(jsonEncode(root));
+  }
+
+  Map<String, dynamic> data(Map<String, dynamic> root) =>
+      root['data'] as Map<String, dynamic>;
+
+  group('round trip', () {
+    test('decode(encode(x)) re-encodes to exactly the same file', () {
+      final first = encodeFull();
+      final decoded = BackupCodec.decode(first);
+
+      expect(decoded.errors, isEmpty);
+      expect(decoded.ok, isTrue);
+      expect(decoded.warnings, isEmpty);
+      final again = BackupCodec.encode(decoded.snapshot!, exportedAt: exportedAt);
+      expect(again, first);
+    });
+
+    test('every table survives with its values', () {
+      final s = BackupCodec.decode(encodeFull()).snapshot!;
+
+      expect(s.units.map((u) => u.name), ['Cash', 'M-Pesa']);
+      expect(s.units.first.color.toARGB32(), 0xFF2E9E6B);
+      expect(s.transactions, hasLength(2));
+      expect(s.transactions.last.amountMinor, 120000);
+      expect(s.templates.single.fieldMap.keys, ['amount']);
+      expect(s.limits.map((l) => l.period), [LimitPeriod.day, LimitPeriod.week]);
+      expect(s.limits.last.warnAt, 0.6);
+      expect(s.categories.single.name, 'Food');
+      expect(s.settings!.name, 'Wanjiru');
+      expect(s.settings!.themeMode, AppThemeMode.dark);
+      expect(s.settings!.homeSections, {HomeSection.units});
+      expect(s.settings!.bannerUnitIds, {'u1'});
+    });
+
+    test('exportedAt is read back', () {
+      expect(BackupCodec.decode(encodeFull()).exportedAt, exportedAt);
+    });
+  });
+
+  group('original message text (ADR-009)', () {
+    test('left out by default', () {
+      final json = encodeFull();
+      expect(json, isNot(contains('secret message')));
+      final decoded = BackupCodec.decode(json);
+      expect(decoded.snapshot!.transactions.first.rawText, isNull);
+      expect(decoded.includesRawText, isFalse);
+    });
+
+    test('included only when asked for', () {
+      final decoded = BackupCodec.decode(encodeFull(includeRawText: true));
+      expect(decoded.snapshot!.transactions.first.rawText, 'secret message');
+      expect(decoded.includesRawText, isTrue);
+    });
+  });
+
+  group('refuses files it cannot trust', () {
+    test('not JSON', () {
+      final r = BackupCodec.decode('this is not json {');
+      expect(r.ok, isFalse);
+      expect(r.snapshot, isNull);
+      expect(r.errors.single, contains('JSON'));
+    });
+
+    test('JSON that is not a Fuata backup', () {
+      expect(BackupCodec.decode('[1,2,3]').ok, isFalse);
+      expect(BackupCodec.decode('{"format":"something-else"}').ok, isFalse);
+    });
+
+    test('a newer format version asks the person to update', () {
+      final r = decodeMutated((root) => root['formatVersion'] = 99);
+      expect(r.ok, isFalse);
+      expect(r.errors.single, contains('newer version'));
+    });
+
+    test('a missing or invalid version', () {
+      expect(decodeMutated((root) => root.remove('formatVersion')).ok, isFalse);
+      expect(decodeMutated((root) => root['formatVersion'] = 0).ok, isFalse);
+      expect(decodeMutated((root) => root['formatVersion'] = '1').ok, isFalse);
+    });
+
+    test('no data section', () {
+      expect(decodeMutated((root) => root.remove('data')).ok, isFalse);
+    });
+
+    test('a missing required field names where', () {
+      final r = decodeMutated(
+            (root) => (data(root)['units'] as List).first.remove('createdAt'),
+      );
+      expect(r.ok, isFalse);
+      expect(r.errors.single, contains('units[0].createdAt'));
+    });
+
+    test('an unknown enum value names where', () {
+      final r = decodeMutated(
+            (root) => (data(root)['transactions'] as List).first['type'] = 'bogus',
+      );
+      expect(r.ok, isFalse);
+      expect(r.errors.single, contains('transactions[0].type'));
+    });
+
+    test('a money amount that is not a whole number', () {
+      final r = decodeMutated(
+            (root) => (data(root)['transactions'] as List).first['amountMinor'] = 12.5,
+      );
+      expect(r.ok, isFalse);
+      expect(r.errors.single, contains('amountMinor'));
+    });
+
+    test('an unreadable date', () {
+      final r = decodeMutated(
+            (root) => (data(root)['transactions'] as List).first['occurredAt'] = 'yesterday',
+      );
+      expect(r.ok, isFalse);
+      expect(r.errors.single, contains('occurredAt'));
+    });
+
+    test('the same id twice in one table', () {
+      final r = decodeMutated((root) {
+        final txs = data(root)['transactions'] as List;
+        txs.add(Map<String, dynamic>.from(txs.first as Map));
+      });
+      expect(r.ok, isFalse);
+      expect(r.errors.single, contains('more than once'));
+    });
+
+    test('a table that is not a list', () {
+      final r = decodeMutated((root) => data(root)['units'] = {'a': 1});
+      expect(r.ok, isFalse);
+    });
+
+    test('a message pattern that is not a valid regex', () {
+      final r = decodeMutated(
+            (root) => (data(root)['templates'] as List).first['pattern'] = '(unclosed',
+      );
+      expect(r.ok, isFalse);
+      expect(r.errors.single, contains('pattern'));
+    });
+
+    test('limit alert levels out of order', () {
+      final r = decodeMutated((root) {
+        final limit = (data(root)['limits'] as List).first as Map;
+        limit['warnAt'] = 0.95;
+        limit['dangerAt'] = 0.9;
+      });
+      expect(r.ok, isFalse);
+    });
+
+    test('a per-unit limit with no unit', () {
+      final r = decodeMutated(
+            (root) => (data(root)['limits'] as List).last['unitId'] = null,
+      );
+      expect(r.ok, isFalse);
+    });
+
+    test('one bad record rejects the whole file', () {
+      final r = decodeMutated((root) {
+        (data(root)['transactions'] as List).last['type'] = 'bogus';
+      });
+      expect(r.snapshot, isNull);
+    });
+
+    test('lists at most 40 problems and counts the rest', () {
+      final r = decodeMutated((root) {
+        final proto = Map<String, dynamic>.from(
+          (data(root)['transactions'] as List).first as Map,
+        )..remove('unitId');
+        data(root)['transactions'] = [
+          for (var i = 0; i < 100; i++) {...proto, 'id': 'bad$i'},
+        ];
+      });
+      expect(r.ok, isFalse);
+      expect(r.errors, hasLength(40));
+      expect(r.moreErrors, 60);
+    });
+  });
+
+  group('tidies without rejecting', () {
+    test('a limit id that does not match its scope and period is normalised', () {
+      final r = decodeMutated(
+            (root) => (data(root)['limits'] as List).first['id'] = 'my-own-id',
+      );
+      expect(r.ok, isTrue);
+      expect(r.snapshot!.limits.first.id, 'l_overall_day');
+      expect(r.warnings, isNotEmpty);
+    });
+
+    test('an overall limit that names a unit ignores the unit', () {
+      final r = decodeMutated(
+            (root) => (data(root)['limits'] as List).first['unitId'] = 'u1',
+      );
+      expect(r.ok, isTrue);
+      expect(r.snapshot!.limits.first.unitId, isNull);
+      expect(r.warnings, isNotEmpty);
+    });
+
+    test('an app id is derived from its package name', () {
+      final r = decodeMutated(
+            (root) => (data(root)['captureSources'] as List).first['id'] = 'whatever',
+      );
+      expect(r.ok, isTrue);
+      expect(r.snapshot!.captureSources.single.id, 'src_com.example.messages');
+    });
+
+    test('unknown extra keys are ignored', () {
+      final r = decodeMutated((root) {
+        root['somethingNew'] = true;
+        (data(root)['units'] as List).first['futureField'] = 42;
+      });
+      expect(r.ok, isTrue);
+    });
+
+    test('a missing table is an empty table', () {
+      final r = decodeMutated((root) => data(root).remove('limits'));
+      expect(r.ok, isTrue);
+      expect(r.snapshot!.limits, isEmpty);
+    });
+  });
+
+  group('settings are forgiving', () {
+    test('an unknown value keeps the default and warns', () {
+      final r = decodeMutated(
+            (root) => (data(root)['settings'] as Map)['themeMode'] = 'neon',
+      );
+      expect(r.ok, isTrue);
+      expect(r.snapshot!.settings!.themeMode, AppSettings.defaults.themeMode);
+      expect(r.warnings.single, contains('themeMode'));
+    });
+
+    test('a wrong-typed toggle keeps the default and warns', () {
+      final r = decodeMutated(
+            (root) => (data(root)['settings'] as Map)['bannerEnabled'] = 'yes',
+      );
+      expect(r.ok, isTrue);
+      expect(r.snapshot!.settings!.bannerEnabled, AppSettings.defaults.bannerEnabled);
+    });
+
+    test('no settings section means null settings', () {
+      final r = decodeMutated((root) => data(root).remove('settings'));
+      expect(r.ok, isTrue);
+      expect(r.snapshot!.settings, isNull);
+    });
+  });
+}
+</file>
+
+<file path="test/domain/backup_import_test.dart">
+// Issue #24: deciding what an import would do. Pure Dart.
+
+import 'package:flutter_test/flutter_test.dart';
+import 'package:fuata/domain/logic/backup_import.dart';
+import 'package:fuata/domain/models/backup_snapshot.dart';
+import 'package:fuata/domain/models/transaction.dart';
+
+import 'backup_test_data.dart';
+
+void main() {
+  ImportPlan plan(BackupSnapshot incoming, [BackupSnapshot? existing]) =>
+      ImportPlanner.plan(
+        incoming: incoming,
+        existing: existing ?? BackupSnapshot.empty,
+      );
+
+  test('into an empty phone, everything is new', () {
+    final p = plan(fullSnapshot());
+
+    expect(p.canApply, isTrue);
+    expect(p.units.added, hasLength(2));
+    expect(p.transactions.added, hasLength(2));
+    expect(p.templates.added, hasLength(1));
+    expect(p.limits.added, hasLength(2));
+    expect(p.categories.added, hasLength(1));
+    expect(p.captureSources.added, hasLength(1));
+    expect(p.hasConflicts, isFalse);
+    expect(p.identicalCount, 0);
+    expect(p.addedCount, fullSnapshot().recordCount);
+  });
+
+  test('importing what is already here changes nothing', () {
+    final p = plan(fullSnapshot(), fullSnapshot());
+
+    expect(p.addedCount, 0);
+    expect(p.conflictCount, 0);
+    expect(p.identicalCount, fullSnapshot().recordCount);
+    expect(p.changesNothing, isTrue);
+  });
+
+  test('same id, different content is a conflict — not added, not identical', () {
+    final incoming = BackupSnapshot(units: [unit('u1', name: 'Wallet')]);
+    final existing = BackupSnapshot(units: [unit('u1', name: 'Cash')]);
+
+    final p = plan(incoming, existing);
+
+    expect(p.units.added, isEmpty);
+    expect(p.units.conflicts, hasLength(1));
+    expect(p.units.conflicts.single.existing.name, 'Cash');
+    expect(p.units.conflicts.single.incoming.name, 'Wallet');
+    expect(p.conflictCount, 1);
+    expect(p.changesNothing, isFalse);
+  });
+
+  group('recordsToWrite', () {
+    final incoming = BackupSnapshot(
+      units: [unit('u1', name: 'Wallet'), unit('u2', name: 'New one')],
+    );
+    final existing = BackupSnapshot(units: [unit('u1', name: 'Cash')]);
+
+    test('keepMine writes only the new records', () {
+      final w = plan(incoming, existing).recordsToWrite(ConflictPolicy.keepMine);
+      expect(w.units.map((u) => u.id), ['u2']);
+    });
+
+    test('useFile also writes the file\'s side of each conflict', () {
+      final w = plan(incoming, existing).recordsToWrite(ConflictPolicy.useFile);
+      expect(w.units.map((u) => u.id).toSet(), {'u1', 'u2'});
+      expect(w.units.firstWhere((u) => u.id == 'u1').name, 'Wallet');
+    });
+
+    test('never includes settings', () {
+      final w = plan(fullSnapshot()).recordsToWrite(ConflictPolicy.useFile);
+      expect(w.settings, isNull);
+    });
+  });
+
+  group('original message text', () {
+    test('a file without it is not "different" from a phone that kept it', () {
+      final existing = BackupSnapshot(
+        units: [unit('u1')],
+        transactions: [tx('t1', raw: 'kept in full')],
+      );
+      final incoming = BackupSnapshot(
+        units: [unit('u1')],
+        transactions: [tx('t1')],
+      );
+
+      final p = plan(incoming, existing);
+
+      expect(p.transactions.conflicts, isEmpty);
+      expect(p.transactions.identicalCount, 1);
+    });
+
+    test('replacing a transaction keeps the text the phone already had', () {
+      final existing = BackupSnapshot(
+        units: [unit('u1')],
+        transactions: [tx('t1', raw: 'kept in full')],
+      );
+      final incoming = BackupSnapshot(
+        units: [unit('u1')],
+        transactions: [tx('t1', amount: -99900)],
+      );
+
+      final p = plan(incoming, existing);
+      final written = p.recordsToWrite(ConflictPolicy.useFile).transactions.single;
+
+      expect(p.transactions.conflicts, hasLength(1));
+      expect(written.amountMinor, -99900);
+      expect(written.rawText, 'kept in full');
+    });
+  });
+
+  group('references', () {
+    test('a transaction for a unit found nowhere blocks the import', () {
+      final p = plan(BackupSnapshot(transactions: [tx('t1', unitId: 'ghost')]));
+
+      expect(p.canApply, isFalse);
+      expect(p.problems.single, contains('money unit'));
+    });
+
+    test('...but a unit already on the phone satisfies it (partial backup)', () {
+      final p = plan(
+        BackupSnapshot(transactions: [tx('t1', unitId: 'u1')]),
+        BackupSnapshot(units: [unit('u1')]),
+      );
+      expect(p.canApply, isTrue);
+    });
+
+    test('a unit in the same file satisfies it', () {
+      final p = plan(
+        BackupSnapshot(units: [unit('u1')], transactions: [tx('t1')]),
+      );
+      expect(p.canApply, isTrue);
+    });
+
+    test('a rule pointing at a missing app blocks the import', () {
+      final p = plan(
+        BackupSnapshot(units: [unit('u1')], templates: [template()]),
+      );
+      expect(p.canApply, isFalse);
+      expect(p.problems.single, contains('app'));
+    });
+
+    test('a per-unit limit for a missing unit blocks the import', () {
+      final p = plan(BackupSnapshot(limits: [unitWeekLimit('ghost')]));
+      expect(p.canApply, isFalse);
+    });
+
+    test('a transaction pointing at a missing category blocks the import', () {
+      final withCategory = MoneyTransaction(
+        id: 't1',
+        unitId: 'u1',
+        type: TxType.spent,
+        amountMinor: -100,
+        categoryId: 'nope',
+        occurredAt: DateTime.utc(2026, 9, 20),
+        createdAt: DateTime.utc(2026, 9, 20),
+      );
+      final p = plan(
+        BackupSnapshot(units: [unit('u1')], transactions: [withCategory]),
+      );
+
+      expect(p.canApply, isFalse);
+      expect(p.problems.single, contains('category'));
+    });
+
+    test('lists at most 20 problems and counts the rest', () {
+      final p = plan(
+        BackupSnapshot(
+          transactions: [for (var i = 0; i < 50; i++) tx('t$i', unitId: 'ghost')],
+        ),
+      );
+      expect(p.problems, hasLength(20));
+      expect(p.moreProblems, 30);
+    });
+  });
+
+  test('carries the file\'s settings without applying them', () {
+    final p = plan(fullSnapshot());
+    expect(p.incomingSettings!.name, 'Wanjiru');
+  });
+}
+</file>
+
+<file path="test/domain/backup_test_data.dart">
+// Shared fixtures for the #24 backup tests (not a test file itself).
+
+import 'package:flutter/material.dart';
+import 'package:fuata/domain/models/backup_snapshot.dart';
+import 'package:fuata/domain/models/capture_source.dart';
+import 'package:fuata/domain/models/limit_rule.dart';
+import 'package:fuata/domain/models/settings.dart';
+import 'package:fuata/domain/models/template.dart';
+import 'package:fuata/domain/models/transaction.dart';
+import 'package:fuata/domain/models/unit.dart';
+
+final exportedAt = DateTime.utc(2026, 9, 30, 9, 12);
+
+MoneyUnit unit(
+    String id, {
+      String name = 'Cash',
+      int sortOrder = 0,
+      int opening = 0,
+    }) =>
+    MoneyUnit(
+      id: id,
+      name: name,
+      kind: UnitKind.cash,
+      currencyCode: 'KES',
+      iconEmoji: '💵',
+      color: const Color(0xFF2E9E6B),
+      openingBalanceMinor: opening,
+      sortOrder: sortOrder,
+      createdAt: DateTime.utc(2026, 9, 1),
+    );
+
+MoneyTransaction tx(
+    String id, {
+      String unitId = 'u1',
+      int amount = -35000,
+      String? who = 'Naivas',
+      String? raw,
+      int minute = 0,
+    }) =>
+    MoneyTransaction(
+      id: id,
+      unitId: unitId,
+      type: amount < 0 ? TxType.spent : TxType.got,
+      amountMinor: amount,
+      counterparty: who,
+      occurredAt: DateTime.utc(2026, 9, 20, 8, minute),
+      createdAt: DateTime.utc(2026, 9, 20, 8, minute),
+      rawText: raw,
+    );
+
+CaptureSource source() => CaptureSource(
+  id: CaptureSource.idFor('com.example.messages'),
+  packageName: 'com.example.messages',
+  displayName: 'Messages',
+);
+
+CaptureTemplate template({String unitId = 'u1'}) =>
+    CaptureTemplate.fromLabeledSample(
+      id: 't1',
+      unitId: unitId,
+      captureSourceId: CaptureSource.idFor('com.example.messages'),
+      name: 'paid',
+      direction: TemplateDirection.spent,
+      sampleText: 'Paid Ksh350.00',
+      labels: const [
+        LabeledSpan(start: 5, end: 14, type: TemplateFieldType.amount),
+      ],
+    );
+
+LimitRule overallDayLimit({int amount = 100000}) => LimitRule(
+  id: LimitRule.idFor(LimitScope.overall, LimitPeriod.day),
+  scope: LimitScope.overall,
+  period: LimitPeriod.day,
+  amountMinor: amount,
+  currencyCode: 'KES',
+);
+
+LimitRule unitWeekLimit(String unitId) => LimitRule(
+  id: LimitRule.idFor(LimitScope.unit, LimitPeriod.week, unitId),
+  scope: LimitScope.unit,
+  unitId: unitId,
+  period: LimitPeriod.week,
+  amountMinor: 500000,
+  currencyCode: 'KES',
+  warnAt: 0.6,
+  dangerAt: 0.85,
+);
+
+AppSettings customSettings() => AppSettings.defaults.copyWith(
+  name: 'Wanjiru',
+  accent: AppAccents.coral,
+  themeMode: AppThemeMode.dark,
+  homeSections: {HomeSection.units},
+  bannerEnabled: true,
+  bannerUnitIds: {'u1'},
+  quietHoursEnabled: true,
+);
+
+/// A snapshot exercising every table.
+BackupSnapshot fullSnapshot({bool withSettings = true}) => BackupSnapshot(
+  categories: const [
+    BackupCategory(
+      id: 'c1',
+      name: 'Food',
+      emoji: '🍲',
+      colorValue: 0xFFE07A5F,
+    ),
+  ],
+  units: [unit('u1'), unit('u2', name: 'M-Pesa', sortOrder: 1)],
+  captureSources: [source()],
+  templates: [template()],
+  transactions: [
+    tx('t1', raw: 'secret message', minute: 1),
+    tx('t2', amount: 120000, who: 'Employer', minute: 2),
+  ],
+  limits: [overallDayLimit(), unitWeekLimit('u2')],
+  settings: withSettings ? customSettings() : null,
+);
 </file>
 
 <file path="test/domain/banner_content_test.dart">
@@ -9912,17 +12994,6 @@ Hero status ring card · Unit card · Transaction row · Transaction bottom shee
 7. A short note on the visual direction (2-3 sentences) so it can be kept consistent later.
 </file>
 
-<file path="lib/data/constants/method_channels_constants.dart">
-const String shareIntakeMethodName = 'fuata/share_intake';
-
-// Issue #22. `capture` is the UI isolate <-> native channel (allow-list,
-// notification-access status, installed apps, "captures changed" ping);
-// `capture_bg` is the background isolate <-> native channel the listener
-// service uses to hand a notification to Dart.
-const String captureMethodName = 'fuata/capture';
-const String captureBackgroundMethodName = 'fuata/capture_bg';
-</file>
-
 <file path="lib/data/db/app_database.dart">
 // ---------------------------------------------------------------------------
 // The database itself: one file on disk, opened lazily, with foreign keys
@@ -10725,84 +13796,6 @@ class CaptureTemplate {
     }
   }
 
-}
-</file>
-
-<file path="lib/domain/models/transaction.dart">
-enum TxType { spent, got, moved, adjustment }
-
-enum TxSource { manual, shared, notification }
-
-enum TxStatus { confirmed, pending }
-
-/// A single ledger entry. amountMinor is the SIGNED effect on the unit's
-/// balance (outflows negative) — see design.md ADR-004/ADR-005.
-/// Transfers are two rows sharing transferGroupId; fees are a separate
-/// `spent` row with parentId pointing at the transaction they belong to.
-class MoneyTransaction {
-  final String id;
-  final String unitId;
-  final TxType type;
-  final int amountMinor;
-  final String? counterparty;
-  final String? categoryId;
-  final String? note;
-  final String? code;
-  final DateTime occurredAt;
-  final DateTime createdAt;
-  final TxSource source;
-  final TxStatus status;
-  final String? transferGroupId;
-  final String? parentId;
-  final String? templateId;
-  final int? balanceAfterMinor;
-  final String? rawText; // null by default (privacy) — see ADR-009
-
-  const MoneyTransaction({
-    required this.id,
-    required this.unitId,
-    required this.type,
-    required this.amountMinor,
-    required this.occurredAt,
-    required this.createdAt,
-    this.counterparty,
-    this.categoryId,
-    this.note,
-    this.code,
-    this.source = TxSource.manual,
-    this.status = TxStatus.confirmed,
-    this.transferGroupId,
-    this.parentId,
-    this.templateId,
-    this.balanceAfterMinor,
-    this.rawText,
-  });
-
-  bool get isConfirmed => status == TxStatus.confirmed;
-  bool get countsAsSpending => type == TxType.spent && isConfirmed;
-  bool get countsAsIncome => type == TxType.got && isConfirmed;
-
-  MoneyTransaction copyWith({TxStatus? status}) {
-    return MoneyTransaction(
-      id: id,
-      unitId: unitId,
-      type: type,
-      amountMinor: amountMinor,
-      counterparty: counterparty,
-      categoryId: categoryId,
-      note: note,
-      code: code,
-      occurredAt: occurredAt,
-      createdAt: createdAt,
-      source: source,
-      status: status ?? this.status,
-      transferGroupId: transferGroupId,
-      parentId: parentId,
-      templateId: templateId,
-      balanceAfterMinor: balanceAfterMinor,
-      rawText: rawText,
-    );
-  }
 }
 </file>
 
@@ -12775,6 +15768,112 @@ class ActionRow extends StatelessWidget {
 }
 </file>
 
+<file path="lib/widgets/personalization/privayc_card.dart">
+import 'package:flutter/material.dart';
+import 'package:fuata/widgets/personalization/section_card.dart';
+import 'package:fuata/widgets/personalization/toggle_row.dart';
+
+import '../../domain/models/settings.dart';
+import '../../ui/theme/app_colors.dart';
+import '../../ui/theme/app_spacing.dart';
+import '../../ui/theme/app_typography.dart';
+import '../coming_soon_row.dart';
+import 'action_row.dart';
+
+class PrivacyCard extends StatelessWidget {
+  final AppSettings settings;
+  final void Function(AppSettings Function(AppSettings)) onChanged;
+
+  /// Opens Back up & restore (#24). A callback rather than a route so this
+  /// widget stays free of screen imports, like the rest of lib/widgets.
+  final VoidCallback onOpenBackup;
+  const PrivacyCard({
+    super.key,
+    required this.settings,
+    required this.onChanged,
+    required this.onOpenBackup,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    return SectionCard(
+      title: 'Privacy & data',
+      children: [
+        Container(
+          padding: const EdgeInsets.all(AppSpacing.md),
+          decoration: BoxDecoration(
+            color: c.statusSafeContainer,
+            borderRadius: BorderRadius.circular(AppSpacing.unitTileRadius),
+          ),
+          child: Row(
+            children: [
+              Icon(Icons.lock_outline_rounded, color: c.statusSafe),
+              const SizedBox(width: AppSpacing.sm),
+              Expanded(
+                child: Text(
+                  'Everything stays on this phone. No account, no server, no internet permission in the release build.',
+                  style: AppTypography.bodySm.copyWith(color: c.onSurface),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: AppSpacing.md),
+        ToggleRow(
+          title: 'Hide amounts in Recents',
+          subtitle: 'Blurs amounts when the app switcher shows Fuata. Turns on the OS-level hook in a later issue.',
+          value: settings.amountsHiddenInRecents,
+          onChanged: (v) =>
+              onChanged((s) => s.copyWith(amountsHiddenInRecents: v)),
+        ),
+        const SizedBox(height: AppSpacing.sm),
+        ToggleRow(
+          title: 'Redact banner on lock screen',
+          subtitle: 'Hides amounts in the notification banner until the phone is unlocked.',
+          value: settings.redactedLockScreenBanner,
+          onChanged: (v) =>
+              onChanged((s) => s.copyWith(redactedLockScreenBanner: v)),
+        ),
+        const SizedBox(height: AppSpacing.md),
+        ActionRow(
+          icon: Icons.import_export_rounded,
+          title: 'Back up & restore',
+          subtitle: 'Save your data as a file, or bring it back from one',
+          onTap: onOpenBackup,
+        ),
+        const SizedBox(height: AppSpacing.sm),
+        ComingSoonRow(
+          icon: Icons.delete_outline_rounded,
+          title: 'Erase everything',
+          subtitle: 'Wipe all data from this phone — coming soon. Save a backup first.',
+          onTap: () => _confirmEraseUnavailable(context),
+        ),
+      ],
+    );
+  }
+
+  void _confirmEraseUnavailable(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Not yet'),
+        content: const Text(
+          "Erasing everything isn't wired up yet. When it is, it will ask you to "
+          "save a backup first (Back up & restore) — you can do that any time.",
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('Got it'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+</file>
+
 <file path="lib/widgets/sheets/edit_limit_sheet.dart">
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -14092,6 +17191,22 @@ did not build (both need a domain-model addition, so are out of scope for #20):
     #15/#16 shipped the minimum for the banner: one overall limit per period. This finishes ui-design-brief.md 7.8 and US-06: per-unit limits under "More", alert-level sliders, quiet hours, a live banner preview, and alert notifications that actually fire (once per threshold per period, on the separate alert channel, from both isolates).
 </file>
 
+<file path="lib/data/constants/method_channels_constants.dart">
+const String shareIntakeMethodName = 'fuata/share_intake';
+
+// Issue #22. `capture` is the UI isolate <-> native channel (allow-list,
+// notification-access status, installed apps, "captures changed" ping);
+// `capture_bg` is the background isolate <-> native channel the listener
+// service uses to hand a notification to Dart.
+const String captureMethodName = 'fuata/capture';
+const String captureBackgroundMethodName = 'fuata/capture_bg';
+
+// Issue #24. Save / open a backup file through Android's system file
+// picker (Storage Access Framework): no storage permission, and the
+// person chooses the location (US-15).
+const String backupFilesMethodName = 'fuata/backup_files';
+</file>
+
 <file path="lib/domain/models/limit_rule.dart">
 enum LimitScope { overall, unit }
 
@@ -14186,6 +17301,84 @@ class LimitRule {
       warnAt: warnAt ?? this.warnAt,
       dangerAt: dangerAt ?? this.dangerAt,
       enabled: enabled ?? this.enabled,
+    );
+  }
+}
+</file>
+
+<file path="lib/domain/models/transaction.dart">
+enum TxType { spent, got, moved, adjustment }
+
+enum TxSource { manual, shared, notification }
+
+enum TxStatus { confirmed, pending }
+
+/// A single ledger entry. amountMinor is the SIGNED effect on the unit's
+/// balance (outflows negative) — see design.md ADR-004/ADR-005.
+/// Transfers are two rows sharing transferGroupId; fees are a separate
+/// `spent` row with parentId pointing at the transaction they belong to.
+class MoneyTransaction {
+  final String id;
+  final String unitId;
+  final TxType type;
+  final int amountMinor;
+  final String? counterparty;
+  final String? categoryId;
+  final String? note;
+  final String? code;
+  final DateTime occurredAt;
+  final DateTime createdAt;
+  final TxSource source;
+  final TxStatus status;
+  final String? transferGroupId;
+  final String? parentId;
+  final String? templateId;
+  final int? balanceAfterMinor;
+  final String? rawText; // null by default (privacy) — see ADR-009
+
+  const MoneyTransaction({
+    required this.id,
+    required this.unitId,
+    required this.type,
+    required this.amountMinor,
+    required this.occurredAt,
+    required this.createdAt,
+    this.counterparty,
+    this.categoryId,
+    this.note,
+    this.code,
+    this.source = TxSource.manual,
+    this.status = TxStatus.confirmed,
+    this.transferGroupId,
+    this.parentId,
+    this.templateId,
+    this.balanceAfterMinor,
+    this.rawText,
+  });
+
+  bool get isConfirmed => status == TxStatus.confirmed;
+  bool get countsAsSpending => type == TxType.spent && isConfirmed;
+  bool get countsAsIncome => type == TxType.got && isConfirmed;
+
+  MoneyTransaction copyWith({TxStatus? status, String? rawText}) {
+    return MoneyTransaction(
+      id: id,
+      unitId: unitId,
+      type: type,
+      amountMinor: amountMinor,
+      counterparty: counterparty,
+      categoryId: categoryId,
+      note: note,
+      code: code,
+      occurredAt: occurredAt,
+      createdAt: createdAt,
+      source: source,
+      status: status ?? this.status,
+      transferGroupId: transferGroupId,
+      parentId: parentId,
+      templateId: templateId,
+      balanceAfterMinor: balanceAfterMinor,
+      rawText: rawText ?? this.rawText,
     );
   }
 }
@@ -14625,53 +17818,6 @@ class AppTheme {
       ),
     );
   }
-}
-</file>
-
-<file path="android/app/src/main/kotlin/com/kinyuanexus/fuata/fuata/MainActivity.kt">
-package com.kinyuanexus.fuata.fuata
-
-import android.content.Intent
-import io.flutter.embedding.android.FlutterActivity
-import io.flutter.embedding.engine.FlutterEngine
-
-/**
- * Hosts the UI engine and wires its native channels:
- *  - `fuata/share_intake` (issue #21): text shared in from other apps.
- *  - `fuata/capture` (issue #22): notification-access status, the
- *    allow-list mirror, the installed-apps picker, and the "captures
- *    changed" ping. Replaces the #18 spike's `fuata/listener_spike`.
- */
-class MainActivity : FlutterActivity() {
-    private var shareIntake: ShareIntakeChannel? = null
-    private var captureChannel: CaptureChannel? = null
-
-    override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
-        super.configureFlutterEngine(flutterEngine)
-
-        captureChannel = CaptureChannel(
-            applicationContext,
-            flutterEngine.dartExecutor.binaryMessenger,
-        )
-
-        shareIntake = ShareIntakeChannel(flutterEngine.dartExecutor.binaryMessenger)
-
-        // The intent that started (or restarted) this activity may be a
-        // share; route it now that the channel exists.
-        shareIntake?.handleShareIntent(intent)
-    }
-
-    override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
-        captureChannel?.dispose()
-        captureChannel = null
-        super.cleanUpFlutterEngine(flutterEngine)
-    }
-
-    override fun onNewIntent(intent: Intent) {
-        super.onNewIntent(intent)
-        // singleTop: shares into a running activity arrive here.
-        shareIntake?.handleShareIntent(intent)
-    }
 }
 </file>
 
@@ -16016,6 +19162,70 @@ Flutter (Android), Riverpod, drift/SQLite, local notifications. No backend.
 - Allows users to label parts of receiving messages. Labelled messages take key labels : code, amount, payee, date, balance and fee. Rest of the string past the last label is completely ignored. In future updates, allow users to choose whether to ignore or strictly match all strings.
 </file>
 
+<file path="android/app/src/main/kotlin/com/kinyuanexus/fuata/fuata/MainActivity.kt">
+package com.kinyuanexus.fuata.fuata
+
+import android.content.Intent
+import io.flutter.embedding.android.FlutterActivity
+import io.flutter.embedding.engine.FlutterEngine
+
+/**
+ * Hosts the UI engine and wires its native channels:
+ *  - `fuata/share_intake` (issue #21): text shared in from other apps.
+ *  - `fuata/capture` (issue #22): notification-access status, the
+ *    allow-list mirror, the installed-apps picker, and the "captures
+ *    changed" ping. Replaces the #18 spike's `fuata/listener_spike`.
+ *  - `fuata/backup_files` (issue #24): save / open a JSON backup through
+ *    the system file picker.
+ */
+class MainActivity : FlutterActivity() {
+    private var shareIntake: ShareIntakeChannel? = null
+    private var captureChannel: CaptureChannel? = null
+    private var backupFiles: BackupFilesChannel? = null
+
+    override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
+        super.configureFlutterEngine(flutterEngine)
+
+        captureChannel = CaptureChannel(
+            applicationContext,
+            flutterEngine.dartExecutor.binaryMessenger,
+        )
+
+        shareIntake = ShareIntakeChannel(flutterEngine.dartExecutor.binaryMessenger)
+
+        backupFiles = BackupFilesChannel(
+            this,
+            flutterEngine.dartExecutor.binaryMessenger,
+        )
+
+        // The intent that started (or restarted) this activity may be a
+        // share; route it now that the channel exists.
+        shareIntake?.handleShareIntent(intent)
+    }
+
+    override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
+        captureChannel?.dispose()
+        captureChannel = null
+        backupFiles?.dispose()
+        backupFiles = null
+        super.cleanUpFlutterEngine(flutterEngine)
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        // Our picker results are consumed here; everything else (plugins)
+        // goes on to Flutter's own handling.
+        if (backupFiles?.handleActivityResult(requestCode, resultCode, data) == true) return
+        super.onActivityResult(requestCode, resultCode, data)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        // singleTop: shares into a running activity arrive here.
+        shareIntake?.handleShareIntent(intent)
+    }
+}
+</file>
+
 <file path="android/app/src/main/AndroidManifest.xml">
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <!-- Issue #16: Android 13+ needs explicit permission to post the
@@ -16187,6 +19397,39 @@ flutter test --coverage    # optional
 | S-18 | Average per day | Counts today; 1 day on a Monday |
 | S-19 | Friendly money | ".00" dropped, real cents kept |
 
+### Backup and restore (US-15) — issue #24
+
+Files: `test/domain/backup_codec_test.dart`, `backup_import_test.dart`, `test/data/db/backup_repository_test.dart`.
+
+| ID | Case | Expected |
+|---|---|---|
+| BK-01 | Encode, decode, encode again | Byte-identical file |
+| BK-02 | Every table through the codec | Units, transactions, rules, limits, categories, settings keep their values |
+| BK-03 | Original message text | Left out by default; included only when asked (ADR-009) |
+| BK-04 | Not JSON; JSON that isn't a Fuata backup | Refused with a readable message |
+| BK-05 | Newer `formatVersion`; missing or invalid version | Refused; newer asks the person to update Fuata |
+| BK-06 | Missing field, unknown enum, non-integer amount, unreadable date | Refused; message names the record and field (`units[0].createdAt`) |
+| BK-07 | Same id twice in one table | Refused |
+| BK-08 | Message pattern that isn't a valid regex | Refused |
+| BK-09 | Alert levels out of order; per-unit limit with no unit | Refused |
+| BK-10 | One bad record among good ones; 100 bad records | Whole file refused; 40 listed, the rest counted |
+| BK-11 | Limit id, app id or overall-limit unit that doesn't match | Tidied with a warning, not refused |
+| BK-12 | Unknown extra keys; a missing table | Tolerated |
+| BK-13 | Unknown or wrong-typed setting | Default kept, warning; backup still imports |
+| BK-14 | Import into an empty phone | Everything is "new" |
+| BK-15 | Import the same file again | Everything "identical"; changes nothing |
+| BK-16 | Same id, different content | A conflict, not added and not identical |
+| BK-17 | Keep mine vs use file's version | Keep writes only new records; use file also writes conflicts; settings never included |
+| BK-18 | Message text absent from file | Not a difference; replacing a transaction keeps the phone's text |
+| BK-19 | References to a missing unit, app, category, or a per-unit limit's unit | Import blocked; a unit in the file or already on the phone satisfies it; at most 20 listed |
+| BK-20 | Export from an empty phone | Valid, empty backup |
+| BK-21 | Export, import into a second database, export again | Identical files |
+| BK-22 | Re-import a file already imported | Plan shows nothing to do |
+| BK-23 | Bad file | Preview refuses it; `apply` throws; nothing written |
+| BK-24 | Conflict, default choice / "use file's" / new record beside existing / settings | Phone's version kept by default; replaced only on request; settings only when chosen |
+| BK-25 | Write fails half-way (foreign key) | Nothing from the import remains |
+| BK-26 | Import raises a limit's amount | Alerts already shown for the old amount are cleared |
+
 ### Parser (US-08, US-09, US-10, US-11)
 Use several fake messages, never real ones.
 
@@ -16297,10 +19540,16 @@ Run against real drift repositories on an in-memory database (`test/domain/captu
 - [ ] Simple, Balanced and Detailed levels show the intended fields only
 
 ### Data and privacy (US-15, US-16)
-- [ ] Export creates a JSON file in a folder the user chooses
-- [ ] Import from that file restores all units, transactions and templates
-- [ ] Importing a corrupt or foreign file fails safely and changes nothing
-- [ ] Import never overwrites existing data without confirmation
+- [ ] Me > Privacy & data > Back up & restore opens
+- [ ] Save opens the system file window suggesting `fuata-backup-YYYY-MM-DD.json`; the saved file opens as readable JSON in a text editor
+- [ ] Backing out of the file window shows no error
+- [ ] The saved file contains no original message text unless "Include original message text" was on
+- [ ] Restore into a reinstalled app: all units, transactions, limits, rules and settings return; balances match the old phone
+- [ ] Restoring the same file again says nothing new and changes nothing
+- [ ] Rename a unit on the phone, restore the older file: it lists one difference; "Keep what's on my phone" (default) leaves the name; "Use the file's version" asks for confirmation first
+- [ ] "Also restore my settings" starts on for a phone with no data and off for one with data
+- [ ] A truncated file, a photo renamed `.json` and a random text file are each refused with a message, and nothing changes
+- [ ] A backup opened from Downloads and from a cloud drive both import
 - [ ] Privacy screen states data stays on the phone
 - [ ] Amounts are hidden in the recents screen (if enabled)
 
@@ -16361,6 +19610,9 @@ Failures found during a run become GitHub issues labelled `type: bug`, with step
 - Overall limits cover only units in the limit's currency (v0.1 is effectively single-currency).
 - The database is not encrypted in v0.1 (ADR-010).
 - Summary figures are computed when transactions change, so a summary screen left open across midnight keeps showing the old day until the next change or until it is reopened.
+- Import only adds and replaces; it never deletes. A transaction deleted on the phone comes back if an older backup that still has it is imported.
+- Backups don't include unparsed messages (kept 7 days by design) or which alerts were already shown, so a restored phone can nudge again for a period it had already warned about.
+- Backup files are plain, unencrypted JSON (ADR-010). Keep them somewhere safe.
 </file>
 
 <file path="docs/design.md">
@@ -16627,12 +19879,22 @@ limit id + period key + level is the atomic claim described in §5.4).
 - **Mitigations now:** auto-backup off, amounts hidden in recents, redacted lock-screen banner by default.
 - **Planned:** SQLCipher with an Android Keystore key, plus app lock, in v1.1.
 
+### ADR-011: Backup as one versioned, validated JSON file (issue #24)
+- **Decision:** Export/import is a single JSON file (`format: "fuata-backup"`, `formatVersion`), saved and opened through Android's system file window, so Fuata needs no storage permission and never sees a file the person didn't pick. `BackupCodec` (pure Dart) reads and writes it; `ImportPlanner` (pure Dart) decides what an import would do; `DriftBackupRepository` writes it.
+- **What's in it:** units, transactions, categories, limits, message rules, watched apps, settings. **Not in it:** balances (derived, ADR-004), unparsed messages (7-day inbox), alert history (derived; a new phone should not be silenced for a period it never showed). Original message text is left out unless the person opts in (ADR-009).
+- **Never overwrites silently:** an import is planned first, and nothing is written while previewing. Each record is *new* (added), *identical* (skipped) or *conflicting* (same id, different content). Conflicts are kept as they are on the phone unless the person picks "Use the file's version", which asks once more. Settings are replaced only if the person switches that on (default on only for a phone with no data).
+- **All or nothing:** a file with any problem is refused whole, and a valid one is written in one database transaction, parents before children. Records pointing at something found neither in the file nor on the phone block the import instead of reaching a foreign key.
+- **Versioning:** `formatVersion` only goes up; a newer file is refused with "update Fuata". Unknown extra keys are ignored, so adding a field doesn't need a version bump.
+- **Stable identities:** limits and watched apps are identified by what they are (`LimitRule.idFor`, `CaptureSource.idFor`), so a file with different ids is tidied to match rather than creating a second limit for the same slot.
+- **Consequences:** import never deletes (see testing.md, known limitations). The file is unencrypted (ADR-010).
+
 ## 5. Open items
 
 | Item | Status |
 |---|---|
 | Local database and repositories (issue #13) | **Done.** See ADR-001's "Implemented" note. |
 | Listener + DB from a background isolate (issue #18) | **Done.** See §5.1 below. |
+| JSON export/import (issue #24) | **Implemented; device pass pending (#26).** See ADR-011. |
 | Notification listener, allow-list and dedupe (issue #22) | **Implemented; device pass pending (#26).** See §5.2. |
 | Final visual tokens (colours, type scale, radii) | Pending: copy from the implemented theme into a "Visual direction" section |
 | Which providers get bundled template presets | Deferred to v1.1 |
@@ -17010,57 +20272,6 @@ flutter:
           weight: 600
         - asset: assets/fonts/PlusJakartaSans-Bold.ttf
           weight: 700
-</file>
-
-<file path="docs/issue-status.md">
-# Issue status (generated 2026-09-30T08:44Z)
-
-Source of truth: GitHub. Regenerate with `scripts/refresh-issue-status.sh`.
-
-| # | State | Milestone | Title |
-|---|---|---|---|
-| #63 | CLOSED | — | feat(limits): remaining 7.8 gaps — per-unit, alert levels, quiet hours, preview, firing alerts |
-| #56 | OPEN | v1.1 Backlog | feat(capture): user-defined custom fields in rule builder |
-| #55 | OPEN | v1.1 Backlog | feat(capture): "This part changes" wildcard in rule builder |
-| #39 | OPEN | v1.1 Backlog | feat: Open-source licence review and contribution guide |
-| #38 | OPEN | v1.1 Backlog | feat: iOS manual/share-sheet edition |
-| #37 | OPEN | v1.1 Backlog | feat: Opt-in redacted diagnostics copy button |
-| #36 | OPEN | v1.1 Backlog | feat: Listener-inactive detection and manufacturer keep-alive guides |
-| #35 | OPEN | v1.1 Backlog | feat: Scheduled encrypted export to a user-chosen folder |
-| #34 | OPEN | v1.1 Backlog | feat: Template packs: export/import/share by file or QR, bundled presets |
-| #33 | OPEN | v1.1 Backlog | feat: Recurring bills and expected income |
-| #32 | OPEN | v1.1 Backlog | feat: Recipient to category rules |
-| #31 | OPEN | v1.1 Backlog | feat: Scheduled daily/weekly/monthly summary notifications |
-| #30 | OPEN | v1.1 Backlog | feat: Outing mode (temporary budget with its own banner) |
-| #29 | OPEN | v1.1 Backlog | feat: Home screen widget |
-| #28 | OPEN | v1.1 Backlog | feat: SQLCipher encryption with Android Keystore and app lock |
-| #27 | OPEN | v0.1 MVP | chore(release): v0.1.0 |
-| #26 | OPEN | v0.1 MVP | test: manual device test pass |
-| #25 | OPEN | v0.1 MVP | chore(privacy): remove INTERNET permission and disable backup |
-| #24 | OPEN | v0.1 MVP | feat(data): JSON export/import |
-| #23 | CLOSED | v0.1 MVP | feat(insight): Today/Week/Month summaries |
-| #22 | CLOSED | v0.1 MVP | feat(capture): notification listener with app allow-list and dedupe |
-| #21 | CLOSED | v0.1 MVP | feat(capture): share/paste to review inbox |
-| #20 | CLOSED | v0.1 MVP | feat(capture): rule builder UI |
-| #19 | CLOSED | v0.1 MVP | feat(capture): template model and parser |
-| #18 | CLOSED | v0.1 MVP | spike: notification listener with app closed |
-| #17 | CLOSED | v0.1 MVP | feat(banner): banner setup screen with live preview |
-| #16 | CLOSED | v0.1 MVP | feat(banner): ongoing notification banner |
-| #15 | CLOSED | v0.1 MVP | feat(limits): limit engine and status |
-| #14 | CLOSED | v0.1 MVP | feat(ledger): computed balances, transfers, fees |
-| #13 | CLOSED | v0.1 MVP | feat(data): local database and repositories |
-| #12 | CLOSED | v0.1 MVP | feat(ui): Me and personalisation settings |
-| #11 | CLOSED | v0.1 MVP | feat(ui): My money and unit pages |
-| #10 | CLOSED | v0.1 MVP | feat(ui): Activity screen and transaction detail |
-| #9 | CLOSED | v0.1 MVP | feat(ui): add-transaction sheet |
-| #8 | CLOSED | v0.1 MVP | feat(ui): Home (Today) screen |
-| #7 | OPEN | v0.1 MVP | feat(ui): onboarding flow |
-| #6 | CLOSED | v0.1 MVP | feat(ui): app theme, tokens and personalisation shell |
-| #5 | CLOSED | v0.1 MVP | docs: devlog and testing checklist |
-| #4 | CLOSED | v0.1 MVP | docs: design doc (data model, architecture, decision records) |
-| #3 | CLOSED | v0.1 MVP | docs: UI design brief and design tokens |
-| #2 | CLOSED | v0.1 MVP | docs: requirements document |
-| #1 | CLOSED | v0.1 MVP | chore: initialise repo and Flutter project |
 </file>
 
 <file path="lib/data/db/drift_repositories.dart">
@@ -17541,416 +20752,55 @@ class DriftCaptureSourceRepository implements CaptureSourceRepository {
 }
 </file>
 
-<file path="lib/ui/providers/app_providers.dart">
-import 'package:flutter_riverpod/flutter_riverpod.dart';
+<file path="docs/issue-status.md">
+# Issue status (generated 2026-09-30T08:44Z)
 
-import '../../data/db/app_database.dart';
-import '../../data/db/drift_repositories.dart';
-import '../../domain/logic/ledger.dart';
-import '../../domain/models/limit_rule.dart';
-import '../../domain/models/settings.dart';
-import '../../domain/models/template.dart';
-import '../../domain/models/transaction.dart';
-import '../../domain/models/unit.dart';
-import '../../domain/repositories/repositories.dart';
+Source of truth: GitHub. Regenerate with `scripts/refresh-issue-status.sh`.
 
-/// One database for the app's lifetime. Opening the file is deferred
-/// until the first query (AppDatabase wraps it in a LazyDatabase), so
-/// creating this provider eagerly at startup is cheap.
-final appDatabaseProvider = Provider<AppDatabase>((ref) {
-  final db = AppDatabase();
-  ref.onDispose(db.close);
-  return db;
-});
-
-/// Issue #13: these four now point at the real drift-backed repositories
-/// instead of data/mock/mock_repositories.dart. No screen below needed to
-/// change for the swap — they only ever depended on the interfaces in
-/// domain/repositories/repositories.dart (design.md, "UI-first approach").
-/// The mock repositories are kept around for widget tests/previews.
-final unitRepositoryProvider = Provider<UnitRepository>((ref) {
-  return DriftUnitRepository(ref.watch(appDatabaseProvider));
-});
-
-final transactionRepositoryProvider = Provider<TransactionRepository>((ref) {
-  return DriftTransactionRepository(ref.watch(appDatabaseProvider));
-});
-
-final limitRepositoryProvider = Provider<LimitRepository>((ref) {
-  return DriftLimitRepository(ref.watch(appDatabaseProvider));
-});
-
-/// Issue #63: which limit alerts have already been shown.
-final alertLogRepositoryProvider = Provider<AlertLogRepository>((ref) {
-  return DriftAlertLogRepository(ref.watch(appDatabaseProvider));
-});
-
-final settingsRepositoryProvider = Provider<SettingsRepository>((ref) {
-  return DriftSettingsRepository(ref.watch(appDatabaseProvider));
-});
-
-/// Issue #20: templates built by the rule builder, persisted in the
-/// Templates drift table that #13 created.
-final templateRepositoryProvider = Provider<TemplateRepository>((ref) {
-  return DriftTemplateRepository(ref.watch(appDatabaseProvider));
-});
-
-final templatesProvider = StreamProvider<List<CaptureTemplate>>((ref) {
-  return ref.watch(templateRepositoryProvider).watchTemplates();
-});
-
-/// Templates for one unit — used by the unit page to show how many
-/// reading rules a unit already has.
-final unitTemplatesProvider =
-StreamProvider.family<List<CaptureTemplate>, String>((ref, unitId) {
-  return ref.watch(templateRepositoryProvider).watchTemplates(unitId: unitId);
-});
-
-final unitsProvider = StreamProvider<List<MoneyUnit>>((ref) {
-  return ref.watch(unitRepositoryProvider).watchUnits();
-});
-
-final transactionsProvider = StreamProvider<List<MoneyTransaction>>((ref) {
-  return ref.watch(transactionRepositoryProvider).watchTransactions();
-});
-
-final limitsProvider = StreamProvider<List<LimitRule>>((ref) {
-  return ref.watch(limitRepositoryProvider).watchLimits();
-});
-
-/// Settings, with a synchronous-feeling default: screens that just want
-/// "the current settings, or sensible defaults while loading" can read
-/// `ref.watch(currentSettingsProvider)` instead of unwrapping an
-/// AsyncValue every time (mirrors how HomeState hides its own loading).
-final settingsProvider = StreamProvider<AppSettings>((ref) {
-  return ref.watch(settingsRepositoryProvider).watchSettings();
-});
-
-final currentSettingsProvider = Provider<AppSettings>((ref) {
-  return ref.watch(settingsProvider).value ?? AppSettings.defaults;
-});
-
-/// Everything Home needs, recomputed whenever units/transactions/limits
-/// change. Kept as one bundle per the storage/perf note in the build
-/// notes: fewer moving parts for the UI to juggle.
-class HomeState {
-  final List<MoneyUnit> units;
-  final Map<String, int> balanceByUnit; // minor units
-  final int spentToday;
-  final LimitRule? dailyLimit;
-  final SpendStatus status;
-  final List<MoneyTransaction> lately;
-
-  const HomeState({
-    required this.units,
-    required this.balanceByUnit,
-    required this.spentToday,
-    required this.dailyLimit,
-    required this.status,
-    required this.lately,
-  });
-
-  static const empty = HomeState(
-    units: [],
-    balanceByUnit: {},
-    spentToday: 0,
-    dailyLimit: null,
-    status: SpendStatus.safe,
-    lately: [],
-  );
-
-  int get leftToday =>
-      dailyLimit == null ? 0 : dailyLimit!.amountMinor - spentToday;
-}
-
-final homeStateProvider = Provider<AsyncValue<HomeState>>((ref) {
-  final unitsAsync = ref.watch(unitsProvider);
-  final txAsync = ref.watch(transactionsProvider);
-  final limitsAsync = ref.watch(limitsProvider);
-
-  if (unitsAsync.isLoading || txAsync.isLoading || limitsAsync.isLoading) {
-    return const AsyncValue.loading();
-  }
-  final error = unitsAsync.error ?? txAsync.error ?? limitsAsync.error;
-  if (error != null) return AsyncValue.error(error, StackTrace.current);
-
-  final units = unitsAsync.value ?? [];
-  final transactions = txAsync.value ?? [];
-  final limits = limitsAsync.value ?? [];
-
-  final balances = {
-    for (final u in units) u.id: Ledger.balanceOf(u, transactions),
-  };
-
-  final now = DateTime.now();
-  final (start, end) = Ledger.todayRange(now);
-  final spentToday = Ledger.spentInPeriod(transactions, start, end);
-
-  final dailyLimit = limits
-      .where((l) => l.enabled && l.scope == LimitScope.overall && l.period == LimitPeriod.day)
-      .firstOrNull;
-
-  final status = Ledger.statusFor(dailyLimit, spentToday);
-
-  final lately = List<MoneyTransaction>.from(transactions)
-    ..sort((a, b) => b.occurredAt.compareTo(a.occurredAt));
-
-  return AsyncValue.data(HomeState(
-    units: units,
-    balanceByUnit: balances,
-    spentToday: spentToday,
-    dailyLimit: dailyLimit,
-    status: status,
-    lately: lately.take(3).toList(),
-  ));
-});
-
-extension _FirstOrNull<T> on Iterable<T> {
-  T? get firstOrNull => isEmpty ? null : first;
-}
-</file>
-
-<file path="lib/ui/screens/me_screen.dart">
-import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:fuata/ui/providers/capture_providers.dart';
-import 'package:fuata/ui/screens/auto_catch_screen.dart';
-import 'package:fuata/ui/screens/review_inbox_screen.dart';
-import 'package:fuata/ui/screens/rule_builder_screen.dart';
-
-import '../../domain/models/limit_rule.dart';
-import '../../domain/models/money.dart';
-import '../../domain/models/settings.dart';
-import '../../widgets/coming_soon_row.dart';
-import '../../widgets/personalization/action_row.dart';
-import '../../widgets/personalization/detail_level_example.dart';
-import '../../widgets/personalization/label.dart';
-import '../../widgets/personalization/privayc_card.dart';
-import '../../widgets/personalization/profile_block.dart';
-import '../../widgets/personalization/section_card.dart';
-import '../../widgets/personalization/toggle_row.dart';
-import '../providers/app_providers.dart';
-import '../theme/app_colors.dart';
-import '../theme/app_spacing.dart';
-import '../theme/app_typography.dart';
-import '../../widgets/app_chips.dart';
-import 'banner_setup_screen.dart';
-import 'limits_screen.dart';
-
-/// Me: settings and personalisation (ui-design-brief.md section 7.12,
-/// US-13/US-14/US-16). Every control here writes straight through
-/// `settingsRepositoryProvider` — same UI-first shape as the rest of the
-/// app (screens depend on the repository interface; today that's
-/// `MockSettingsRepository`, an in-memory store, same as units/
-/// transactions/limits until #13).
-///
-/// Limits & alerts and Banner each get their own dedicated screens in
-/// later issues (#15/#17, #16/#17) — shown here as `ComingSoonRow`s that
-/// link out, rather than half-built here. Message reading is live as of
-/// #20 (rules), #21 (share/paste capture + review inbox) and #22
-/// (Auto-catch: notification access + allowed apps).
-class MeScreen extends ConsumerWidget {
-  const MeScreen({super.key});
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final c = context.colors;
-    final settings = ref.watch(currentSettingsProvider);
-    final repo = ref.read(settingsRepositoryProvider);
-    final pendingCount = ref.watch(pendingTransactionsProvider).length;
-    final watchedApps = ref.watch(allowedPackagesProvider).length;
-    final dailyLimit = (ref.watch(limitsProvider).value ?? const <LimitRule>[])
-        .where((l) =>
-    l.scope == LimitScope.overall &&
-        l.period == LimitPeriod.day &&
-        l.enabled)
-        .firstOrNull;
-
-    void update(AppSettings Function(AppSettings) fn) {
-      repo.updateSettings(fn(settings));
-    }
-
-    return Scaffold(
-      appBar: AppBar(title: const Text('Me')),
-      body: SafeArea(
-        child: ListView(
-          padding: const EdgeInsets.fromLTRB(
-            AppSpacing.margin,
-            AppSpacing.sm,
-            AppSpacing.margin,
-            AppSpacing.xl,
-          ),
-          children: [
-            ProfileBlock(settings: settings, onChanged: update),
-            const SizedBox(height: AppSpacing.lg),
-            SectionCard(
-              title: 'Home',
-              children: [
-                Label('Headline number'),
-                const SizedBox(height: AppSpacing.sm),
-                Wrap(
-                  spacing: AppSpacing.sm,
-                  runSpacing: AppSpacing.sm,
-                  children: HomeHeadline.values.map((h) {
-                    return AppChoiceChip(
-                      label: h.label,
-                      selected: settings.homeHeadline == h,
-                      onTap: () => update((s) => s.copyWith(homeHeadline: h)),
-                    );
-                  }).toList(),
-                ),
-                const SizedBox(height: AppSpacing.md),
-                Label('Sections'),
-                const SizedBox(height: AppSpacing.xs),
-                ...HomeSection.values.map((section) {
-                  final on = settings.homeSections.contains(section);
-                  return ToggleRow(
-                    title: section.label,
-                    subtitle: section.description,
-                    value: on,
-                    onChanged: (v) => update((s) {
-                      final next = Set<HomeSection>.from(s.homeSections);
-                      if (v) {
-                        next.add(section);
-                      } else {
-                        next.remove(section);
-                      }
-                      return s.copyWith(homeSections: next);
-                    }),
-                  );
-                }),
-              ],
-            ),
-            const SizedBox(height: AppSpacing.lg),
-            SectionCard(
-              title: 'Detail level',
-              children: [
-                Wrap(
-                  spacing: AppSpacing.sm,
-                  runSpacing: AppSpacing.sm,
-                  children: DetailLevel.values.map((lvl) {
-                    return AppChoiceChip(
-                      label: lvl.label,
-                      selected: settings.detailLevel == lvl,
-                      onTap: () => update((s) => s.copyWith(detailLevel: lvl)),
-                    );
-                  }).toList(),
-                ),
-                const SizedBox(height: AppSpacing.md),
-                Text(
-                  settings.detailLevel.description,
-                  style: AppTypography.bodySm.copyWith(
-                    color: c.onSurfaceVariant,
-                  ),
-                ),
-                const SizedBox(height: AppSpacing.sm),
-                DetailLevelExample(level: settings.detailLevel),
-              ],
-            ),
-            const SizedBox(height: AppSpacing.lg),
-            SectionCard(
-              title: 'Limits, banner and messages',
-              children: [
-                ActionRow(
-                  icon: Icons.notifications_active_outlined,
-                  title: 'Auto-catch',
-                  subtitle: watchedApps == 0
-                      ? 'Off — pick the apps Fuata may read messages from'
-                      : watchedApps == 1
-                      ? 'Watching 1 app'
-                      : 'Watching $watchedApps apps',
-                  onTap: () => Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => const AutoCatchScreen()),
-                  ),
-                ),
-                const SizedBox(height: AppSpacing.sm),
-                ActionRow(
-                  icon: Icons.inbox_rounded,
-                  title: 'Caught from your messages',
-                  subtitle: pendingCount == 0
-                      ? 'Nothing waiting for your check'
-                      : '$pendingCount waiting for your check',
-                  onTap: () => Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (_) => const ReviewInboxScreen(),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: AppSpacing.sm),
-                ActionRow(
-                  icon: Icons.mark_email_read_outlined,
-                  title: 'Message reading rules',
-                  subtitle:
-                  'Teach Fuata to read a bank or mobile-money message',
-                  onTap: () => Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (_) => const RuleBuilderScreen(),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: AppSpacing.sm),
-                ActionRow(
-                  icon: Icons.speed_rounded,
-                  title: 'Limits & alerts',
-                  subtitle: dailyLimit == null
-                      ? 'Set how much you can spend each day, week or month'
-                      : 'Daily limit: ${Money(dailyLimit.amountMinor, dailyLimit.currencyCode).format()}',
-                  onTap: () => Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => const LimitsScreen()),
-                  ),
-                ),
-                SizedBox(height: AppSpacing.sm),
-                ActionRow(
-                  icon: Icons.notifications_active_outlined,
-                  title: 'Banner',
-                  subtitle: settings.bannerEnabled
-                      ? 'On — choose what it shows'
-                      : 'Off — choose what the notification banner shows',
-                  onTap: () => Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => const BannerSetupScreen()),
-                  ),
-                ),
-                SizedBox(height: AppSpacing.sm),
-                ComingSoonRow(
-                  icon: Icons.sell_outlined,
-                  title: 'Categories',
-                  subtitle:
-                  'Rename or add category names and icons — coming soon',
-                ),
-              ],
-            ),
-            const SizedBox(height: AppSpacing.lg),
-            SectionCard(
-              title: 'Appearance',
-              children: [
-                Wrap(
-                  spacing: AppSpacing.sm,
-                  runSpacing: AppSpacing.sm,
-                  children: AppThemeMode.values.map((mode) {
-                    return AppChoiceChip(
-                      label: mode.label,
-                      leading: Icon(
-                        mode.icon,
-                        size: 16,
-                        color: settings.themeMode == mode
-                            ? c.primary
-                            : c.onSurfaceVariant,
-                      ),
-                      selected: settings.themeMode == mode,
-                      onTap: () => update((s) => s.copyWith(themeMode: mode)),
-                    );
-                  }).toList(),
-                ),
-              ],
-            ),
-            const SizedBox(height: AppSpacing.lg),
-            PrivacyCard(settings: settings, onChanged: update),
-          ],
-        ),
-      ),
-    );
-  }
-}
+| # | State | Milestone | Title |
+|---|---|---|---|
+| #63 | CLOSED | — | feat(limits): remaining 7.8 gaps — per-unit, alert levels, quiet hours, preview, firing alerts |
+| #56 | OPEN | v1.1 Backlog | feat(capture): user-defined custom fields in rule builder |
+| #55 | OPEN | v1.1 Backlog | feat(capture): "This part changes" wildcard in rule builder |
+| #39 | OPEN | v1.1 Backlog | feat: Open-source licence review and contribution guide |
+| #38 | OPEN | v1.1 Backlog | feat: iOS manual/share-sheet edition |
+| #37 | OPEN | v1.1 Backlog | feat: Opt-in redacted diagnostics copy button |
+| #36 | OPEN | v1.1 Backlog | feat: Listener-inactive detection and manufacturer keep-alive guides |
+| #35 | OPEN | v1.1 Backlog | feat: Scheduled encrypted export to a user-chosen folder |
+| #34 | OPEN | v1.1 Backlog | feat: Template packs: export/import/share by file or QR, bundled presets |
+| #33 | OPEN | v1.1 Backlog | feat: Recurring bills and expected income |
+| #32 | OPEN | v1.1 Backlog | feat: Recipient to category rules |
+| #31 | OPEN | v1.1 Backlog | feat: Scheduled daily/weekly/monthly summary notifications |
+| #30 | OPEN | v1.1 Backlog | feat: Outing mode (temporary budget with its own banner) |
+| #29 | OPEN | v1.1 Backlog | feat: Home screen widget |
+| #28 | OPEN | v1.1 Backlog | feat: SQLCipher encryption with Android Keystore and app lock |
+| #27 | OPEN | v0.1 MVP | chore(release): v0.1.0 |
+| #26 | OPEN | v0.1 MVP | test: manual device test pass |
+| #25 | OPEN | v0.1 MVP | chore(privacy): remove INTERNET permission and disable backup |
+| #24 | OPEN | v0.1 MVP | feat(data): JSON export/import |
+| #23 | CLOSED | v0.1 MVP | feat(insight): Today/Week/Month summaries |
+| #22 | CLOSED | v0.1 MVP | feat(capture): notification listener with app allow-list and dedupe |
+| #21 | CLOSED | v0.1 MVP | feat(capture): share/paste to review inbox |
+| #20 | CLOSED | v0.1 MVP | feat(capture): rule builder UI |
+| #19 | CLOSED | v0.1 MVP | feat(capture): template model and parser |
+| #18 | CLOSED | v0.1 MVP | spike: notification listener with app closed |
+| #17 | CLOSED | v0.1 MVP | feat(banner): banner setup screen with live preview |
+| #16 | CLOSED | v0.1 MVP | feat(banner): ongoing notification banner |
+| #15 | CLOSED | v0.1 MVP | feat(limits): limit engine and status |
+| #14 | CLOSED | v0.1 MVP | feat(ledger): computed balances, transfers, fees |
+| #13 | CLOSED | v0.1 MVP | feat(data): local database and repositories |
+| #12 | CLOSED | v0.1 MVP | feat(ui): Me and personalisation settings |
+| #11 | CLOSED | v0.1 MVP | feat(ui): My money and unit pages |
+| #10 | CLOSED | v0.1 MVP | feat(ui): Activity screen and transaction detail |
+| #9 | CLOSED | v0.1 MVP | feat(ui): add-transaction sheet |
+| #8 | CLOSED | v0.1 MVP | feat(ui): Home (Today) screen |
+| #7 | OPEN | v0.1 MVP | feat(ui): onboarding flow |
+| #6 | CLOSED | v0.1 MVP | feat(ui): app theme, tokens and personalisation shell |
+| #5 | CLOSED | v0.1 MVP | docs: devlog and testing checklist |
+| #4 | CLOSED | v0.1 MVP | docs: design doc (data model, architecture, decision records) |
+| #3 | CLOSED | v0.1 MVP | docs: UI design brief and design tokens |
+| #2 | CLOSED | v0.1 MVP | docs: requirements document |
+| #1 | CLOSED | v0.1 MVP | chore: initialise repo and Flutter project |
 </file>
 
 <file path="lib/data/mock/mock_repositories.dart">
@@ -18311,102 +21161,448 @@ class MockCaptureSourceRepository implements CaptureSourceRepository {
 }
 </file>
 
-<file path="lib/domain/repositories/repositories.dart">
-import '../models/capture_source.dart';
-import '../models/limit_alert.dart';
-import '../models/limit_rule.dart';
-import '../models/settings.dart';
-import '../models/template.dart';
-import '../models/transaction.dart';
-import '../models/unit.dart';
-import '../models/unparsed_capture.dart';
+<file path="lib/ui/providers/app_providers.dart">
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-/// Screens depend only on these interfaces (design.md, "UI-first approach").
-/// Two implementations exist: MockUnitRepository etc. (data/mock, used by
-/// widget tests/previews) and Drift*Repository (data/db, wired up by
-/// default in app_providers.dart as of #13) — swapped via Riverpod
-/// provider overrides, with no screen changes needed either way.
-abstract class UnitRepository {
-  Stream<List<MoneyUnit>> watchUnits({bool includeArchived = false});
-  Future<void> addUnit(MoneyUnit unit);
-  Future<void> updateUnit(MoneyUnit unit);
-  Future<void> archiveUnit(String unitId);
-}
+import '../../data/db/app_database.dart';
+import '../../data/db/backup_repository.dart';
+import '../../data/db/drift_repositories.dart';
+import '../../domain/logic/backup_service.dart';
+import '../../domain/logic/ledger.dart';
+import '../../domain/models/limit_rule.dart';
+import '../../domain/models/settings.dart';
+import '../../domain/models/template.dart';
+import '../../domain/models/transaction.dart';
+import '../../domain/models/unit.dart';
+import '../../domain/repositories/repositories.dart';
 
-abstract class TransactionRepository {
-  Stream<List<MoneyTransaction>> watchTransactions({String? unitId});
-  Future<void> addTransaction(MoneyTransaction transaction);
-  // In-place edit of an existing row (the review inbox's Fix, #21).
-  // Drift implements it as an upsert by primary key; the mock replaces
-  // the stored item with the same id.
-  Future<void> updateTransaction(MoneyTransaction transaction);
-  Future<void> confirmTransaction(String transactionId);
-  Future<void> deleteTransaction(String transactionId);
-}
+/// One database for the app's lifetime. Opening the file is deferred
+/// until the first query (AppDatabase wraps it in a LazyDatabase), so
+/// creating this provider eagerly at startup is cheap.
+final appDatabaseProvider = Provider<AppDatabase>((ref) {
+  final db = AppDatabase();
+  ref.onDispose(db.close);
+  return db;
+});
 
-abstract class LimitRepository {
-  Stream<List<LimitRule>> watchLimits();
-  Future<void> setLimit(LimitRule limit);
-  Future<void> deleteLimit(String limitId);
-}
+/// Issue #13: these four now point at the real drift-backed repositories
+/// instead of data/mock/mock_repositories.dart. No screen below needed to
+/// change for the swap — they only ever depended on the interfaces in
+/// domain/repositories/repositories.dart (design.md, "UI-first approach").
+/// The mock repositories are kept around for widget tests/previews.
+final unitRepositoryProvider = Provider<UnitRepository>((ref) {
+  return DriftUnitRepository(ref.watch(appDatabaseProvider));
+});
 
-/// Personalisation settings (design.md's `settings` key/value table).
-/// One object in, one object out — same reasoning as the other
-/// repositories: screens never see how it's stored.
-abstract class SettingsRepository {
-  Stream<AppSettings> watchSettings();
-  Future<void> updateSettings(AppSettings settings);
-}
+final transactionRepositoryProvider = Provider<TransactionRepository>((ref) {
+  return DriftTransactionRepository(ref.watch(appDatabaseProvider));
+});
 
-/// Capture templates (design.md TEMPLATE, ADR-007): built by the rule
-/// builder (#20) from a pasted sample plus user-labeled spans, consumed
-/// by the parser whenever a message is matched (#21/#22). The Templates
-/// drift table has existed since #13; this interface is the seam the
-/// rule builder talks through so it never learns that drift exists.
-abstract class TemplateRepository {
-  Stream<List<CaptureTemplate>> watchTemplates({String? unitId});
-  Future<void> saveTemplate(CaptureTemplate template);
-  Future<void> deleteTemplate(String templateId);
-}
+final limitRepositoryProvider = Provider<LimitRepository>((ref) {
+  return DriftLimitRepository(ref.watch(appDatabaseProvider));
+});
 
-/// Unparsed captures (design.md's `unparsed_capture` table): messages
-/// nothing could read, kept for the review inbox's "Couldn't read these"
-/// list (US-11) and auto-purged after 7 days. #21 writes these from the
-/// share/paste paths; #22's notification listener writes the same table.
-abstract class CaptureRepository {
-  Stream<List<UnparsedCapture>> watchUnparsed();
-  Future<void> recordUnparsed({
-    required String id,
-    required String sourcePackage,
-    required String rawText,
+/// Issue #63: which limit alerts have already been shown.
+final alertLogRepositoryProvider = Provider<AlertLogRepository>((ref) {
+  return DriftAlertLogRepository(ref.watch(appDatabaseProvider));
+});
+
+final settingsRepositoryProvider = Provider<SettingsRepository>((ref) {
+  return DriftSettingsRepository(ref.watch(appDatabaseProvider));
+});
+
+/// Issue #24: whole-database export/import, and the service the Back up &
+/// restore screen talks to. Not a stream — read once to export or plan,
+/// written once (in a transaction) when the person confirms.
+final backupRepositoryProvider = Provider<BackupRepository>((ref) {
+  return DriftBackupRepository(ref.watch(appDatabaseProvider));
+});
+
+final backupServiceProvider = Provider<BackupService>((ref) {
+  return BackupService(ref.watch(backupRepositoryProvider));
+});
+
+/// Issue #20: templates built by the rule builder, persisted in the
+/// Templates drift table that #13 created.
+final templateRepositoryProvider = Provider<TemplateRepository>((ref) {
+  return DriftTemplateRepository(ref.watch(appDatabaseProvider));
+});
+
+final templatesProvider = StreamProvider<List<CaptureTemplate>>((ref) {
+  return ref.watch(templateRepositoryProvider).watchTemplates();
+});
+
+/// Templates for one unit — used by the unit page to show how many
+/// reading rules a unit already has.
+final unitTemplatesProvider =
+    StreamProvider.family<List<CaptureTemplate>, String>((ref, unitId) {
+      return ref
+          .watch(templateRepositoryProvider)
+          .watchTemplates(unitId: unitId);
+    });
+
+final unitsProvider = StreamProvider<List<MoneyUnit>>((ref) {
+  return ref.watch(unitRepositoryProvider).watchUnits();
+});
+
+final transactionsProvider = StreamProvider<List<MoneyTransaction>>((ref) {
+  return ref.watch(transactionRepositoryProvider).watchTransactions();
+});
+
+final limitsProvider = StreamProvider<List<LimitRule>>((ref) {
+  return ref.watch(limitRepositoryProvider).watchLimits();
+});
+
+/// Settings, with a synchronous-feeling default: screens that just want
+/// "the current settings, or sensible defaults while loading" can read
+/// `ref.watch(currentSettingsProvider)` instead of unwrapping an
+/// AsyncValue every time (mirrors how HomeState hides its own loading).
+final settingsProvider = StreamProvider<AppSettings>((ref) {
+  return ref.watch(settingsRepositoryProvider).watchSettings();
+});
+
+final currentSettingsProvider = Provider<AppSettings>((ref) {
+  return ref.watch(settingsProvider).value ?? AppSettings.defaults;
+});
+
+/// Everything Home needs, recomputed whenever units/transactions/limits
+/// change. Kept as one bundle per the storage/perf note in the build
+/// notes: fewer moving parts for the UI to juggle.
+class HomeState {
+  final List<MoneyUnit> units;
+  final Map<String, int> balanceByUnit; // minor units
+  final int spentToday;
+  final LimitRule? dailyLimit;
+  final SpendStatus status;
+  final List<MoneyTransaction> lately;
+
+  const HomeState({
+    required this.units,
+    required this.balanceByUnit,
+    required this.spentToday,
+    required this.dailyLimit,
+    required this.status,
+    required this.lately,
   });
-  Future<void> deleteUnparsed(String captureId);
+
+  static const empty = HomeState(
+    units: [],
+    balanceByUnit: {},
+    spentToday: 0,
+    dailyLimit: null,
+    status: SpendStatus.safe,
+    lately: [],
+  );
+
+  int get leftToday =>
+      dailyLimit == null ? 0 : dailyLimit!.amountMinor - spentToday;
 }
-/// The notification allow-list (design.md CAPTURE_SOURCE, US-10): which
-/// apps Fuata may read notifications from. Enabled rows *are* the
-/// allow-list. There is deliberately no delete: turning an app off flips
-/// `enabled`, because templates reference this table (see
-/// [CaptureSource]).
-abstract class CaptureSourceRepository {
-  Stream<List<CaptureSource>> watchSources();
 
-  /// Upsert by id — use [CaptureSource.idFor] so one package is one row.
-  Future<void> saveSource(CaptureSource source);
+final homeStateProvider = Provider<AsyncValue<HomeState>>((ref) {
+  final unitsAsync = ref.watch(unitsProvider);
+  final txAsync = ref.watch(transactionsProvider);
+  final limitsAsync = ref.watch(limitsProvider);
+
+  if (unitsAsync.isLoading || txAsync.isLoading || limitsAsync.isLoading) {
+    return const AsyncValue.loading();
+  }
+  final error = unitsAsync.error ?? txAsync.error ?? limitsAsync.error;
+  if (error != null) return AsyncValue.error(error, StackTrace.current);
+
+  final units = unitsAsync.value ?? [];
+  final transactions = txAsync.value ?? [];
+  final limits = limitsAsync.value ?? [];
+
+  final balances = {
+    for (final u in units) u.id: Ledger.balanceOf(u, transactions),
+  };
+
+  final now = DateTime.now();
+  final (start, end) = Ledger.todayRange(now);
+  final spentToday = Ledger.spentInPeriod(transactions, start, end);
+
+  final dailyLimit = limits
+      .where(
+        (l) =>
+            l.enabled &&
+            l.scope == LimitScope.overall &&
+            l.period == LimitPeriod.day,
+      )
+      .firstOrNull;
+
+  final status = Ledger.statusFor(dailyLimit, spentToday);
+
+  final lately = List<MoneyTransaction>.from(transactions)
+    ..sort((a, b) => b.occurredAt.compareTo(a.occurredAt));
+
+  return AsyncValue.data(
+    HomeState(
+      units: units,
+      balanceByUnit: balances,
+      spentToday: spentToday,
+      dailyLimit: dailyLimit,
+      status: status,
+      lately: lately.take(3).toList(),
+    ),
+  );
+});
+
+extension _FirstOrNull<T> on Iterable<T> {
+  T? get firstOrNull => isEmpty ? null : first;
 }
+</file>
 
-/// Which limit alerts have already been shown (issue #63, US-06: "fires
-/// once per threshold per period"). Lives in the database, not memory,
-/// because two isolates raise alerts and the answer has to survive the
-/// app being killed.
-abstract class AlertLogRepository {
-  Future<Set<AlertKey>> firedKeys();
+<file path="lib/ui/screens/me_screen.dart">
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:fuata/ui/providers/capture_providers.dart';
+import 'package:fuata/ui/screens/auto_catch_screen.dart';
+import 'package:fuata/ui/screens/review_inbox_screen.dart';
+import 'package:fuata/ui/screens/rule_builder_screen.dart';
 
-  /// Atomically records [key] as shown. True for exactly one caller ever;
-  /// false if it was already claimed (by anyone, including another
-  /// isolate) or could not be recorded — in both cases: do not show it.
-  Future<bool> claim(AlertKey key, DateTime at);
+import '../../domain/models/limit_rule.dart';
+import '../../domain/models/money.dart';
+import '../../domain/models/settings.dart';
+import '../../widgets/coming_soon_row.dart';
+import '../../widgets/personalization/action_row.dart';
+import '../../widgets/personalization/detail_level_example.dart';
+import '../../widgets/personalization/label.dart';
+import '../../widgets/personalization/privayc_card.dart';
+import '../../widgets/personalization/profile_block.dart';
+import '../../widgets/personalization/section_card.dart';
+import '../../widgets/personalization/toggle_row.dart';
+import '../providers/app_providers.dart';
+import '../theme/app_colors.dart';
+import '../theme/app_spacing.dart';
+import '../theme/app_typography.dart';
+import '../../widgets/app_chips.dart';
+import 'banner_setup_screen.dart';
+import 'data_backup_screen.dart';
+import 'limits_screen.dart';
 
-  Future<void> purgeBefore(DateTime cutoff);
+/// Me: settings and personalisation (ui-design-brief.md section 7.12,
+/// US-13/US-14/US-16). Every control here writes straight through
+/// `settingsRepositoryProvider` — same UI-first shape as the rest of the
+/// app (screens depend on the repository interface; today that's
+/// `MockSettingsRepository`, an in-memory store, same as units/
+/// transactions/limits until #13).
+///
+/// Limits & alerts and Banner each get their own dedicated screens in
+/// later issues (#15/#17, #16/#17) — shown here as `ComingSoonRow`s that
+/// link out, rather than half-built here. Message reading is live as of
+/// #20 (rules), #21 (share/paste capture + review inbox) and #22
+/// (Auto-catch: notification access + allowed apps).
+class MeScreen extends ConsumerWidget {
+  const MeScreen({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final c = context.colors;
+    final settings = ref.watch(currentSettingsProvider);
+    final repo = ref.read(settingsRepositoryProvider);
+    final pendingCount = ref.watch(pendingTransactionsProvider).length;
+    final watchedApps = ref.watch(allowedPackagesProvider).length;
+    final dailyLimit = (ref.watch(limitsProvider).value ?? const <LimitRule>[])
+        .where(
+          (l) =>
+              l.scope == LimitScope.overall &&
+              l.period == LimitPeriod.day &&
+              l.enabled,
+        )
+        .firstOrNull;
+
+    void update(AppSettings Function(AppSettings) fn) {
+      repo.updateSettings(fn(settings));
+    }
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('Me')),
+      body: SafeArea(
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(
+            AppSpacing.margin,
+            AppSpacing.sm,
+            AppSpacing.margin,
+            AppSpacing.xl,
+          ),
+          children: [
+            ProfileBlock(settings: settings, onChanged: update),
+            const SizedBox(height: AppSpacing.lg),
+            SectionCard(
+              title: 'Home',
+              children: [
+                Label('Headline number'),
+                const SizedBox(height: AppSpacing.sm),
+                Wrap(
+                  spacing: AppSpacing.sm,
+                  runSpacing: AppSpacing.sm,
+                  children: HomeHeadline.values.map((h) {
+                    return AppChoiceChip(
+                      label: h.label,
+                      selected: settings.homeHeadline == h,
+                      onTap: () => update((s) => s.copyWith(homeHeadline: h)),
+                    );
+                  }).toList(),
+                ),
+                const SizedBox(height: AppSpacing.md),
+                Label('Sections'),
+                const SizedBox(height: AppSpacing.xs),
+                ...HomeSection.values.map((section) {
+                  final on = settings.homeSections.contains(section);
+                  return ToggleRow(
+                    title: section.label,
+                    subtitle: section.description,
+                    value: on,
+                    onChanged: (v) => update((s) {
+                      final next = Set<HomeSection>.from(s.homeSections);
+                      if (v) {
+                        next.add(section);
+                      } else {
+                        next.remove(section);
+                      }
+                      return s.copyWith(homeSections: next);
+                    }),
+                  );
+                }),
+              ],
+            ),
+            const SizedBox(height: AppSpacing.lg),
+            SectionCard(
+              title: 'Detail level',
+              children: [
+                Wrap(
+                  spacing: AppSpacing.sm,
+                  runSpacing: AppSpacing.sm,
+                  children: DetailLevel.values.map((lvl) {
+                    return AppChoiceChip(
+                      label: lvl.label,
+                      selected: settings.detailLevel == lvl,
+                      onTap: () => update((s) => s.copyWith(detailLevel: lvl)),
+                    );
+                  }).toList(),
+                ),
+                const SizedBox(height: AppSpacing.md),
+                Text(
+                  settings.detailLevel.description,
+                  style: AppTypography.bodySm.copyWith(
+                    color: c.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.sm),
+                DetailLevelExample(level: settings.detailLevel),
+              ],
+            ),
+            const SizedBox(height: AppSpacing.lg),
+            SectionCard(
+              title: 'Limits, banner and messages',
+              children: [
+                ActionRow(
+                  icon: Icons.notifications_active_outlined,
+                  title: 'Auto-catch',
+                  subtitle: watchedApps == 0
+                      ? 'Off — pick the apps Fuata may read messages from'
+                      : watchedApps == 1
+                      ? 'Watching 1 app'
+                      : 'Watching $watchedApps apps',
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const AutoCatchScreen()),
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.sm),
+                ActionRow(
+                  icon: Icons.inbox_rounded,
+                  title: 'Caught from your messages',
+                  subtitle: pendingCount == 0
+                      ? 'Nothing waiting for your check'
+                      : '$pendingCount waiting for your check',
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => const ReviewInboxScreen(),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.sm),
+                ActionRow(
+                  icon: Icons.mark_email_read_outlined,
+                  title: 'Message reading rules',
+                  subtitle:
+                      'Teach Fuata to read a bank or mobile-money message',
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => const RuleBuilderScreen(),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.sm),
+                ActionRow(
+                  icon: Icons.speed_rounded,
+                  title: 'Limits & alerts',
+                  subtitle: dailyLimit == null
+                      ? 'Set how much you can spend each day, week or month'
+                      : 'Daily limit: ${Money(dailyLimit.amountMinor, dailyLimit.currencyCode).format()}',
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const LimitsScreen()),
+                  ),
+                ),
+                SizedBox(height: AppSpacing.sm),
+                ActionRow(
+                  icon: Icons.notifications_active_outlined,
+                  title: 'Banner',
+                  subtitle: settings.bannerEnabled
+                      ? 'On — choose what it shows'
+                      : 'Off — choose what the notification banner shows',
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => const BannerSetupScreen(),
+                    ),
+                  ),
+                ),
+                SizedBox(height: AppSpacing.sm),
+                ComingSoonRow(
+                  icon: Icons.sell_outlined,
+                  title: 'Categories',
+                  subtitle:
+                      'Rename or add category names and icons — coming soon',
+                ),
+              ],
+            ),
+            const SizedBox(height: AppSpacing.lg),
+            SectionCard(
+              title: 'Appearance',
+              children: [
+                Wrap(
+                  spacing: AppSpacing.sm,
+                  runSpacing: AppSpacing.sm,
+                  children: AppThemeMode.values.map((mode) {
+                    return AppChoiceChip(
+                      label: mode.label,
+                      leading: Icon(
+                        mode.icon,
+                        size: 16,
+                        color: settings.themeMode == mode
+                            ? c.primary
+                            : c.onSurfaceVariant,
+                      ),
+                      selected: settings.themeMode == mode,
+                      onTap: () => update((s) => s.copyWith(themeMode: mode)),
+                    );
+                  }).toList(),
+                ),
+              ],
+            ),
+            const SizedBox(height: AppSpacing.lg),
+            PrivacyCard(
+              settings: settings,
+              onChanged: update,
+              onOpenBackup: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const DataBackupScreen()),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 </file>
 
@@ -18652,6 +21848,122 @@ Nothing broke yet — the schema and repositories are new code with no prior imp
 **Time spent:** _3hours_
 
 **Tomorrow:** see Day 2.
+</file>
+
+<file path="lib/domain/repositories/repositories.dart">
+import '../models/backup_snapshot.dart';
+import '../models/capture_source.dart';
+import '../models/limit_alert.dart';
+import '../models/limit_rule.dart';
+import '../models/settings.dart';
+import '../models/template.dart';
+import '../models/transaction.dart';
+import '../models/unit.dart';
+import '../models/unparsed_capture.dart';
+
+/// Screens depend only on these interfaces (design.md, "UI-first approach").
+/// Two implementations exist: MockUnitRepository etc. (data/mock, used by
+/// widget tests/previews) and Drift*Repository (data/db, wired up by
+/// default in app_providers.dart as of #13) — swapped via Riverpod
+/// provider overrides, with no screen changes needed either way.
+abstract class UnitRepository {
+  Stream<List<MoneyUnit>> watchUnits({bool includeArchived = false});
+  Future<void> addUnit(MoneyUnit unit);
+  Future<void> updateUnit(MoneyUnit unit);
+  Future<void> archiveUnit(String unitId);
+}
+
+abstract class TransactionRepository {
+  Stream<List<MoneyTransaction>> watchTransactions({String? unitId});
+  Future<void> addTransaction(MoneyTransaction transaction);
+  // In-place edit of an existing row (the review inbox's Fix, #21).
+  // Drift implements it as an upsert by primary key; the mock replaces
+  // the stored item with the same id.
+  Future<void> updateTransaction(MoneyTransaction transaction);
+  Future<void> confirmTransaction(String transactionId);
+  Future<void> deleteTransaction(String transactionId);
+}
+
+abstract class LimitRepository {
+  Stream<List<LimitRule>> watchLimits();
+  Future<void> setLimit(LimitRule limit);
+  Future<void> deleteLimit(String limitId);
+}
+
+/// Personalisation settings (design.md's `settings` key/value table).
+/// One object in, one object out — same reasoning as the other
+/// repositories: screens never see how it's stored.
+abstract class SettingsRepository {
+  Stream<AppSettings> watchSettings();
+  Future<void> updateSettings(AppSettings settings);
+}
+
+/// Capture templates (design.md TEMPLATE, ADR-007): built by the rule
+/// builder (#20) from a pasted sample plus user-labeled spans, consumed
+/// by the parser whenever a message is matched (#21/#22). The Templates
+/// drift table has existed since #13; this interface is the seam the
+/// rule builder talks through so it never learns that drift exists.
+abstract class TemplateRepository {
+  Stream<List<CaptureTemplate>> watchTemplates({String? unitId});
+  Future<void> saveTemplate(CaptureTemplate template);
+  Future<void> deleteTemplate(String templateId);
+}
+
+/// Unparsed captures (design.md's `unparsed_capture` table): messages
+/// nothing could read, kept for the review inbox's "Couldn't read these"
+/// list (US-11) and auto-purged after 7 days. #21 writes these from the
+/// share/paste paths; #22's notification listener writes the same table.
+abstract class CaptureRepository {
+  Stream<List<UnparsedCapture>> watchUnparsed();
+  Future<void> recordUnparsed({
+    required String id,
+    required String sourcePackage,
+    required String rawText,
+  });
+  Future<void> deleteUnparsed(String captureId);
+}
+
+/// The notification allow-list (design.md CAPTURE_SOURCE, US-10): which
+/// apps Fuata may read notifications from. Enabled rows *are* the
+/// allow-list. There is deliberately no delete: turning an app off flips
+/// `enabled`, because templates reference this table (see
+/// [CaptureSource]).
+abstract class CaptureSourceRepository {
+  Stream<List<CaptureSource>> watchSources();
+
+  /// Upsert by id — use [CaptureSource.idFor] so one package is one row.
+  Future<void> saveSource(CaptureSource source);
+}
+
+/// Which limit alerts have already been shown (issue #63, US-06: "fires
+/// once per threshold per period"). Lives in the database, not memory,
+/// because two isolates raise alerts and the answer has to survive the
+/// app being killed.
+abstract class AlertLogRepository {
+  Future<Set<AlertKey>> firedKeys();
+
+  /// Atomically records [key] as shown. True for exactly one caller ever;
+  /// false if it was already claimed (by anyone, including another
+  /// isolate) or could not be recorded — in both cases: do not show it.
+  Future<bool> claim(AlertKey key, DateTime at);
+
+  Future<void> purgeBefore(DateTime cutoff);
+}
+
+/// Whole-database access for export/import (issue #24). Unlike the other
+/// repositories this one is not a stream for a screen to watch: it is read
+/// once when exporting or planning an import, and written once — in a
+/// single transaction — when the person confirms.
+abstract class BackupRepository {
+  /// Everything a backup carries, including current settings.
+  Future<BackupSnapshot> readAll();
+
+  /// Writes [records] (upserting by id) and, when [settings] is given,
+  /// replaces the settings — all or nothing. Callers decide *what* to
+  /// write (see ImportPlan.recordsToWrite); this never decides to
+  /// overwrite anything on its own.
+  Future<void> apply(BackupSnapshot records, {AppSettings? settings});
+}
 </file>
 
 <file path="lib/ui/screens/home_screen.dart">

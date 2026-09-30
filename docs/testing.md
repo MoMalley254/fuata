@@ -84,6 +84,39 @@ flutter test --coverage    # optional
 | S-18 | Average per day | Counts today; 1 day on a Monday |
 | S-19 | Friendly money | ".00" dropped, real cents kept |
 
+### Backup and restore (US-15) — issue #24
+
+Files: `test/domain/backup_codec_test.dart`, `backup_import_test.dart`, `test/data/db/backup_repository_test.dart`.
+
+| ID | Case | Expected |
+|---|---|---|
+| BK-01 | Encode, decode, encode again | Byte-identical file |
+| BK-02 | Every table through the codec | Units, transactions, rules, limits, categories, settings keep their values |
+| BK-03 | Original message text | Left out by default; included only when asked (ADR-009) |
+| BK-04 | Not JSON; JSON that isn't a Fuata backup | Refused with a readable message |
+| BK-05 | Newer `formatVersion`; missing or invalid version | Refused; newer asks the person to update Fuata |
+| BK-06 | Missing field, unknown enum, non-integer amount, unreadable date | Refused; message names the record and field (`units[0].createdAt`) |
+| BK-07 | Same id twice in one table | Refused |
+| BK-08 | Message pattern that isn't a valid regex | Refused |
+| BK-09 | Alert levels out of order; per-unit limit with no unit | Refused |
+| BK-10 | One bad record among good ones; 100 bad records | Whole file refused; 40 listed, the rest counted |
+| BK-11 | Limit id, app id or overall-limit unit that doesn't match | Tidied with a warning, not refused |
+| BK-12 | Unknown extra keys; a missing table | Tolerated |
+| BK-13 | Unknown or wrong-typed setting | Default kept, warning; backup still imports |
+| BK-14 | Import into an empty phone | Everything is "new" |
+| BK-15 | Import the same file again | Everything "identical"; changes nothing |
+| BK-16 | Same id, different content | A conflict, not added and not identical |
+| BK-17 | Keep mine vs use file's version | Keep writes only new records; use file also writes conflicts; settings never included |
+| BK-18 | Message text absent from file | Not a difference; replacing a transaction keeps the phone's text |
+| BK-19 | References to a missing unit, app, category, or a per-unit limit's unit | Import blocked; a unit in the file or already on the phone satisfies it; at most 20 listed |
+| BK-20 | Export from an empty phone | Valid, empty backup |
+| BK-21 | Export, import into a second database, export again | Identical files |
+| BK-22 | Re-import a file already imported | Plan shows nothing to do |
+| BK-23 | Bad file | Preview refuses it; `apply` throws; nothing written |
+| BK-24 | Conflict, default choice / "use file's" / new record beside existing / settings | Phone's version kept by default; replaced only on request; settings only when chosen |
+| BK-25 | Write fails half-way (foreign key) | Nothing from the import remains |
+| BK-26 | Import raises a limit's amount | Alerts already shown for the old amount are cleared |
+
 ### Parser (US-08, US-09, US-10, US-11)
 Use several fake messages, never real ones.
 
@@ -194,10 +227,16 @@ Run against real drift repositories on an in-memory database (`test/domain/captu
 - [ ] Simple, Balanced and Detailed levels show the intended fields only
 
 ### Data and privacy (US-15, US-16)
-- [ ] Export creates a JSON file in a folder the user chooses
-- [ ] Import from that file restores all units, transactions and templates
-- [ ] Importing a corrupt or foreign file fails safely and changes nothing
-- [ ] Import never overwrites existing data without confirmation
+- [ ] Me > Privacy & data > Back up & restore opens
+- [ ] Save opens the system file window suggesting `fuata-backup-YYYY-MM-DD.json`; the saved file opens as readable JSON in a text editor
+- [ ] Backing out of the file window shows no error
+- [ ] The saved file contains no original message text unless "Include original message text" was on
+- [ ] Restore into a reinstalled app: all units, transactions, limits, rules and settings return; balances match the old phone
+- [ ] Restoring the same file again says nothing new and changes nothing
+- [ ] Rename a unit on the phone, restore the older file: it lists one difference; "Keep what's on my phone" (default) leaves the name; "Use the file's version" asks for confirmation first
+- [ ] "Also restore my settings" starts on for a phone with no data and off for one with data
+- [ ] A truncated file, a photo renamed `.json` and a random text file are each refused with a message, and nothing changes
+- [ ] A backup opened from Downloads and from a cloud drive both import
 - [ ] Privacy screen states data stays on the phone
 - [ ] Amounts are hidden in the recents screen (if enabled)
 
@@ -258,3 +297,6 @@ Failures found during a run become GitHub issues labelled `type: bug`, with step
 - Overall limits cover only units in the limit's currency (v0.1 is effectively single-currency).
 - The database is not encrypted in v0.1 (ADR-010).
 - Summary figures are computed when transactions change, so a summary screen left open across midnight keeps showing the old day until the next change or until it is reopened.
+- Import only adds and replaces; it never deletes. A transaction deleted on the phone comes back if an older backup that still has it is imported.
+- Backups don't include unparsed messages (kept 7 days by design) or which alerts were already shown, so a restored phone can nudge again for a period it had already warned about.
+- Backup files are plain, unencrypted JSON (ADR-010). Keep them somewhere safe.

@@ -1,7 +1,9 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/db/app_database.dart';
+import '../../data/db/backup_repository.dart';
 import '../../data/db/drift_repositories.dart';
+import '../../domain/logic/backup_service.dart';
 import '../../domain/logic/ledger.dart';
 import '../../domain/models/limit_rule.dart';
 import '../../domain/models/settings.dart';
@@ -45,6 +47,17 @@ final settingsRepositoryProvider = Provider<SettingsRepository>((ref) {
   return DriftSettingsRepository(ref.watch(appDatabaseProvider));
 });
 
+/// Issue #24: whole-database export/import, and the service the Back up &
+/// restore screen talks to. Not a stream — read once to export or plan,
+/// written once (in a transaction) when the person confirms.
+final backupRepositoryProvider = Provider<BackupRepository>((ref) {
+  return DriftBackupRepository(ref.watch(appDatabaseProvider));
+});
+
+final backupServiceProvider = Provider<BackupService>((ref) {
+  return BackupService(ref.watch(backupRepositoryProvider));
+});
+
 /// Issue #20: templates built by the rule builder, persisted in the
 /// Templates drift table that #13 created.
 final templateRepositoryProvider = Provider<TemplateRepository>((ref) {
@@ -58,9 +71,11 @@ final templatesProvider = StreamProvider<List<CaptureTemplate>>((ref) {
 /// Templates for one unit — used by the unit page to show how many
 /// reading rules a unit already has.
 final unitTemplatesProvider =
-StreamProvider.family<List<CaptureTemplate>, String>((ref, unitId) {
-  return ref.watch(templateRepositoryProvider).watchTemplates(unitId: unitId);
-});
+    StreamProvider.family<List<CaptureTemplate>, String>((ref, unitId) {
+      return ref
+          .watch(templateRepositoryProvider)
+          .watchTemplates(unitId: unitId);
+    });
 
 final unitsProvider = StreamProvider<List<MoneyUnit>>((ref) {
   return ref.watch(unitRepositoryProvider).watchUnits();
@@ -143,7 +158,12 @@ final homeStateProvider = Provider<AsyncValue<HomeState>>((ref) {
   final spentToday = Ledger.spentInPeriod(transactions, start, end);
 
   final dailyLimit = limits
-      .where((l) => l.enabled && l.scope == LimitScope.overall && l.period == LimitPeriod.day)
+      .where(
+        (l) =>
+            l.enabled &&
+            l.scope == LimitScope.overall &&
+            l.period == LimitPeriod.day,
+      )
       .firstOrNull;
 
   final status = Ledger.statusFor(dailyLimit, spentToday);
@@ -151,14 +171,16 @@ final homeStateProvider = Provider<AsyncValue<HomeState>>((ref) {
   final lately = List<MoneyTransaction>.from(transactions)
     ..sort((a, b) => b.occurredAt.compareTo(a.occurredAt));
 
-  return AsyncValue.data(HomeState(
-    units: units,
-    balanceByUnit: balances,
-    spentToday: spentToday,
-    dailyLimit: dailyLimit,
-    status: status,
-    lately: lately.take(3).toList(),
-  ));
+  return AsyncValue.data(
+    HomeState(
+      units: units,
+      balanceByUnit: balances,
+      spentToday: spentToday,
+      dailyLimit: dailyLimit,
+      status: status,
+      lately: lately.take(3).toList(),
+    ),
+  );
 });
 
 extension _FirstOrNull<T> on Iterable<T> {

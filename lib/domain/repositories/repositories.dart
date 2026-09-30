@@ -1,3 +1,4 @@
+import '../models/backup_snapshot.dart';
 import '../models/capture_source.dart';
 import '../models/limit_alert.dart';
 import '../models/limit_rule.dart';
@@ -68,6 +69,7 @@ abstract class CaptureRepository {
   });
   Future<void> deleteUnparsed(String captureId);
 }
+
 /// The notification allow-list (design.md CAPTURE_SOURCE, US-10): which
 /// apps Fuata may read notifications from. Enabled rows *are* the
 /// allow-list. There is deliberately no delete: turning an app off flips
@@ -93,4 +95,19 @@ abstract class AlertLogRepository {
   Future<bool> claim(AlertKey key, DateTime at);
 
   Future<void> purgeBefore(DateTime cutoff);
+}
+
+/// Whole-database access for export/import (issue #24). Unlike the other
+/// repositories this one is not a stream for a screen to watch: it is read
+/// once when exporting or planning an import, and written once — in a
+/// single transaction — when the person confirms.
+abstract class BackupRepository {
+  /// Everything a backup carries, including current settings.
+  Future<BackupSnapshot> readAll();
+
+  /// Writes [records] (upserting by id) and, when [settings] is given,
+  /// replaces the settings — all or nothing. Callers decide *what* to
+  /// write (see ImportPlan.recordsToWrite); this never decides to
+  /// overwrite anything on its own.
+  Future<void> apply(BackupSnapshot records, {AppSettings? settings});
 }

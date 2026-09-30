@@ -51,7 +51,7 @@ class MoneyTransaction {
   bool get countsAsSpending => type == TxType.spent && isConfirmed;
   bool get countsAsIncome => type == TxType.got && isConfirmed;
 
-  MoneyTransaction copyWith({TxStatus? status}) {
+  MoneyTransaction copyWith({TxStatus? status, String? rawText}) {
     return MoneyTransaction(
       id: id,
       unitId: unitId,
@@ -69,7 +69,7 @@ class MoneyTransaction {
       parentId: parentId,
       templateId: templateId,
       balanceAfterMinor: balanceAfterMinor,
-      rawText: rawText,
+      rawText: rawText ?? this.rawText,
     );
   }
 }
