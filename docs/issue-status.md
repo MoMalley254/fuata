@@ -1,10 +1,10 @@
-# Issue status (generated 2026-09-30T06:56Z)
+# Issue status (generated 2026-09-30T06:57Z)
 
 Source of truth: GitHub. Regenerate with `scripts/refresh-issue-status.sh`.
 
 | # | State | Milestone | Title |
 |---|---|---|---|
-| #63 | OPEN | — | feat(limits): remaining 7.8 gaps — per-unit, alert levels, quiet hours, preview, firing alerts |
+| #63 | CLOSED | — | feat(limits): remaining 7.8 gaps — per-unit, alert levels, quiet hours, preview, firing alerts |
 | #56 | OPEN | v1.1 Backlog | feat(capture): user-defined custom fields in rule builder |
 | #55 | OPEN | v1.1 Backlog | feat(capture): "This part changes" wildcard in rule builder |
 | #39 | OPEN | v1.1 Backlog | feat: Open-source licence review and contribution guide |
