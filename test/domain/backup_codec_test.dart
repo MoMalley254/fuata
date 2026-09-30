@@ -1,0 +1,266 @@
+// Issue #24: the backup file format. Pure Dart, no database.
+
+import 'dart:convert';
+
+import 'package:flutter_test/flutter_test.dart';
+import 'package:fuata/domain/logic/backup_codec.dart';
+import 'package:fuata/domain/models/limit_rule.dart';
+import 'package:fuata/domain/models/settings.dart';
+
+import 'backup_test_data.dart';
+
+void main() {
+  String encodeFull({bool includeRawText = false}) => BackupCodec.encode(
+    fullSnapshot(),
+    exportedAt: exportedAt,
+    includeRawText: includeRawText,
+  );
+
+  /// Encode a valid file, let [mutate] break it, decode the result.
+  BackupDecodeResult decodeMutated(void Function(Map<String, dynamic> root) mutate) {
+    final root = jsonDecode(encodeFull()) as Map<String, dynamic>;
+    mutate(root);
+    return BackupCodec.decode(jsonEncode(root));
+  }
+
+  Map<String, dynamic> data(Map<String, dynamic> root) =>
+      root['data'] as Map<String, dynamic>;
+
+  group('round trip', () {
+    test('decode(encode(x)) re-encodes to exactly the same file', () {
+      final first = encodeFull();
+      final decoded = BackupCodec.decode(first);
+
+      expect(decoded.errors, isEmpty);
+      expect(decoded.ok, isTrue);
+      expect(decoded.warnings, isEmpty);
+      final again = BackupCodec.encode(decoded.snapshot!, exportedAt: exportedAt);
+      expect(again, first);
+    });
+
+    test('every table survives with its values', () {
+      final s = BackupCodec.decode(encodeFull()).snapshot!;
+
+      expect(s.units.map((u) => u.name), ['Cash', 'M-Pesa']);
+      expect(s.units.first.color.toARGB32(), 0xFF2E9E6B);
+      expect(s.transactions, hasLength(2));
+      expect(s.transactions.last.amountMinor, 120000);
+      expect(s.templates.single.fieldMap.keys, ['amount']);
+      expect(s.limits.map((l) => l.period), [LimitPeriod.day, LimitPeriod.week]);
+      expect(s.limits.last.warnAt, 0.6);
+      expect(s.categories.single.name, 'Food');
+      expect(s.settings!.name, 'Wanjiru');
+      expect(s.settings!.themeMode, AppThemeMode.dark);
+      expect(s.settings!.homeSections, {HomeSection.units});
+      expect(s.settings!.bannerUnitIds, {'u1'});
+    });
+
+    test('exportedAt is read back', () {
+      expect(BackupCodec.decode(encodeFull()).exportedAt, exportedAt);
+    });
+  });
+
+  group('original message text (ADR-009)', () {
+    test('left out by default', () {
+      final json = encodeFull();
+      expect(json, isNot(contains('secret message')));
+      final decoded = BackupCodec.decode(json);
+      expect(decoded.snapshot!.transactions.first.rawText, isNull);
+      expect(decoded.includesRawText, isFalse);
+    });
+
+    test('included only when asked for', () {
+      final decoded = BackupCodec.decode(encodeFull(includeRawText: true));
+      expect(decoded.snapshot!.transactions.first.rawText, 'secret message');
+      expect(decoded.includesRawText, isTrue);
+    });
+  });
+
+  group('refuses files it cannot trust', () {
+    test('not JSON', () {
+      final r = BackupCodec.decode('this is not json {');
+      expect(r.ok, isFalse);
+      expect(r.snapshot, isNull);
+      expect(r.errors.single, contains('JSON'));
+    });
+
+    test('JSON that is not a Fuata backup', () {
+      expect(BackupCodec.decode('[1,2,3]').ok, isFalse);
+      expect(BackupCodec.decode('{"format":"something-else"}').ok, isFalse);
+    });
+
+    test('a newer format version asks the person to update', () {
+      final r = decodeMutated((root) => root['formatVersion'] = 99);
+      expect(r.ok, isFalse);
+      expect(r.errors.single, contains('newer version'));
+    });
+
+    test('a missing or invalid version', () {
+      expect(decodeMutated((root) => root.remove('formatVersion')).ok, isFalse);
+      expect(decodeMutated((root) => root['formatVersion'] = 0).ok, isFalse);
+      expect(decodeMutated((root) => root['formatVersion'] = '1').ok, isFalse);
+    });
+
+    test('no data section', () {
+      expect(decodeMutated((root) => root.remove('data')).ok, isFalse);
+    });
+
+    test('a missing required field names where', () {
+      final r = decodeMutated(
+            (root) => (data(root)['units'] as List).first.remove('createdAt'),
+      );
+      expect(r.ok, isFalse);
+      expect(r.errors.single, contains('units[0].createdAt'));
+    });
+
+    test('an unknown enum value names where', () {
+      final r = decodeMutated(
+            (root) => (data(root)['transactions'] as List).first['type'] = 'bogus',
+      );
+      expect(r.ok, isFalse);
+      expect(r.errors.single, contains('transactions[0].type'));
+    });
+
+    test('a money amount that is not a whole number', () {
+      final r = decodeMutated(
+            (root) => (data(root)['transactions'] as List).first['amountMinor'] = 12.5,
+      );
+      expect(r.ok, isFalse);
+      expect(r.errors.single, contains('amountMinor'));
+    });
+
+    test('an unreadable date', () {
+      final r = decodeMutated(
+            (root) => (data(root)['transactions'] as List).first['occurredAt'] = 'yesterday',
+      );
+      expect(r.ok, isFalse);
+      expect(r.errors.single, contains('occurredAt'));
+    });
+
+    test('the same id twice in one table', () {
+      final r = decodeMutated((root) {
+        final txs = data(root)['transactions'] as List;
+        txs.add(Map<String, dynamic>.from(txs.first as Map));
+      });
+      expect(r.ok, isFalse);
+      expect(r.errors.single, contains('more than once'));
+    });
+
+    test('a table that is not a list', () {
+      final r = decodeMutated((root) => data(root)['units'] = {'a': 1});
+      expect(r.ok, isFalse);
+    });
+
+    test('a message pattern that is not a valid regex', () {
+      final r = decodeMutated(
+            (root) => (data(root)['templates'] as List).first['pattern'] = '(unclosed',
+      );
+      expect(r.ok, isFalse);
+      expect(r.errors.single, contains('pattern'));
+    });
+
+    test('limit alert levels out of order', () {
+      final r = decodeMutated((root) {
+        final limit = (data(root)['limits'] as List).first as Map;
+        limit['warnAt'] = 0.95;
+        limit['dangerAt'] = 0.9;
+      });
+      expect(r.ok, isFalse);
+    });
+
+    test('a per-unit limit with no unit', () {
+      final r = decodeMutated(
+            (root) => (data(root)['limits'] as List).last['unitId'] = null,
+      );
+      expect(r.ok, isFalse);
+    });
+
+    test('one bad record rejects the whole file', () {
+      final r = decodeMutated((root) {
+        (data(root)['transactions'] as List).last['type'] = 'bogus';
+      });
+      expect(r.snapshot, isNull);
+    });
+
+    test('lists at most 40 problems and counts the rest', () {
+      final r = decodeMutated((root) {
+        final proto = Map<String, dynamic>.from(
+          (data(root)['transactions'] as List).first as Map,
+        )..remove('unitId');
+        data(root)['transactions'] = [
+          for (var i = 0; i < 100; i++) {...proto, 'id': 'bad$i'},
+        ];
+      });
+      expect(r.ok, isFalse);
+      expect(r.errors, hasLength(40));
+      expect(r.moreErrors, 60);
+    });
+  });
+
+  group('tidies without rejecting', () {
+    test('a limit id that does not match its scope and period is normalised', () {
+      final r = decodeMutated(
+            (root) => (data(root)['limits'] as List).first['id'] = 'my-own-id',
+      );
+      expect(r.ok, isTrue);
+      expect(r.snapshot!.limits.first.id, 'l_overall_day');
+      expect(r.warnings, isNotEmpty);
+    });
+
+    test('an overall limit that names a unit ignores the unit', () {
+      final r = decodeMutated(
+            (root) => (data(root)['limits'] as List).first['unitId'] = 'u1',
+      );
+      expect(r.ok, isTrue);
+      expect(r.snapshot!.limits.first.unitId, isNull);
+      expect(r.warnings, isNotEmpty);
+    });
+
+    test('an app id is derived from its package name', () {
+      final r = decodeMutated(
+            (root) => (data(root)['captureSources'] as List).first['id'] = 'whatever',
+      );
+      expect(r.ok, isTrue);
+      expect(r.snapshot!.captureSources.single.id, 'src_com.example.messages');
+    });
+
+    test('unknown extra keys are ignored', () {
+      final r = decodeMutated((root) {
+        root['somethingNew'] = true;
+        (data(root)['units'] as List).first['futureField'] = 42;
+      });
+      expect(r.ok, isTrue);
+    });
+
+    test('a missing table is an empty table', () {
+      final r = decodeMutated((root) => data(root).remove('limits'));
+      expect(r.ok, isTrue);
+      expect(r.snapshot!.limits, isEmpty);
+    });
+  });
+
+  group('settings are forgiving', () {
+    test('an unknown value keeps the default and warns', () {
+      final r = decodeMutated(
+            (root) => (data(root)['settings'] as Map)['themeMode'] = 'neon',
+      );
+      expect(r.ok, isTrue);
+      expect(r.snapshot!.settings!.themeMode, AppSettings.defaults.themeMode);
+      expect(r.warnings.single, contains('themeMode'));
+    });
+
+    test('a wrong-typed toggle keeps the default and warns', () {
+      final r = decodeMutated(
+            (root) => (data(root)['settings'] as Map)['bannerEnabled'] = 'yes',
+      );
+      expect(r.ok, isTrue);
+      expect(r.snapshot!.settings!.bannerEnabled, AppSettings.defaults.bannerEnabled);
+    });
+
+    test('no settings section means null settings', () {
+      final r = decodeMutated((root) => data(root).remove('settings'));
+      expect(r.ok, isTrue);
+      expect(r.snapshot!.settings, isNull);
+    });
+  });
+}
