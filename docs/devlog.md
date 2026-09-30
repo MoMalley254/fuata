@@ -6,6 +6,35 @@ A running, honest record of the build: goals, what got done, what broke, and why
 
 ---
 
+## Day 11 (later): Wed 30 Sep 2026 — Onboarding flow (#7)
+
+**Goals**
+- [x] Five skippable steps: welcome (name, accent), add your money, daily limit, banner, auto-catch (ui-design-brief.md 7.1)
+- [x] First launch only; never again once finished or skipped
+- [x] Answer logic unit-tested (testing.md O-01 to O-06)
+- [x] Compile, run and try on a real device
+
+**Done**
+- `OnboardingDraft` and `LimitStepper` (`lib/domain/logic/onboarding.dart`): pure Dart that turns the answers into units, a daily limit and settings.
+- `OnboardingScreen` and one widget per step under `lib/widgets/onboarding/`. The banner step's preview is the real `BannerPreview` fed by the real `BannerContent`, from the units and limit just entered.
+- `AppGate` is now the app's `home`: it waits for the first settings read, then shows onboarding or the tabs.
+- New `onboardingComplete` setting.
+
+**What broke / learned**
+- Ran clean end to end: `dart run build_runner build`, `flutter analyze` and `flutter test` pass, and the onboarding rows in the testing.md manual pass were exercised on a real device.
+
+**Decisions**
+- **Nothing is saved until the end**, except the accent (written at once so the whole app visibly recolours). Units, the limit and the settings are saved together on the last step; settings go last because that write is what leaves onboarding, and units and the limit are saved by id, so a retry after a failure can't duplicate them.
+- **The flag is a setting, and "no flag" means "already onboarded".** A truly empty settings table is a fresh install; rows without the key belong to an install from before #7. Backup import decodes with the flag on, so a restore never re-runs onboarding.
+- **Wait for settings before choosing.** `currentSettingsProvider` falls back to defaults while loading, which would flash onboarding at existing users, hence `AppGate`.
+- **A skipped name stays empty** instead of keeping the development placeholder "Amina"; Home says "Hi there".
+- **"Turn on" opens Auto-Catch** (access plus the apps to watch) rather than jumping straight to Android's settings, so the allow-list gets chosen too, and the restricted-settings help is on screen.
+- **KES only**, like the unit sheet. The limit stepper is whole shillings, with steps that grow (100, then 500, then 1,000).
+
+**Time spent:** _tbc_
+
+---
+
 ## Day 11: Wed 30 Sep 2026 — Today / Week / Month summaries (#23)
 
 **Goals**
