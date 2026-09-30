@@ -543,6 +543,9 @@ class BackupCodec {
       quietHoursEnabled: flag('quietHoursEnabled', d.quietHoursEnabled),
       quietStartMinute: minute('quietStartMinute', d.quietStartMinute),
       quietEndMinute: minute('quietEndMinute', d.quietEndMinute),
+      // A backup only exists because the app was set up; restoring one
+      // must never send the person back through onboarding (#7).
+      onboardingComplete: true,
     );
   }
 

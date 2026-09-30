@@ -151,12 +151,32 @@ Run against real drift repositories on an in-memory database (`test/domain/captu
 | N-09 | Same unreadable text from two different apps | Two entries |
 | N-10 | Allow-list storage: one row per package, off keeps the row, order by name, toggling a template-referenced source doesn't break the FK | `capture_source_repository_test.dart` |
 
+### Onboarding (US-14) — issue #7
+
+| ID | Case | Test file |
+|---|---|---|
+| O-01 | Daily-limit stepper: steps grow with the number (100 → 500 → 1,000), `down` mirrors `up` at every boundary, stays inside its min and max, and every preset is a stop on the way up | `onboarding_test.dart` |
+| O-02 | Draft units: add, replace by id (keeping order), remove one | `onboarding_test.dart` |
+| O-03 | Daily limit: none when skipped; otherwise the overall daily rule (`l_overall_day`, KES) with alert levels taken from existing limits | `onboarding_test.dart` |
+| O-04 | `settingsFor`: trims the name, applies accent and banner choice, marks onboarding complete, leaves every other setting alone; a skipped name stays empty | `onboarding_test.dart` |
+| O-05 | Settings restored from a backup are never sent to onboarding | `onboarding_test.dart` |
+| O-06 | Flag storage: fresh install is not onboarded; finishing is remembered; saving the accent mid-flow does not finish it; settings rows from before #7 (no flag) read as already onboarded | `onboarding_settings_test.dart` |
+
 ## 3. Manual device checklist
 
 **Setup:** real Android device (API 26+), release or profile build installed, notification permission granted. Record device, Android version and build in the table at the end. Mark each row ☐ → ✅ or ❌ and add a note.
 
 ### Install and first run (US-01, US-14)
-- [ ] First launch shows onboarding; every step can be skipped
+- [x] First launch shows onboarding; every step can be skipped
+- [x] Back (arrow and system back) steps through the flow; only on the first step does it leave the app
+- [x] Picking an accent on step 1 recolours the onboarding screen straight away
+- [x] Skipping every step lands on Home with no units, no limit, no banner, greeting "Hi there" (no name)
+- [x] Quitting mid-onboarding and reopening starts onboarding again; finishing it once never shows it again
+- [x] Units added in step 2 (with an opening balance) appear on Home and My money after finishing
+- [x] Daily limit set in step 3 shows on Home's hero card and in Me → Limits
+- [x] Banner step preview uses the units and limit just entered; "Yes, show it" posts the banner after finishing (Android 13+: asks for notification permission then, not before)
+- [x] "Turn on" on the last step opens Auto-Catch on top of Home; "Set it up later" lands on Home
+- [x] An install upgraded from a build without onboarding does not see it; nor does a restore from backup on a fresh install
 - [ ] Adding a unit needs no card or account number
 - [ ] Custom name, emoji/icon and colour are shown on Home
 - [ ] Name and accent colour change the app's appearance

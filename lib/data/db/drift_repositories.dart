@@ -222,6 +222,8 @@ class DriftSettingsRepository implements SettingsRepository {
   static const _kQuietStart = 'quietStartMinute';
   static const _kQuietEnd = 'quietEndMinute';
 
+  static const _kOnboardingComplete = 'onboardingComplete';
+
   @override
   Stream<AppSettings> watchSettings() {
     return _db.select(_db.settingsEntries).watch().map(_toSettings);
@@ -289,6 +291,8 @@ class DriftSettingsRepository implements SettingsRepository {
           key: _kQuietStart, value: s.quietStartMinute.toString()),
       SettingsEntriesCompanion.insert(
           key: _kQuietEnd, value: s.quietEndMinute.toString()),
+      SettingsEntriesCompanion.insert(
+          key: _kOnboardingComplete, value: s.onboardingComplete.toString()),
     ];
   }
 
@@ -373,6 +377,10 @@ class DriftSettingsRepository implements SettingsRepository {
       quietStartMinute:
       minuteOr(map[_kQuietStart], defaults.quietStartMinute),
       quietEndMinute: minuteOr(map[_kQuietEnd], defaults.quietEndMinute),
+      // Rows exist but carry no onboarding key: this install predates #7
+      // (or was restored from a backup), so the person has already been
+      // through setup. Only a truly empty table (above) means "first run".
+      onboardingComplete: boolOr(map[_kOnboardingComplete], true),
     );
   }
 }

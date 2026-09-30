@@ -10,7 +10,7 @@ import 'package:fuata/ui/providers/app_providers.dart';
 import 'package:fuata/ui/providers/alert_providers.dart';
 import 'package:fuata/ui/providers/banner_providers.dart';
 import 'package:fuata/ui/providers/capture_providers.dart';
-import 'package:fuata/ui/screens/root_shell.dart';
+import 'package:fuata/ui/screens/app_gate.dart';
 import 'package:fuata/ui/theme/app_theme.dart';
 import 'package:fuata/widgets/sheets/add_transaction_sheet.dart';
 
@@ -119,7 +119,8 @@ class _FuataState extends ConsumerState<Fuata> with WidgetsBindingObserver {
       themeMode: settings.themeMode.flutterThemeMode,
       theme: AppTheme.light(accent: settings.accent),
       darkTheme: AppTheme.dark(accent: settings.accent),
-      home: const RootShell(),
+      // Issue #7: onboarding on first launch, the tabs afterwards.
+      home: const AppGate(),
       navigatorKey: rootNavigatorKey,
       scaffoldMessengerKey: rootScaffoldMessengerKey,
       builder: FlutterSmartDialog.init(),

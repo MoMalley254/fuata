@@ -166,6 +166,12 @@ class AppSettings {
   final int quietStartMinute;
   final int quietEndMinute;
 
+  // Onboarding (issue #7). False on a fresh install, so the first launch
+  // shows the onboarding flow; flipped to true when it is finished or
+  // skipped, and never shown again. Installs that predate #7 have settings
+  // rows but no such key, and are read as true (see DriftSettingsRepository).
+  final bool onboardingComplete;
+
   const AppSettings({
     required this.name,
     required this.accent,
@@ -185,6 +191,7 @@ class AppSettings {
     this.quietHoursEnabled = false,
     this.quietStartMinute = 22 * 60,
     this.quietEndMinute = 7 * 60,
+    this.onboardingComplete = false,
   });
 
   static final defaults = AppSettings(
@@ -197,7 +204,7 @@ class AppSettings {
     amountsHiddenInRecents: false,
     redactedLockScreenBanner: true,
     autoAcceptCaptures: false,
-    bannerEnabled: false, // turned on by onboarding (#7) or this screen
+    bannerEnabled: false, // turned on by onboarding (#7) or the Banner screen
     bannerHeadline: BannerHeadline.leftToday,
     bannerUnitIds: <String>{},
     bannerShowProgress: true,
@@ -206,6 +213,7 @@ class AppSettings {
     quietHoursEnabled: false,
     quietStartMinute: 22 * 60,
     quietEndMinute: 7 * 60,
+    onboardingComplete: false,
   );
 
   AppSettings copyWith({
@@ -227,6 +235,7 @@ class AppSettings {
     bool? quietHoursEnabled,
     int? quietStartMinute,
     int? quietEndMinute,
+    bool? onboardingComplete,
   }) {
     return AppSettings(
       name: name ?? this.name,
@@ -249,6 +258,7 @@ class AppSettings {
       quietHoursEnabled: quietHoursEnabled ?? this.quietHoursEnabled,
       quietStartMinute: quietStartMinute ?? this.quietStartMinute,
       quietEndMinute: quietEndMinute ?? this.quietEndMinute,
+      onboardingComplete: onboardingComplete ?? this.onboardingComplete,
     );
   }
 }

@@ -261,7 +261,8 @@ class Greeting extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Hi $name 👋',
+              // Onboarding lets the name be skipped; don't greet "Hi  👋".
+              name.trim().isEmpty ? 'Hi there 👋' : 'Hi $name 👋',
               style: AppTypography.headlineLg.copyWith(color: c.onSurface),
             ),
             Text(
