@@ -66,6 +66,24 @@ flutter test --coverage    # optional
 | T-16 | Two claims for the same (limit, period, level) | Exactly one wins (drift primary key) |
 | T-17 | Limit amount changed / limit deleted | Its announcements are cleared; editing levels or the switch keeps them |
 
+### Summaries (US-12) — issue #23
+
+| ID | Case | Expected |
+|---|---|---|
+| S-01 | Moved, adjustment and pending rows | Not in spent or got |
+| S-02 | Summary spent vs `Ledger.spentInPeriod` | Same figure for day, week and month |
+| S-03 | Sunday 23:59 vs Monday 00:00 | Sunday is last week, Monday this week |
+| S-04 | 31 Aug 23:59 vs 1 Sep 00:00 | Calendar month boundary respected |
+| S-05 | Unit in another currency | Excluded from the total (see T-13) |
+| S-06 | "Java House" and "java house " | One recipient, amounts added, ranked by amount |
+| S-07 | Fee row with a parent payment | Added to the parent's recipient, not a second transaction |
+| S-08 | Money received | Ranked by who it came from |
+| S-09 | Spending across units | Split biggest first |
+| S-10 to S-12 | Previous period | Cut at the same point (time of day, day of week, day of month), incl. Dec to Jan |
+| S-13 to S-17 | Story text | Total, top spot and comparison; no comparison without a previous figure; empty and income-only wording |
+| S-18 | Average per day | Counts today; 1 day on a Monday |
+| S-19 | Friendly money | ".00" dropped, real cents kept |
+
 ### Parser (US-08, US-09, US-10, US-11)
 Use several fake messages, never real ones.
 
@@ -170,6 +188,9 @@ Run against real drift repositories on an in-memory database (`test/domain/captu
 ### Summaries and detail level (US-12, US-13)
 - [ ] Today/Week/Month figures match hand-calculated totals
 - [ ] Top recipients and per-unit split are correct
+- [ ] Day / Week / Month switch works; "See all" lists every recipient; "Show me more" opens and closes
+- [ ] Reachable from Home ("See my summaries") and from the Activity app bar
+- [ ] After midnight, reopen the screen: it shows the new day (see Known limitations)
 - [ ] Simple, Balanced and Detailed levels show the intended fields only
 
 ### Data and privacy (US-15, US-16)
@@ -236,3 +257,4 @@ Failures found during a run become GitHub issues labelled `type: bug`, with step
 - Notification content can be truncated or hidden by the SMS app, which can prevent parsing.
 - Overall limits cover only units in the limit's currency (v0.1 is effectively single-currency).
 - The database is not encrypted in v0.1 (ADR-010).
+- Summary figures are computed when transactions change, so a summary screen left open across midnight keeps showing the old day until the next change or until it is reopened.
