@@ -61,6 +61,10 @@ flutter test --coverage    # optional
 | T-11 | Week starts Monday; month is calendar month | Period boundaries correct |
 | T-12 | Alert fires once per threshold per period | No repeat on the next transaction in the same band |
 | T-13 | Limit and unit currencies differ | Unit excluded from the overall total |
+| T-14 | One transaction jumps 50% → 105% | One "over" alert; lower levels marked used |
+| T-15 | Quiet hours 22:00–07:00 | 23:00 and 06:59 quiet; 07:00 and 12:00 not; start == end never quiet |
+| T-16 | Two claims for the same (limit, period, level) | Exactly one wins (drift primary key) |
+| T-17 | Limit amount changed / limit deleted | Its announcements are cleared; editing levels or the switch keeps them |
 
 ### Parser (US-08, US-09, US-10, US-11)
 Use several fake messages, never real ones.
@@ -119,6 +123,14 @@ Run against real drift repositories on an in-memory database (`test/domain/captu
 - [ ] Safe → Warning → Danger → Overdraft transitions happen at 70%, 90%, 100%
 - [ ] Status is legible without colour (icon and label present)
 - [ ] Alert notification appears once per threshold, on its own channel
+- [ ] Spend to 70% / 90% / 100% of the daily limit: three alerts, each once; spending more in the same band adds none
+- [ ] Jump from under 70% straight past 100% with one transaction: one "over" alert, no 70%/90% ones afterwards
+- [ ] Close the app, then let a captured notification cross a threshold: the alert still appears, exactly once (background isolate)
+- [ ] Raise a limit's amount after alerting: approaching the new number alerts again. Only moving the alert sliders does not repeat anything
+- [ ] Alert-level sliders: drag; the preview's emoji flips at the chosen numbers; the two thumbs cannot get within 5% of each other
+- [ ] Quiet hours on, alert during the window: it appears in the shade with no sound or pop-up (channel "Limit alerts (quiet hours)"); outside the window it buzzes
+- [ ] Alerts switch off: nothing fires, and turning it back on does not replay old ones
+- [ ] Per-unit limit (Limits > More, and the unit page): only that unit's spending counts, the alert names the unit, blank field removes it
 
 ### Banner (US-05, US-07)
 - [ ] Banner shows emoji, amount left and progress bar

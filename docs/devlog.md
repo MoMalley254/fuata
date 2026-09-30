@@ -6,6 +6,34 @@ A running, honest record of the build: goals, what got done, what broke, and why
 
 ---
 
+## Day 10: Wed 30 Sep 2026 — Finishing limits and alerts (#63)
+
+**Goals**
+- [x] Per-unit limits, under "More" and on the unit page
+- [x] Alert-level sliders, quiet hours, live banner preview (ui-design-brief.md 7.8)
+- [x] Alerts that actually fire: once per threshold per period, separate channel (US-06)
+- [ ] Verify on a real device (moves to #26)
+
+**Done**
+- `AlertEngine` (`lib/domain/logic/alert_engine.dart`): pure "what is due" over limits + transactions + what already fired. One alert per limit per evaluation, for the highest level crossed.
+- AlertLogRepository and an alert_firings table, added to the v1 onCreate. No schemaVersion bump: nothing has shipped, so there is no install that needs the additive onUpgrade step. A commented-out if (from < 2) await m.createTable(alertFirings); in app_database.dart documents the migration to uncomment if this ever does ship behind a real release. `claimDueAlerts` claims before showing; `fireDueAlerts` (`platform/alerts.dart`) shows. Called from the UI isolate (`alertSyncProvider`) and from the listener's background isolate right after the banner re-post.
+- Limits screen: Alerts card (toggle, range slider, "try it" scrubber driving the real `BannerPreview`), Quiet hours card, "More" list of per-unit limits. `EditUnitLimitsSheet` handles add/edit/remove in one place (blank field = no limit).
+
+**What broke / learned**
+- Nothing was run on a device or compiled in the session that wrote this. `flutter pub run build_runner build` is required (new table), then `flutter test`.
+
+**Decisions**
+- **Claim, don't check.** Both isolates can see the same crossing. "Already fired?" then "fire" would race; the table's primary key makes the claim atomic, and a failed claim means *do not show*.
+- **Alert levels are stored on each `LimitRule`** (they already had `warnAt`/`dangerAt`), and one slider pair edits all of them; new limits inherit. No new settings for levels.
+- **Quiet hours deliver silently rather than drop.** Android fixes a channel's sound at creation, so quiet alerts use their own low-importance channel (`fuata_alerts_quiet`).
+- **Changing a limit's amount clears its announcements** (raise 1,000 to 5,000 and you should be nudged again); changing only levels or the switch does not, so dragging a slider never repeats an alert.
+- The slider writes on release, not per tick, so the banner and alerts don't re-run mid-drag.
+- The banner and Home ring still follow the overall daily limit only. Per-unit limits alert but do not change the banner emoji.
+
+**Time spent:** _tbc_
+
+---
+
 ## Day 9: Tue 29 Sep 2026 — Notification listener, allow-list and dedupe (#22)
 
 **Goals**

@@ -1,9 +1,10 @@
-# Issue status (generated 2026-09-29T23:37Z)
+# Issue status (generated 2026-09-30T06:56Z)
 
 Source of truth: GitHub. Regenerate with `scripts/refresh-issue-status.sh`.
 
 | # | State | Milestone | Title |
 |---|---|---|---|
+| #63 | OPEN | — | feat(limits): remaining 7.8 gaps — per-unit, alert levels, quiet hours, preview, firing alerts |
 | #56 | OPEN | v1.1 Backlog | feat(capture): user-defined custom fields in rule builder |
 | #55 | OPEN | v1.1 Backlog | feat(capture): "This part changes" wildcard in rule builder |
 | #39 | OPEN | v1.1 Backlog | feat: Open-source licence review and contribution guide |
@@ -29,7 +30,7 @@ Source of truth: GitHub. Regenerate with `scripts/refresh-issue-status.sh`.
 | #19 | CLOSED | v0.1 MVP | feat(capture): template model and parser |
 | #18 | CLOSED | v0.1 MVP | spike: notification listener with app closed |
 | #17 | CLOSED | v0.1 MVP | feat(banner): banner setup screen with live preview |
-| #16 | OPEN | v0.1 MVP | feat(banner): ongoing notification banner |
+| #16 | CLOSED | v0.1 MVP | feat(banner): ongoing notification banner |
 | #15 | CLOSED | v0.1 MVP | feat(limits): limit engine and status |
 | #14 | CLOSED | v0.1 MVP | feat(ledger): computed balances, transfers, fees |
 | #13 | CLOSED | v0.1 MVP | feat(data): local database and repositories |
