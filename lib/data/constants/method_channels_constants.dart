@@ -6,3 +6,8 @@ const String shareIntakeMethodName = 'fuata/share_intake';
 // service uses to hand a notification to Dart.
 const String captureMethodName = 'fuata/capture';
 const String captureBackgroundMethodName = 'fuata/capture_bg';
+
+// Issue #24. Save / open a backup file through Android's system file
+// picker (Storage Access Framework): no storage permission, and the
+// person chooses the location (US-15).
+const String backupFilesMethodName = 'fuata/backup_files';
