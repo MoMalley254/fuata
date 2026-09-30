@@ -22,6 +22,7 @@ import '../theme/app_spacing.dart';
 import '../theme/app_typography.dart';
 import '../../widgets/app_chips.dart';
 import 'banner_setup_screen.dart';
+import 'data_backup_screen.dart';
 import 'limits_screen.dart';
 
 /// Me: settings and personalisation (ui-design-brief.md section 7.12,
@@ -47,10 +48,12 @@ class MeScreen extends ConsumerWidget {
     final pendingCount = ref.watch(pendingTransactionsProvider).length;
     final watchedApps = ref.watch(allowedPackagesProvider).length;
     final dailyLimit = (ref.watch(limitsProvider).value ?? const <LimitRule>[])
-        .where((l) =>
-    l.scope == LimitScope.overall &&
-        l.period == LimitPeriod.day &&
-        l.enabled)
+        .where(
+          (l) =>
+              l.scope == LimitScope.overall &&
+              l.period == LimitPeriod.day &&
+              l.enabled,
+        )
         .firstOrNull;
 
     void update(AppSettings Function(AppSettings) fn) {
@@ -168,7 +171,7 @@ class MeScreen extends ConsumerWidget {
                   icon: Icons.mark_email_read_outlined,
                   title: 'Message reading rules',
                   subtitle:
-                  'Teach Fuata to read a bank or mobile-money message',
+                      'Teach Fuata to read a bank or mobile-money message',
                   onTap: () => Navigator.of(context).push(
                     MaterialPageRoute(
                       builder: (_) => const RuleBuilderScreen(),
@@ -194,7 +197,9 @@ class MeScreen extends ConsumerWidget {
                       ? 'On — choose what it shows'
                       : 'Off — choose what the notification banner shows',
                   onTap: () => Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => const BannerSetupScreen()),
+                    MaterialPageRoute(
+                      builder: (_) => const BannerSetupScreen(),
+                    ),
                   ),
                 ),
                 SizedBox(height: AppSpacing.sm),
@@ -202,7 +207,7 @@ class MeScreen extends ConsumerWidget {
                   icon: Icons.sell_outlined,
                   title: 'Categories',
                   subtitle:
-                  'Rename or add category names and icons — coming soon',
+                      'Rename or add category names and icons — coming soon',
                 ),
               ],
             ),
@@ -231,7 +236,13 @@ class MeScreen extends ConsumerWidget {
               ],
             ),
             const SizedBox(height: AppSpacing.lg),
-            PrivacyCard(settings: settings, onChanged: update),
+            PrivacyCard(
+              settings: settings,
+              onChanged: update,
+              onOpenBackup: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const DataBackupScreen()),
+              ),
+            ),
           ],
         ),
       ),
