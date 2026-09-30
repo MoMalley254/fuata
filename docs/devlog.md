@@ -6,6 +6,32 @@ A running, honest record of the build: goals, what got done, what broke, and why
 
 ---
 
+## Day 11: Wed 30 Sep 2026 — Today / Week / Month summaries (#23)
+
+**Goals**
+- [x] Segmented Day / Week / Month control (ui-design-brief.md 7.11)
+- [x] Story card, spent vs got, top recipients, per-unit split, "Show me more"
+- [x] Figures unit-tested against hand-calculated totals (testing.md S-01 to S-19)
+- [ ] Verify on a real device (moves to #26)
+
+**Done**
+- `PeriodSummary.build` (`lib/domain/logic/summary.dart`): one pass over the transactions, using the same `countsAsSpending` / `countsAsIncome` rules and the same Monday-start week and calendar month as `Ledger`, so a summary can never disagree with Home or the limits.
+- `summaryProvider` (family by period) and `SummaryScreen`, with small cards under `lib/widgets/summary/`. Entry points: "See my summaries" on Home and an insights icon in the Activity app bar.
+
+**What broke / learned**
+- Nothing was run on a device or compiled in the session that wrote this. `flutter analyze` and `flutter test` come first.
+
+**Decisions**
+- **Compare like with like.** "So far this week" is compared with the same stretch of last week (Mon to the same weekday and time), not with a finished week, so mid-week never reads as "much less". Wording is deliberately soft: "A bit more than last week".
+- **Fees follow their payment.** A fee row is attributed to its parent's recipient and is not counted as a separate transaction, so "Naivas" shows payment plus fee.
+- **Recipients, not categories.** ui-design-brief.md's example mentions Food, but categories have no repository yet. This ranks by counterparty (what US-12 asks for). Unnamed spending is shown under "Show me more" so the lists still add up.
+- **Other-currency units are left out** rather than added in (T-13), and a unit in the total's currency is the first unit's, the same rule Home uses.
+- Per-unit split only appears when more than one unit was used. Archived units still show, as "Archived unit".
+
+**Time spent:** _tbc_
+
+---
+
 ## Day 10: Wed 30 Sep 2026 — Finishing limits and alerts (#63)
 
 **Goals**
