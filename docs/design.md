@@ -261,12 +261,22 @@ limit id + period key + level is the atomic claim described in §5.4).
 - **Mitigations now:** auto-backup off, amounts hidden in recents, redacted lock-screen banner by default.
 - **Planned:** SQLCipher with an Android Keystore key, plus app lock, in v1.1.
 
+### ADR-011: Backup as one versioned, validated JSON file (issue #24)
+- **Decision:** Export/import is a single JSON file (`format: "fuata-backup"`, `formatVersion`), saved and opened through Android's system file window, so Fuata needs no storage permission and never sees a file the person didn't pick. `BackupCodec` (pure Dart) reads and writes it; `ImportPlanner` (pure Dart) decides what an import would do; `DriftBackupRepository` writes it.
+- **What's in it:** units, transactions, categories, limits, message rules, watched apps, settings. **Not in it:** balances (derived, ADR-004), unparsed messages (7-day inbox), alert history (derived; a new phone should not be silenced for a period it never showed). Original message text is left out unless the person opts in (ADR-009).
+- **Never overwrites silently:** an import is planned first, and nothing is written while previewing. Each record is *new* (added), *identical* (skipped) or *conflicting* (same id, different content). Conflicts are kept as they are on the phone unless the person picks "Use the file's version", which asks once more. Settings are replaced only if the person switches that on (default on only for a phone with no data).
+- **All or nothing:** a file with any problem is refused whole, and a valid one is written in one database transaction, parents before children. Records pointing at something found neither in the file nor on the phone block the import instead of reaching a foreign key.
+- **Versioning:** `formatVersion` only goes up; a newer file is refused with "update Fuata". Unknown extra keys are ignored, so adding a field doesn't need a version bump.
+- **Stable identities:** limits and watched apps are identified by what they are (`LimitRule.idFor`, `CaptureSource.idFor`), so a file with different ids is tidied to match rather than creating a second limit for the same slot.
+- **Consequences:** import never deletes (see testing.md, known limitations). The file is unencrypted (ADR-010).
+
 ## 5. Open items
 
 | Item | Status |
 |---|---|
 | Local database and repositories (issue #13) | **Done.** See ADR-001's "Implemented" note. |
 | Listener + DB from a background isolate (issue #18) | **Done.** See §5.1 below. |
+| JSON export/import (issue #24) | **Implemented; device pass pending (#26).** See ADR-011. |
 | Notification listener, allow-list and dedupe (issue #22) | **Implemented; device pass pending (#26).** See §5.2. |
 | Final visual tokens (colours, type scale, radii) | Pending: copy from the implemented theme into a "Visual direction" section |
 | Which providers get bundled template presets | Deferred to v1.1 |
