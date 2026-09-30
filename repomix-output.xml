@@ -19615,6 +19615,307 @@ Failures found during a run become GitHub issues labelled `type: bug`, with step
 - Backup files are plain, unencrypted JSON (ADR-010). Keep them somewhere safe.
 </file>
 
+<file path="lib/ui/screens/unit_detail_screen.dart">
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:fuata/domain/logic/ledger.dart';
+import 'package:intl/intl.dart';
+
+import '../../domain/models/limit_rule.dart';
+import '../../domain/models/money.dart';
+import '../../widgets/activity/empty_activity.dart';
+import '../../widgets/activity/grouped_list.dart';
+import '../../widgets/limits/unit_limit_summary.dart';
+import '../../widgets/personalization/action_row.dart';
+import '../../widgets/sheets/edit_unit_limits_sheet.dart';
+import '../../widgets/sheets/edit_unit_sheet.dart';
+import '../../widgets/sheets/update_balance_sheet.dart';
+import '../providers/app_providers.dart';
+import '../theme/app_colors.dart';
+import '../theme/app_spacing.dart';
+import '../theme/app_typography.dart';
+import 'manage_rules_screen.dart';
+
+/// Unit page (ui-design-brief.md section 7.5): balance, "Update balance",
+/// edit name/icon/colour, archive, and that unit's recent activity —
+/// reusing GroupedList/showTransactionDetail from the Activity screen
+/// rather than a second implementation.
+///
+/// The per-unit limit row is live as of #63 (it opens the same sheet as
+/// Limits & alerts > More); the message-reading row is live as of #20 — it opens the rule builder
+/// pre-set to this unit and shows how many rules the unit already has.
+
+class UnitDetailScreen extends ConsumerWidget {
+  final String unitId;
+  const UnitDetailScreen({super.key, required this.unitId});
+
+  void _confirmArchive(
+      BuildContext context,
+      WidgetRef ref,
+      String unitId,
+      String name,
+      ) {
+    showDialog(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text('Archive $name?'),
+        content: const Text(
+          "It'll disappear from Home and My money, but its history stays safe.",
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () async {
+              await ref.read(unitRepositoryProvider).archiveUnit(unitId);
+              if (dialogContext.mounted) Navigator.of(dialogContext).pop();
+              if (context.mounted) Navigator.of(context).pop();
+            },
+            child: const Text('Archive'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final c = context.colors;
+    final unitsAsync = ref.watch(unitsProvider);
+    final txAsync = ref.watch(transactionsProvider);
+
+    return unitsAsync.when(
+      loading: () => const Center(child: CircularProgressIndicator.adaptive()),
+      error: (e, st) => Center(child: Text('Something went wrong: $e')),
+      data: (units) {
+        final unit = units.where((u) => u.id == unitId).firstOrNull;
+        if (unit == null) {
+          return Scaffold(
+            appBar: AppBar(),
+            body: Center(
+              child: Text(
+                "This one's gone.",
+                style: AppTypography.bodyMd.copyWith(color: c.onSurfaceVariant),
+              ),
+            ),
+          );
+        }
+
+        return txAsync.when(
+          loading: () =>
+          const Center(child: CircularProgressIndicator.adaptive()),
+          error: (e, st) => Center(child: Text('Something went wrong: $e')),
+          data: (allTransactions) {
+            final balance = Ledger.balanceOf(unit, allTransactions);
+            final unitTransactions =
+            allTransactions
+                .where((t) => t.unitId == unit.id && t.isConfirmed)
+                .toList()
+              ..sort((a, b) => b.occurredAt.compareTo(a.occurredAt));
+
+            return Scaffold(
+              appBar: AppBar(
+                title: Text(unit.name),
+                actions: [
+                  IconButton(
+                    tooltip: 'Edit',
+                    onPressed: () => showEditUnitSheet(context, existing: unit),
+                    icon: const Icon(Icons.edit_outlined),
+                  ),
+                  PopupMenuButton<String>(
+                    onSelected: (v) {
+                      if (v == 'archive') {
+                        _confirmArchive(context, ref, unit.id, unit.name);
+                      }
+                    },
+                    itemBuilder: (_) => const [
+                      PopupMenuItem(value: 'archive', child: Text('Archive')),
+                    ],
+                  ),
+                ],
+              ),
+              body: SafeArea(
+                child: ListView(
+                  padding: const EdgeInsets.fromLTRB(
+                    AppSpacing.margin,
+                    AppSpacing.sm,
+                    AppSpacing.margin,
+                    AppSpacing.xl,
+                  ),
+                  children: [
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(AppSpacing.lg),
+                      decoration: BoxDecoration(
+                        color: unit.color.withValues(alpha: 0.10),
+                        borderRadius: BorderRadius.circular(
+                          AppSpacing.cardRadiusHero,
+                        ),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Text(
+                                unit.iconEmoji,
+                                style: const TextStyle(fontSize: 28),
+                              ),
+                              const SizedBox(width: AppSpacing.sm),
+                              Text(
+                                unit.name,
+                                style: AppTypography.headlineSm.copyWith(
+                                  color: c.onSurface,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: AppSpacing.sm),
+                          Text(
+                            Money(balance, unit.currencyCode).format(),
+                            style: AppTypography.displayHeroMobile.copyWith(
+                              color: c.onSurface,
+                            ),
+                          ),
+                          const SizedBox(height: AppSpacing.xs),
+                          Text(
+                            unit.lastVerifiedAt == null
+                                ? 'Not checked yet'
+                                : 'Last checked ${DateFormat('d MMM, h:mm a').format(unit.lastVerifiedAt!)}',
+                            style: AppTypography.bodySm.copyWith(
+                              color: c.onSurfaceVariant,
+                            ),
+                          ),
+                          const SizedBox(height: AppSpacing.md),
+                          FilledButton.tonal(
+                            onPressed: () => showUpdateBalanceSheet(
+                              unit: unit,
+                              currentBalanceMinor: balance,
+                            ),
+                            child: const Text('Update balance'),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: AppSpacing.lg),
+                    ActionRow(
+                      icon: Icons.speed_rounded,
+                      title: 'Limit for this unit',
+                      subtitle: unitLimitSummary(
+                        ref.watch(limitsProvider).value ?? const <LimitRule>[],
+                        unit,
+                      ),
+                      onTap: () => showEditUnitLimitsSheet(unit: unit),
+                    ),
+                    const SizedBox(height: AppSpacing.sm),
+                    Builder(
+                      builder: (context) {
+                        final templates =
+                            ref.watch(unitTemplatesProvider(unit.id)).value ??
+                                [];
+                        return ActionRow(
+                          icon: Icons.mark_email_read_outlined,
+                          title: 'Reading messages',
+                          subtitle: templates.isEmpty
+                              ? 'Teach the app to read messages for this unit'
+                              : '${templates.length} rule${templates.length == 1 ? '' : 's'} · add or review',
+                          onTap: () => Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) =>
+                                  ManageRulesScreen(unitId: unit.id),
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                    const SizedBox(height: AppSpacing.lg),
+                    Text(
+                      'Recent activity',
+                      style: AppTypography.headlineSm.copyWith(
+                        color: c.onSurface,
+                      ),
+                    ),
+                    const SizedBox(height: AppSpacing.sm),
+                    if (unitTransactions.isEmpty)
+                      const EmptyActivity()
+                    else
+                      GroupedList(
+                        transactions: unitTransactions,
+                        unitById: {unit.id: unit},
+                      ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+}
+
+extension _FirstOrNull<T> on Iterable<T> {
+  T? get firstOrNull => isEmpty ? null : first;
+}
+</file>
+
+<file path="pubspec.yaml">
+name: fuata
+description: "A new Flutter project."
+
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.13.2
+
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+
+  cupertino_icons: ^1.0.8
+  flutter_riverpod: ^3.4.3
+  intl: ^0.20.3
+
+  # Local database (#13) — no backend, everything on-device (ADR-001/ADR-009).
+  drift: ^2.35.0
+  path_provider: ^2.1.6
+  path: ^1.9.1
+  flutter_smart_dialog: ^5.3.0
+
+  # Ongoing status banner (#16, ADR-008) and its Android channels. Alerts
+  # (US-06) get their own channel so the banner can be muted without
+  # silencing them.
+  flutter_local_notifications: ^22.3.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+  flutter_lints: ^6.0.0
+  build_runner: ^2.16.1
+  drift_dev: ^2.35.0
+
+flutter:
+
+  uses-material-design: true
+  fonts:
+    - family: PlusJakartaSans
+      fonts:
+        - asset: assets/fonts/PlusJakartaSans-Regular.ttf
+          weight: 400
+        - asset: assets/fonts/PlusJakartaSans-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/PlusJakartaSans-SemiBold.ttf
+          weight: 600
+        - asset: assets/fonts/PlusJakartaSans-Bold.ttf
+          weight: 700
+</file>
+
 <file path="docs/design.md">
 # Design: Fuata
 
@@ -19971,307 +20272,6 @@ without it, and it's a polish item rather than a correctness bug. See
 
 Alerts use `fuata_alerts` (high). Inside quiet hours they use `fuata_alerts_quiet` (low, no sound), because per-notification sound overrides are ignored on Android 8+. Notification id is derived from the limit id, so a later level replaces an earlier one. Not done: the banner/Home status ignores per-unit limits; there is no alert when a period ends.
 MockAlertLogRepository in data/mock/ mirrors the same contract in memory for widget tests and previews — same "claim once" semantics, no DB.
-</file>
-
-<file path="lib/ui/screens/unit_detail_screen.dart">
-import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:fuata/domain/logic/ledger.dart';
-import 'package:intl/intl.dart';
-
-import '../../domain/models/limit_rule.dart';
-import '../../domain/models/money.dart';
-import '../../widgets/activity/empty_activity.dart';
-import '../../widgets/activity/grouped_list.dart';
-import '../../widgets/limits/unit_limit_summary.dart';
-import '../../widgets/personalization/action_row.dart';
-import '../../widgets/sheets/edit_unit_limits_sheet.dart';
-import '../../widgets/sheets/edit_unit_sheet.dart';
-import '../../widgets/sheets/update_balance_sheet.dart';
-import '../providers/app_providers.dart';
-import '../theme/app_colors.dart';
-import '../theme/app_spacing.dart';
-import '../theme/app_typography.dart';
-import 'manage_rules_screen.dart';
-
-/// Unit page (ui-design-brief.md section 7.5): balance, "Update balance",
-/// edit name/icon/colour, archive, and that unit's recent activity —
-/// reusing GroupedList/showTransactionDetail from the Activity screen
-/// rather than a second implementation.
-///
-/// The per-unit limit row is live as of #63 (it opens the same sheet as
-/// Limits & alerts > More); the message-reading row is live as of #20 — it opens the rule builder
-/// pre-set to this unit and shows how many rules the unit already has.
-
-class UnitDetailScreen extends ConsumerWidget {
-  final String unitId;
-  const UnitDetailScreen({super.key, required this.unitId});
-
-  void _confirmArchive(
-      BuildContext context,
-      WidgetRef ref,
-      String unitId,
-      String name,
-      ) {
-    showDialog(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: Text('Archive $name?'),
-        content: const Text(
-          "It'll disappear from Home and My money, but its history stays safe.",
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () async {
-              await ref.read(unitRepositoryProvider).archiveUnit(unitId);
-              if (dialogContext.mounted) Navigator.of(dialogContext).pop();
-              if (context.mounted) Navigator.of(context).pop();
-            },
-            child: const Text('Archive'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final c = context.colors;
-    final unitsAsync = ref.watch(unitsProvider);
-    final txAsync = ref.watch(transactionsProvider);
-
-    return unitsAsync.when(
-      loading: () => const Center(child: CircularProgressIndicator.adaptive()),
-      error: (e, st) => Center(child: Text('Something went wrong: $e')),
-      data: (units) {
-        final unit = units.where((u) => u.id == unitId).firstOrNull;
-        if (unit == null) {
-          return Scaffold(
-            appBar: AppBar(),
-            body: Center(
-              child: Text(
-                "This one's gone.",
-                style: AppTypography.bodyMd.copyWith(color: c.onSurfaceVariant),
-              ),
-            ),
-          );
-        }
-
-        return txAsync.when(
-          loading: () =>
-          const Center(child: CircularProgressIndicator.adaptive()),
-          error: (e, st) => Center(child: Text('Something went wrong: $e')),
-          data: (allTransactions) {
-            final balance = Ledger.balanceOf(unit, allTransactions);
-            final unitTransactions =
-            allTransactions
-                .where((t) => t.unitId == unit.id && t.isConfirmed)
-                .toList()
-              ..sort((a, b) => b.occurredAt.compareTo(a.occurredAt));
-
-            return Scaffold(
-              appBar: AppBar(
-                title: Text(unit.name),
-                actions: [
-                  IconButton(
-                    tooltip: 'Edit',
-                    onPressed: () => showEditUnitSheet(context, existing: unit),
-                    icon: const Icon(Icons.edit_outlined),
-                  ),
-                  PopupMenuButton<String>(
-                    onSelected: (v) {
-                      if (v == 'archive') {
-                        _confirmArchive(context, ref, unit.id, unit.name);
-                      }
-                    },
-                    itemBuilder: (_) => const [
-                      PopupMenuItem(value: 'archive', child: Text('Archive')),
-                    ],
-                  ),
-                ],
-              ),
-              body: SafeArea(
-                child: ListView(
-                  padding: const EdgeInsets.fromLTRB(
-                    AppSpacing.margin,
-                    AppSpacing.sm,
-                    AppSpacing.margin,
-                    AppSpacing.xl,
-                  ),
-                  children: [
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(AppSpacing.lg),
-                      decoration: BoxDecoration(
-                        color: unit.color.withValues(alpha: 0.10),
-                        borderRadius: BorderRadius.circular(
-                          AppSpacing.cardRadiusHero,
-                        ),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              Text(
-                                unit.iconEmoji,
-                                style: const TextStyle(fontSize: 28),
-                              ),
-                              const SizedBox(width: AppSpacing.sm),
-                              Text(
-                                unit.name,
-                                style: AppTypography.headlineSm.copyWith(
-                                  color: c.onSurface,
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: AppSpacing.sm),
-                          Text(
-                            Money(balance, unit.currencyCode).format(),
-                            style: AppTypography.displayHeroMobile.copyWith(
-                              color: c.onSurface,
-                            ),
-                          ),
-                          const SizedBox(height: AppSpacing.xs),
-                          Text(
-                            unit.lastVerifiedAt == null
-                                ? 'Not checked yet'
-                                : 'Last checked ${DateFormat('d MMM, h:mm a').format(unit.lastVerifiedAt!)}',
-                            style: AppTypography.bodySm.copyWith(
-                              color: c.onSurfaceVariant,
-                            ),
-                          ),
-                          const SizedBox(height: AppSpacing.md),
-                          FilledButton.tonal(
-                            onPressed: () => showUpdateBalanceSheet(
-                              unit: unit,
-                              currentBalanceMinor: balance,
-                            ),
-                            child: const Text('Update balance'),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: AppSpacing.lg),
-                    ActionRow(
-                      icon: Icons.speed_rounded,
-                      title: 'Limit for this unit',
-                      subtitle: unitLimitSummary(
-                        ref.watch(limitsProvider).value ?? const <LimitRule>[],
-                        unit,
-                      ),
-                      onTap: () => showEditUnitLimitsSheet(unit: unit),
-                    ),
-                    const SizedBox(height: AppSpacing.sm),
-                    Builder(
-                      builder: (context) {
-                        final templates =
-                            ref.watch(unitTemplatesProvider(unit.id)).value ??
-                                [];
-                        return ActionRow(
-                          icon: Icons.mark_email_read_outlined,
-                          title: 'Reading messages',
-                          subtitle: templates.isEmpty
-                              ? 'Teach the app to read messages for this unit'
-                              : '${templates.length} rule${templates.length == 1 ? '' : 's'} · add or review',
-                          onTap: () => Navigator.of(context).push(
-                            MaterialPageRoute(
-                              builder: (_) =>
-                                  ManageRulesScreen(unitId: unit.id),
-                            ),
-                          ),
-                        );
-                      },
-                    ),
-                    const SizedBox(height: AppSpacing.lg),
-                    Text(
-                      'Recent activity',
-                      style: AppTypography.headlineSm.copyWith(
-                        color: c.onSurface,
-                      ),
-                    ),
-                    const SizedBox(height: AppSpacing.sm),
-                    if (unitTransactions.isEmpty)
-                      const EmptyActivity()
-                    else
-                      GroupedList(
-                        transactions: unitTransactions,
-                        unitById: {unit.id: unit},
-                      ),
-                  ],
-                ),
-              ),
-            );
-          },
-        );
-      },
-    );
-  }
-}
-
-extension _FirstOrNull<T> on Iterable<T> {
-  T? get firstOrNull => isEmpty ? null : first;
-}
-</file>
-
-<file path="pubspec.yaml">
-name: fuata
-description: "A new Flutter project."
-
-publish_to: 'none'
-version: 1.0.0+1
-
-environment:
-  sdk: ^3.13.2
-
-
-dependencies:
-  flutter:
-    sdk: flutter
-
-
-  cupertino_icons: ^1.0.8
-  flutter_riverpod: ^3.4.3
-  intl: ^0.20.3
-
-  # Local database (#13) — no backend, everything on-device (ADR-001/ADR-009).
-  drift: ^2.35.0
-  path_provider: ^2.1.6
-  path: ^1.9.1
-  flutter_smart_dialog: ^5.3.0
-
-  # Ongoing status banner (#16, ADR-008) and its Android channels. Alerts
-  # (US-06) get their own channel so the banner can be muted without
-  # silencing them.
-  flutter_local_notifications: ^22.3.1
-
-dev_dependencies:
-  flutter_test:
-    sdk: flutter
-
-  flutter_lints: ^6.0.0
-  build_runner: ^2.16.1
-  drift_dev: ^2.35.0
-
-flutter:
-
-  uses-material-design: true
-  fonts:
-    - family: PlusJakartaSans
-      fonts:
-        - asset: assets/fonts/PlusJakartaSans-Regular.ttf
-          weight: 400
-        - asset: assets/fonts/PlusJakartaSans-Medium.ttf
-          weight: 500
-        - asset: assets/fonts/PlusJakartaSans-SemiBold.ttf
-          weight: 600
-        - asset: assets/fonts/PlusJakartaSans-Bold.ttf
-          weight: 700
 </file>
 
 <file path="lib/data/db/drift_repositories.dart">
@@ -20753,7 +20753,7 @@ class DriftCaptureSourceRepository implements CaptureSourceRepository {
 </file>
 
 <file path="docs/issue-status.md">
-# Issue status (generated 2026-09-30T08:44Z)
+# Issue status (generated 2026-09-30T11:34Z)
 
 Source of truth: GitHub. Regenerate with `scripts/refresh-issue-status.sh`.
 
@@ -20777,7 +20777,7 @@ Source of truth: GitHub. Regenerate with `scripts/refresh-issue-status.sh`.
 | #27 | OPEN | v0.1 MVP | chore(release): v0.1.0 |
 | #26 | OPEN | v0.1 MVP | test: manual device test pass |
 | #25 | OPEN | v0.1 MVP | chore(privacy): remove INTERNET permission and disable backup |
-| #24 | OPEN | v0.1 MVP | feat(data): JSON export/import |
+| #24 | CLOSED | v0.1 MVP | feat(data): JSON export/import |
 | #23 | CLOSED | v0.1 MVP | feat(insight): Today/Week/Month summaries |
 | #22 | CLOSED | v0.1 MVP | feat(capture): notification listener with app allow-list and dedupe |
 | #21 | CLOSED | v0.1 MVP | feat(capture): share/paste to review inbox |

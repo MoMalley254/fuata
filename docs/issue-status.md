@@ -1,4 +1,4 @@
-# Issue status (generated 2026-09-30T08:44Z)
+# Issue status (generated 2026-09-30T11:34Z)
 
 Source of truth: GitHub. Regenerate with `scripts/refresh-issue-status.sh`.
 
@@ -22,7 +22,7 @@ Source of truth: GitHub. Regenerate with `scripts/refresh-issue-status.sh`.
 | #27 | OPEN | v0.1 MVP | chore(release): v0.1.0 |
 | #26 | OPEN | v0.1 MVP | test: manual device test pass |
 | #25 | OPEN | v0.1 MVP | chore(privacy): remove INTERNET permission and disable backup |
-| #24 | OPEN | v0.1 MVP | feat(data): JSON export/import |
+| #24 | CLOSED | v0.1 MVP | feat(data): JSON export/import |
 | #23 | CLOSED | v0.1 MVP | feat(insight): Today/Week/Month summaries |
 | #22 | CLOSED | v0.1 MVP | feat(capture): notification listener with app allow-list and dedupe |
 | #21 | CLOSED | v0.1 MVP | feat(capture): share/paste to review inbox |
