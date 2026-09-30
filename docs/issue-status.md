@@ -1,4 +1,4 @@
-# Issue status (generated 2026-09-30T11:34Z)
+# Issue status (generated 2026-09-30T12:48Z)
 
 Source of truth: GitHub. Regenerate with `scripts/refresh-issue-status.sh`.
 
@@ -39,7 +39,7 @@ Source of truth: GitHub. Regenerate with `scripts/refresh-issue-status.sh`.
 | #10 | CLOSED | v0.1 MVP | feat(ui): Activity screen and transaction detail |
 | #9 | CLOSED | v0.1 MVP | feat(ui): add-transaction sheet |
 | #8 | CLOSED | v0.1 MVP | feat(ui): Home (Today) screen |
-| #7 | OPEN | v0.1 MVP | feat(ui): onboarding flow |
+| #7 | CLOSED | v0.1 MVP | feat(ui): onboarding flow |
 | #6 | CLOSED | v0.1 MVP | feat(ui): app theme, tokens and personalisation shell |
 | #5 | CLOSED | v0.1 MVP | docs: devlog and testing checklist |
 | #4 | CLOSED | v0.1 MVP | docs: design doc (data model, architecture, decision records) |
