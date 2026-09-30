@@ -45,6 +45,21 @@ class LimitRule {
     this.enabled = true,
   });
 
+  /// Stable id for a limit: one row per (scope, unit, period), so saving
+  /// again edits in place instead of adding a second limit.
+  static String idFor(LimitScope scope, LimitPeriod period, [String? unitId]) =>
+      scope == LimitScope.overall
+          ? 'l_overall_${period.name}'
+          : 'l_unit_${unitId}_${period.name}';
+
+  /// The alert levels a *new* limit should start with: whatever the
+  /// person already chose for their existing limits (they set these once,
+  /// on the Limits screen), or the defaults when there are none.
+  static (double, double) levelsFrom(Iterable<LimitRule> existing) {
+    final first = existing.isEmpty ? null : existing.first;
+    return (first?.warnAt ?? 0.7, first?.dangerAt ?? 0.9);
+  }
+
   /// Given spent-so-far (positive minor units) and this limit, returns
   /// the status. Overdraft also applies whenever spent >= amount.
   SpendStatus statusFor(int spentMinor) {
