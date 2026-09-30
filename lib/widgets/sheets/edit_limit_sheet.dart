@@ -102,14 +102,19 @@ class _EditLimitSheetState extends ConsumerState<EditLimitSheet> {
     });
 
     final existing = widget.existing;
+    // A brand-new limit starts with the alert levels already chosen for
+    // the others (#63), not a hard-coded 70/90.
+    final (warn, danger) = LimitRule.levelsFrom(
+      ref.read(limitsProvider).value ?? const <LimitRule>[],
+    );
     final rule = LimitRule(
       id: existing?.id ?? 'l_overall_${widget.period.name}',
       scope: LimitScope.overall,
       period: widget.period,
       amountMinor: amount.minor,
       currencyCode: widget.currencyCode,
-      warnAt: existing?.warnAt ?? 0.7,
-      dangerAt: existing?.dangerAt ?? 0.9,
+      warnAt: existing?.warnAt ?? warn,
+      dangerAt: existing?.dangerAt ?? danger,
       enabled: existing?.enabled ?? true,
     );
 

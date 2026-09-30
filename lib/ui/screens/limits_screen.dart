@@ -2,7 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../domain/models/limit_rule.dart';
+import '../../widgets/limits/alert_levels_card.dart';
 import '../../widgets/limits/limit_card.dart';
+import '../../widgets/limits/quiet_hours_card.dart';
+import '../../widgets/limits/unit_limits_section.dart';
+import '../../widgets/personalization/section_card.dart';
 import '../../widgets/sheets/edit_limit_sheet.dart';
 import '../providers/app_providers.dart';
 import '../theme/app_colors.dart';
@@ -11,13 +15,13 @@ import '../theme/app_typography.dart';
 
 /// Limits & alerts (issue #15's UI half, ui-design-brief.md 7.8).
 ///
-/// Minimum that makes the banner (#16) meaningful: one overall limit per
-/// period, each with an on/off switch. Alert-level sliders, per-unit
-/// limits, quiet hours and the live banner preview from 7.8 are
-/// deliberately deferred — see the note at the bottom of the screen.
+/// One overall limit per period, each with an on/off switch (#15). Issue
+/// #63 completes the rest of 7.8: alert-level sliders, quiet hours, a live
+/// banner preview, and per-unit limits under "More".
 class LimitsScreen extends ConsumerWidget {
   const LimitsScreen({super.key});
 
+  // Overall limits only — per-unit ones are managed under "More".
   LimitRule? _limitFor(List<LimitRule> limits, LimitPeriod period) => limits
       .where((l) => l.scope == LimitScope.overall && l.period == period)
       .firstOrNull;
@@ -102,11 +106,15 @@ class LimitsScreen extends ConsumerWidget {
               ),
               const SizedBox(height: AppSpacing.sm),
             ],
+            UnitLimitsSection(units: units, limits: limits),
             const SizedBox(height: AppSpacing.md),
-            Text(
-              "Nudges at 70% and 90% of a limit, and again when you're "
-                  'over — landing with alerts in a follow-up.',
-              style: AppTypography.labelSm.copyWith(color: c.onSurfaceTertiary),
+            SectionCard(
+              title: 'Alerts',
+              children: [
+                AlertLevelsCard(limits: limits),
+                const SizedBox(height: AppSpacing.md),
+                const QuietHoursCard(),
+              ],
             ),
           ],
         ),

@@ -7,6 +7,7 @@ import 'package:fuata/platform/banner.dart';
 import 'package:fuata/platform/notification_capture.dart';
 import 'package:fuata/platform/share_intake.dart';
 import 'package:fuata/ui/providers/app_providers.dart';
+import 'package:fuata/ui/providers/alert_providers.dart';
 import 'package:fuata/ui/providers/banner_providers.dart';
 import 'package:fuata/ui/providers/capture_providers.dart';
 import 'package:fuata/ui/screens/root_shell.dart';
@@ -108,6 +109,8 @@ class _FuataState extends ConsumerState<Fuata> with WidgetsBindingObserver {
     // homeState change, so the banner never re-posts. Watching it
     // subscribes, which is what keeps it firing.
     ref.watch(bannerSyncProvider);
+    // Issue #63: and announce limits being crossed (US-06).
+    ref.watch(alertSyncProvider);
 
     final settings = ref.watch(currentSettingsProvider);
 

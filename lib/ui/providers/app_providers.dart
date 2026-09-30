@@ -36,6 +36,11 @@ final limitRepositoryProvider = Provider<LimitRepository>((ref) {
   return DriftLimitRepository(ref.watch(appDatabaseProvider));
 });
 
+/// Issue #63: which limit alerts have already been shown.
+final alertLogRepositoryProvider = Provider<AlertLogRepository>((ref) {
+  return DriftAlertLogRepository(ref.watch(appDatabaseProvider));
+});
+
 final settingsRepositoryProvider = Provider<SettingsRepository>((ref) {
   return DriftSettingsRepository(ref.watch(appDatabaseProvider));
 });
