@@ -138,6 +138,25 @@ class LimitRules extends Table {
   Set<Column> get primaryKey => {id};
 }
 
+/// Which limit alerts have been shown (issue #63, US-06: once per
+/// threshold per period). The primary key *is* the "once" guarantee: a
+/// second insert for the same (limit, period, level) fails, so two
+/// isolates racing to announce the same crossing cannot both win.
+///
+/// No foreign key to LimitRules on purpose — DriftLimitRepository clears a
+/// limit's rows itself when its amount changes or it is removed, and a
+/// stale row must never block that delete.
+@DataClassName('AlertFiringRow')
+class AlertFirings extends Table {
+  TextColumn get limitId => text()();
+  TextColumn get periodKey => text()();
+  TextColumn get level => text()();
+  DateTimeColumn get firedAt => dateTime()();
+
+  @override
+  Set<Column> get primaryKey => {limitId, periodKey, level};
+}
+
 /// design.md's "supporting tables (not drawn)": unparsed_capture, kept
 /// only long enough for the review inbox's "Couldn't read these" list
 /// before being auto-purged (US-11, requirements.md).

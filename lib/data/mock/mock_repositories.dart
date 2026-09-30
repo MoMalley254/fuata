@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../domain/models/capture_source.dart';
+import '../../domain/models/limit_alert.dart';
 import '../../domain/models/limit_rule.dart';
 import '../../domain/models/settings.dart';
 import '../../domain/models/template.dart';
@@ -261,6 +262,26 @@ class MockLimitRepository implements LimitRepository {
 /// permanently one-item list) keeps this repo the same shape and the
 /// same "broadcast on every mutation" behaviour as the other three,
 /// rather than a bespoke ValueNotifier just for this one case.
+/// In-memory alert log for widget tests/previews. Same contract as the
+/// drift one: a key can be claimed once.
+class MockAlertLogRepository implements AlertLogRepository {
+  final _claimed = <AlertKey, DateTime>{};
+
+  @override
+  Future<Set<AlertKey>> firedKeys() async => _claimed.keys.toSet();
+
+  @override
+  Future<bool> claim(AlertKey key, DateTime at) async {
+    if (_claimed.containsKey(key)) return false;
+    _claimed[key] = at;
+    return true;
+  }
+
+  @override
+  Future<void> purgeBefore(DateTime cutoff) async =>
+      _claimed.removeWhere((_, at) => at.isBefore(cutoff));
+}
+
 class MockSettingsRepository implements SettingsRepository {
   final _store = _Store<AppSettings>([AppSettings.defaults]);
 

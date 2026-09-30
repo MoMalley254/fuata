@@ -11,6 +11,7 @@ import 'package:drift/drift.dart';
 import 'package:flutter/material.dart';
 
 import '../../domain/models/capture_source.dart';
+import '../../domain/models/limit_alert.dart';
 import '../../domain/models/limit_rule.dart';
 import '../../domain/models/settings.dart';
 import '../../domain/models/template.dart';
@@ -116,16 +117,81 @@ class DriftLimitRepository implements LimitRepository {
 
   @override
   Future<void> setLimit(LimitRule limit) {
-    return _db
-        .into(_db.limitRules)
-        .insertOnConflictUpdate(limitRuleToCompanion(limit));
+    return _db.transaction(() async {
+      // A different amount is a different limit: the alerts already shown
+      // for the old number no longer mean anything (raise 1,000 to 5,000
+      // and the person should be nudged again as they approach 5,000).
+      // Editing only the alert levels or the on/off switch keeps them, so
+      // dragging a slider never repeats an alert the person already saw.
+      final existing = await (_db.select(_db.limitRules)
+        ..where((l) => l.id.equals(limit.id))).getSingleOrNull();
+      if (existing != null && existing.amountMinor != limit.amountMinor) {
+        await _clearAlerts(limit.id);
+      }
+      await _db
+          .into(_db.limitRules)
+          .insertOnConflictUpdate(limitRuleToCompanion(limit));
+    });
   }
 
   @override
   Future<void> deleteLimit(String limitId) {
-    return (_db.delete(_db.limitRules)
-      ..where((l) => l.id.equals(limitId))).go();
+    return _db.transaction(() async {
+      await _clearAlerts(limitId);
+      await (_db.delete(_db.limitRules)
+        ..where((l) => l.id.equals(limitId))).go();
+    });
   }
+
+  Future<void> _clearAlerts(String limitId) => (_db.delete(_db.alertFirings)
+    ..where((f) => f.limitId.equals(limitId))).go();
+}
+
+class DriftAlertLogRepository implements AlertLogRepository {
+  DriftAlertLogRepository(this._db);
+  final AppDatabase _db;
+
+  @override
+  Future<Set<AlertKey>> firedKeys() async {
+    final rows = await _db.select(_db.alertFirings).get();
+    return {
+      for (final r in rows)
+        AlertKey(
+          r.limitId,
+          r.periodKey,
+          AlertLevel.values.firstWhere(
+                (l) => l.name == r.level,
+            orElse: () => AlertLevel.warning,
+          ),
+        ),
+    };
+  }
+
+  @override
+  Future<bool> claim(AlertKey key, DateTime at) async {
+    try {
+      // Plain insert, not insert-or-replace: the primary key rejects a
+      // second claim, which is exactly the guarantee wanted. A racing
+      // isolate that loses gets an exception here, and "could not record
+      // it" is treated as "do not show it" — a missed nudge is better
+      // than one that repeats forever because it can't be remembered.
+      await _db.into(_db.alertFirings).insert(
+        AlertFiringsCompanion.insert(
+          limitId: key.limitId,
+          periodKey: key.periodKey,
+          level: key.level.name,
+          firedAt: at,
+        ),
+      );
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  @override
+  Future<void> purgeBefore(DateTime cutoff) => (_db.delete(_db.alertFirings)
+    ..where((f) => f.firedAt.isSmallerThanValue(cutoff))).go();
 }
 
 /// Settings are stored as key/value rows (design.md), so this repository
@@ -150,6 +216,11 @@ class DriftSettingsRepository implements SettingsRepository {
   static const _kBannerUnitIds = 'bannerUnitIds'; // comma-separated ids
   static const _kBannerProgress = 'bannerShowProgress';
   static const _kBannerQuickAdd = 'bannerShowQuickAdd';
+
+  static const _kAlertsEnabled = 'alertsEnabled';
+  static const _kQuietEnabled = 'quietHoursEnabled';
+  static const _kQuietStart = 'quietStartMinute';
+  static const _kQuietEnd = 'quietEndMinute';
 
   @override
   Stream<AppSettings> watchSettings() {
@@ -210,6 +281,14 @@ class DriftSettingsRepository implements SettingsRepository {
           key: _kBannerProgress, value: s.bannerShowProgress.toString()),
       SettingsEntriesCompanion.insert(
           key: _kBannerQuickAdd, value: s.bannerShowQuickAdd.toString()),
+      SettingsEntriesCompanion.insert(
+          key: _kAlertsEnabled, value: s.alertsEnabled.toString()),
+      SettingsEntriesCompanion.insert(
+          key: _kQuietEnabled, value: s.quietHoursEnabled.toString()),
+      SettingsEntriesCompanion.insert(
+          key: _kQuietStart, value: s.quietStartMinute.toString()),
+      SettingsEntriesCompanion.insert(
+          key: _kQuietEnd, value: s.quietEndMinute.toString()),
     ];
   }
 
@@ -230,6 +309,13 @@ class DriftSettingsRepository implements SettingsRepository {
     bool boolOr(String? raw, bool fallback) {
       if (raw == null) return fallback;
       return raw.toLowerCase() == 'true';
+    }
+
+    // Rows written before #63 have no quiet-hours keys; a corrupt value
+    // falls back rather than throwing on every settings read.
+    int minuteOr(String? raw, int fallback) {
+      final v = int.tryParse(raw ?? '');
+      return v != null && v >= 0 && v < 24 * 60 ? v : fallback;
     }
 
     return AppSettings(
@@ -281,6 +367,12 @@ class DriftSettingsRepository implements SettingsRepository {
       boolOr(map[_kBannerProgress], defaults.bannerShowProgress),
       bannerShowQuickAdd:
       boolOr(map[_kBannerQuickAdd], defaults.bannerShowQuickAdd),
+      alertsEnabled: boolOr(map[_kAlertsEnabled], defaults.alertsEnabled),
+      quietHoursEnabled:
+      boolOr(map[_kQuietEnabled], defaults.quietHoursEnabled),
+      quietStartMinute:
+      minuteOr(map[_kQuietStart], defaults.quietStartMinute),
+      quietEndMinute: minuteOr(map[_kQuietEnd], defaults.quietEndMinute),
     );
   }
 }

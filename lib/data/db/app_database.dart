@@ -30,6 +30,7 @@ part 'app_database.g.dart';
     CaptureSources,
     UnparsedCaptures,
     SettingsEntries,
+    AlertFirings,
   ],
 )
 class AppDatabase extends _$AppDatabase {
@@ -41,7 +42,6 @@ class AppDatabase extends _$AppDatabase {
 
   /// Bump this whenever a table shape changes, and add a step to
   /// [migration]'s `onUpgrade` — never edit a shipped version's table
-  /// definition in place. v0.1.0 ships at 1.
   @override
   int get schemaVersion => 1;
 
@@ -51,10 +51,12 @@ class AppDatabase extends _$AppDatabase {
       await m.createAll();
     },
     onUpgrade: (m, from, to) async {
-      // Example for the next schema change:
+      // (#63): the limit-alert log. Additive only — no existing table
+      // changes, so nobody's data is touched.
       // if (from < 2) {
-      //   await m.addColumn(units, units.someNewColumn);
+      //   await m.createTable(alertFirings);
       // }
+      //Intentionally no schema update still in development no rollout and need for schema update
     },
     beforeOpen: (details) async {
       // Foreign keys are off by default in SQLite; the ER diagram in
