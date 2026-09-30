@@ -70,6 +70,8 @@ android/
             styles.xml
           values-night/
             styles.xml
+          xml/
+            data_extraction_rules.xml
         AndroidManifest.xml
       profile/
         AndroidManifest.xml
@@ -1569,6 +1571,30 @@ class ShareIntakeChannel(messenger: BinaryMessenger) {
         const val CHANNEL = "fuata/share_intake"
     }
 }
+</file>
+
+<file path="android/app/src/main/res/xml/data_extraction_rules.xml">
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Issue #25 (US-16, ADR-009): nothing is copied off the phone by Android.
+     Applies to Android 12+ (targetSdk 31+). Older versions are covered by
+     android:allowBackup="false" in the manifest. The person's own
+     Back up & restore file (#24) is the only way data moves. -->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="root" />
+        <exclude domain="file" />
+        <exclude domain="database" />
+        <exclude domain="sharedpref" />
+        <exclude domain="external" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="root" />
+        <exclude domain="file" />
+        <exclude domain="database" />
+        <exclude domain="sharedpref" />
+        <exclude domain="external" />
+    </device-transfer>
+</data-extraction-rules>
 </file>
 
 <file path="lib/data/constants/captures_constants.dart">
@@ -19200,6 +19226,38 @@ class _UpdateBalanceSheetState extends ConsumerState<UpdateBalanceSheet> {
 }
 </file>
 
+<file path="README.md">
+# Fuata
+
+**Follow your money.** 
+
+A private, local-first Android app that shows, at a glance, how much you have across cash, mobile money, banks and cards, how much you've spent today, to whom, and where money came from. No account, no server, no internet permission: everything stays on your phone.
+
+> Status: in development (target: v0.1.0)
+
+## Why
+
+Spending is scattered across cash, mobile money and bank transactions, and reconciling it by hand is a chore. Fuata gives a single, glanceable answer to "Am I okay today?", including a persistent notification banner that shows what's left and whether you're safe, close to your limit, over it, or overdrawn.
+
+## Principles
+
+- **Private by design:** no network access, no telemetry, no card or account numbers collected.
+- **Simple by default, deep on demand:** show only what's needed, with more one tap away.
+- **Yours:** you name your money, pick its look, and decide what you see.
+## Docs
+
+- [Requirements](docs/requirements.md)
+- [UI design brief](docs/ui-design-brief.md)
+- [Issue plan](docs/github-issues.md)
+## Tech
+
+Flutter (Android), Riverpod, drift/SQLite, local notifications. No backend.
+
+
+## Notes
+- Allows users to label parts of receiving messages. Labelled messages take key labels : code, amount, payee, date, balance and fee. Rest of the string past the last label is completely ignored. In future updates, allow users to choose whether to ignore or strictly match all strings.
+</file>
+
 <file path="android/app/src/main/kotlin/com/kinyuanexus/fuata/fuata/NotificationListener.kt">
 package com.kinyuanexus.fuata.fuata
 
@@ -19694,38 +19752,6 @@ Future<void> _refreshBanner(AppDatabase db) async {
 }
 </file>
 
-<file path="README.md">
-# Fuata
-
-**Follow your money.** 
-
-A private, local-first Android app that shows, at a glance, how much you have across cash, mobile money, banks and cards, how much you've spent today, to whom, and where money came from. No account, no server, no internet permission: everything stays on your phone.
-
-> Status: in development (target: v0.1.0)
-
-## Why
-
-Spending is scattered across cash, mobile money and bank transactions, and reconciling it by hand is a chore. Fuata gives a single, glanceable answer to "Am I okay today?", including a persistent notification banner that shows what's left and whether you're safe, close to your limit, over it, or overdrawn.
-
-## Principles
-
-- **Private by design:** no network access, no telemetry, no card or account numbers collected.
-- **Simple by default, deep on demand:** show only what's needed, with more one tap away.
-- **Yours:** you name your money, pick its look, and decide what you see.
-## Docs
-
-- [Requirements](docs/requirements.md)
-- [UI design brief](docs/ui-design-brief.md)
-- [Issue plan](docs/github-issues.md)
-## Tech
-
-Flutter (Android), Riverpod, drift/SQLite, local notifications. No backend.
-
-
-## Notes
-- Allows users to label parts of receiving messages. Labelled messages take key labels : code, amount, payee, date, balance and fee. Rest of the string past the last label is completely ignored. In future updates, allow users to choose whether to ignore or strictly match all strings.
-</file>
-
 <file path="android/app/src/main/kotlin/com/kinyuanexus/fuata/fuata/MainActivity.kt">
 package com.kinyuanexus.fuata.fuata
 
@@ -19788,90 +19814,6 @@ class MainActivity : FlutterActivity() {
         shareIntake?.handleShareIntent(intent)
     }
 }
-</file>
-
-<file path="android/app/src/main/AndroidManifest.xml">
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <!-- Issue #16: Android 13+ needs explicit permission to post the
-         ongoing banner. Requested at first post (see BannerPlatform's
-         _requestPermissionOnce), never at launch. -->
-    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
-    <application
-        android:label="fuata"
-        android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher">
-        <activity
-            android:name=".MainActivity"
-            android:exported="true"
-            android:launchMode="singleTop"
-            android:taskAffinity=""
-            android:theme="@style/LaunchTheme"
-            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
-            android:hardwareAccelerated="true"
-            android:windowSoftInputMode="adjustResize">
-            <!-- Specifies an Android theme to apply to this Activity as soon as
-                 the Android process has started. This theme is visible to the user
-                 while the Flutter UI initializes. After that, this theme continues
-                 to determine the Window background behind the Flutter UI. -->
-            <meta-data
-                android:name="io.flutter.embedding.android.NormalTheme"
-                android:resource="@style/NormalTheme"
-                />
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN"/>
-                <category android:name="android.intent.category.LAUNCHER"/>
-            </intent-filter>
-            <!-- Issue #21 share target: appear in other apps' "Share" sheets
-                 for plain text, with no permission required (US-09).
-                 MainActivity forwards the text to Dart over the
-                 fuata/share_intake channel. -->
-            <intent-filter>
-                <action android:name="android.intent.action.SEND"/>
-                <category android:name="android.intent.category.DEFAULT"/>
-                <data android:mimeType="text/plain"/>
-            </intent-filter>
-        </activity>
-        <!-- Don't delete the meta-data below.
-             This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
-        <meta-data
-            android:name="flutterEmbedding"
-            android:value="2" />
-
-        <!-- Issue #22: notification listener. Only apps on the person's
-             allow-list are ever read (US-10); everything else is dropped
-             in NotificationListener.kt before any text is touched.
-             Requires the user to grant special access in
-             Settings > Notification access; the Auto-catch screen opens
-             that page directly. -->
-        <service
-            android:name=".NotificationListener"
-            android:label="Fuata"
-            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="android.service.notification.NotificationListenerService" />
-            </intent-filter>
-        </service>
-    </application>
-    <!-- Required to query activities that can process text, see:
-         https://developer.android.com/training/package-visibility and
-         https://developer.android.com/reference/android/content/Intent#ACTION_PROCESS_TEXT.
-
-         In particular, this is used by the Flutter engine in io.flutter.plugin.text.ProcessTextPlugin. -->
-    <queries>
-        <intent>
-            <action android:name="android.intent.action.PROCESS_TEXT"/>
-            <data android:mimeType="text/plain"/>
-        </intent>
-        <!-- Issue #22: lets the Auto-catch picker list launchable apps on
-             Android 11+ without QUERY_ALL_PACKAGES. Fuata never sees
-             non-launchable apps and never asks for the broad permission. -->
-        <intent>
-            <action android:name="android.intent.action.MAIN"/>
-            <category android:name="android.intent.category.LAUNCHER"/>
-        </intent>
-    </queries>
-</manifest>
 </file>
 
 <file path="lib/data/db/mappers.dart">
@@ -20979,6 +20921,111 @@ flutter:
           weight: 600
         - asset: assets/fonts/PlusJakartaSans-Bold.ttf
           weight: 700
+</file>
+
+<file path="android/app/src/main/AndroidManifest.xml">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <!-- Issue #16: Android 13+ needs explicit permission to post the
+         ongoing banner. Requested at first post (see BannerPlatform's
+         _requestPermissionOnce), never at launch. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+
+    <!-- Issue #25 (US-16, ADR-009): Fuata never touches the network. The
+         release build must not hold INTERNET, so strip it (and the
+         connectivity-state permissions) if any plugin's manifest ever
+         merges it in. Debug and profile builds add INTERNET back from
+         their own manifests, which outrank this file, so hot reload
+         still works. Verified on the built APK by
+         scripts/verify-privacy.sh. -->
+    <uses-permission android:name="android.permission.INTERNET" tools:node="remove"/>
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" tools:node="remove"/>
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" tools:node="remove"/>
+
+    <!-- Issue #25: no Android auto-backup to Google Drive and no
+         device-to-device transfer of the database. allowBackup covers
+         Android 11 and below; dataExtractionRules covers 12+, where it
+         takes over from allowBackup for transfers. The only way data
+         leaves the phone is the person's own Back up & restore file. -->
+    <application
+        android:label="fuata"
+        android:name="${applicationName}"
+        android:icon="@mipmap/ic_launcher"
+        android:allowBackup="false"
+        android:fullBackupContent="false"
+        android:dataExtractionRules="@xml/data_extraction_rules">
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:taskAffinity=""
+            android:theme="@style/LaunchTheme"
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
+            android:hardwareAccelerated="true"
+            android:windowSoftInputMode="adjustResize">
+            <!-- Specifies an Android theme to apply to this Activity as soon as
+                 the Android process has started. This theme is visible to the user
+                 while the Flutter UI initializes. After that, this theme continues
+                 to determine the Window background behind the Flutter UI. -->
+            <meta-data
+                android:name="io.flutter.embedding.android.NormalTheme"
+                android:resource="@style/NormalTheme"
+                />
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+            <!-- Issue #21 share target: appear in other apps' "Share" sheets
+                 for plain text, with no permission required (US-09).
+                 MainActivity forwards the text to Dart over the
+                 fuata/share_intake channel. -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <data android:mimeType="text/plain"/>
+            </intent-filter>
+        </activity>
+        <!-- Don't delete the meta-data below.
+             This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
+        <meta-data
+            android:name="flutterEmbedding"
+            android:value="2" />
+
+        <!-- Issue #22: notification listener. Only apps on the person's
+             allow-list are ever read (US-10); everything else is dropped
+             in NotificationListener.kt before any text is touched.
+             Requires the user to grant special access in
+             Settings > Notification access; the Auto-catch screen opens
+             that page directly. -->
+        <service
+            android:name=".NotificationListener"
+            android:label="Fuata"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+    </application>
+    <!-- Required to query activities that can process text, see:
+         https://developer.android.com/training/package-visibility and
+         https://developer.android.com/reference/android/content/Intent#ACTION_PROCESS_TEXT.
+
+         In particular, this is used by the Flutter engine in io.flutter.plugin.text.ProcessTextPlugin. -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.PROCESS_TEXT"/>
+            <data android:mimeType="text/plain"/>
+        </intent>
+        <!-- Issue #22: lets the Auto-catch picker list launchable apps on
+             Android 11+ without QUERY_ALL_PACKAGES. Fuata never sees
+             non-launchable apps and never asks for the broad permission. -->
+        <intent>
+            <action android:name="android.intent.action.MAIN"/>
+            <category android:name="android.intent.category.LAUNCHER"/>
+        </intent>
+    </queries>
+</manifest>
 </file>
 
 <file path="lib/domain/models/settings.dart">
@@ -23466,57 +23513,6 @@ class MeScreen extends ConsumerWidget {
 }
 </file>
 
-<file path="docs/issue-status.md">
-# Issue status (generated 2026-09-30T12:48Z)
-
-Source of truth: GitHub. Regenerate with `scripts/refresh-issue-status.sh`.
-
-| # | State | Milestone | Title |
-|---|---|---|---|
-| #63 | CLOSED | — | feat(limits): remaining 7.8 gaps — per-unit, alert levels, quiet hours, preview, firing alerts |
-| #56 | OPEN | v1.1 Backlog | feat(capture): user-defined custom fields in rule builder |
-| #55 | OPEN | v1.1 Backlog | feat(capture): "This part changes" wildcard in rule builder |
-| #39 | OPEN | v1.1 Backlog | feat: Open-source licence review and contribution guide |
-| #38 | OPEN | v1.1 Backlog | feat: iOS manual/share-sheet edition |
-| #37 | OPEN | v1.1 Backlog | feat: Opt-in redacted diagnostics copy button |
-| #36 | OPEN | v1.1 Backlog | feat: Listener-inactive detection and manufacturer keep-alive guides |
-| #35 | OPEN | v1.1 Backlog | feat: Scheduled encrypted export to a user-chosen folder |
-| #34 | OPEN | v1.1 Backlog | feat: Template packs: export/import/share by file or QR, bundled presets |
-| #33 | OPEN | v1.1 Backlog | feat: Recurring bills and expected income |
-| #32 | OPEN | v1.1 Backlog | feat: Recipient to category rules |
-| #31 | OPEN | v1.1 Backlog | feat: Scheduled daily/weekly/monthly summary notifications |
-| #30 | OPEN | v1.1 Backlog | feat: Outing mode (temporary budget with its own banner) |
-| #29 | OPEN | v1.1 Backlog | feat: Home screen widget |
-| #28 | OPEN | v1.1 Backlog | feat: SQLCipher encryption with Android Keystore and app lock |
-| #27 | OPEN | v0.1 MVP | chore(release): v0.1.0 |
-| #26 | OPEN | v0.1 MVP | test: manual device test pass |
-| #25 | OPEN | v0.1 MVP | chore(privacy): remove INTERNET permission and disable backup |
-| #24 | CLOSED | v0.1 MVP | feat(data): JSON export/import |
-| #23 | CLOSED | v0.1 MVP | feat(insight): Today/Week/Month summaries |
-| #22 | CLOSED | v0.1 MVP | feat(capture): notification listener with app allow-list and dedupe |
-| #21 | CLOSED | v0.1 MVP | feat(capture): share/paste to review inbox |
-| #20 | CLOSED | v0.1 MVP | feat(capture): rule builder UI |
-| #19 | CLOSED | v0.1 MVP | feat(capture): template model and parser |
-| #18 | CLOSED | v0.1 MVP | spike: notification listener with app closed |
-| #17 | CLOSED | v0.1 MVP | feat(banner): banner setup screen with live preview |
-| #16 | CLOSED | v0.1 MVP | feat(banner): ongoing notification banner |
-| #15 | CLOSED | v0.1 MVP | feat(limits): limit engine and status |
-| #14 | CLOSED | v0.1 MVP | feat(ledger): computed balances, transfers, fees |
-| #13 | CLOSED | v0.1 MVP | feat(data): local database and repositories |
-| #12 | CLOSED | v0.1 MVP | feat(ui): Me and personalisation settings |
-| #11 | CLOSED | v0.1 MVP | feat(ui): My money and unit pages |
-| #10 | CLOSED | v0.1 MVP | feat(ui): Activity screen and transaction detail |
-| #9 | CLOSED | v0.1 MVP | feat(ui): add-transaction sheet |
-| #8 | CLOSED | v0.1 MVP | feat(ui): Home (Today) screen |
-| #7 | CLOSED | v0.1 MVP | feat(ui): onboarding flow |
-| #6 | CLOSED | v0.1 MVP | feat(ui): app theme, tokens and personalisation shell |
-| #5 | CLOSED | v0.1 MVP | docs: devlog and testing checklist |
-| #4 | CLOSED | v0.1 MVP | docs: design doc (data model, architecture, decision records) |
-| #3 | CLOSED | v0.1 MVP | docs: UI design brief and design tokens |
-| #2 | CLOSED | v0.1 MVP | docs: requirements document |
-| #1 | CLOSED | v0.1 MVP | chore: initialise repo and Flutter project |
-</file>
-
 <file path="lib/domain/repositories/repositories.dart">
 import '../models/backup_snapshot.dart';
 import '../models/capture_source.dart';
@@ -24037,6 +24033,57 @@ Nothing broke yet — the schema and repositories are new code with no prior imp
 **Time spent:** _3hours_
 
 **Tomorrow:** see Day 2.
+</file>
+
+<file path="docs/issue-status.md">
+# Issue status (generated 2026-09-30T19:32Z)
+
+Source of truth: GitHub. Regenerate with `scripts/refresh-issue-status.sh`.
+
+| # | State | Milestone | Title |
+|---|---|---|---|
+| #63 | CLOSED | — | feat(limits): remaining 7.8 gaps — per-unit, alert levels, quiet hours, preview, firing alerts |
+| #56 | OPEN | v1.1 Backlog | feat(capture): user-defined custom fields in rule builder |
+| #55 | OPEN | v1.1 Backlog | feat(capture): "This part changes" wildcard in rule builder |
+| #39 | OPEN | v1.1 Backlog | feat: Open-source licence review and contribution guide |
+| #38 | OPEN | v1.1 Backlog | feat: iOS manual/share-sheet edition |
+| #37 | OPEN | v1.1 Backlog | feat: Opt-in redacted diagnostics copy button |
+| #36 | OPEN | v1.1 Backlog | feat: Listener-inactive detection and manufacturer keep-alive guides |
+| #35 | OPEN | v1.1 Backlog | feat: Scheduled encrypted export to a user-chosen folder |
+| #34 | OPEN | v1.1 Backlog | feat: Template packs: export/import/share by file or QR, bundled presets |
+| #33 | OPEN | v1.1 Backlog | feat: Recurring bills and expected income |
+| #32 | OPEN | v1.1 Backlog | feat: Recipient to category rules |
+| #31 | OPEN | v1.1 Backlog | feat: Scheduled daily/weekly/monthly summary notifications |
+| #30 | OPEN | v1.1 Backlog | feat: Outing mode (temporary budget with its own banner) |
+| #29 | OPEN | v1.1 Backlog | feat: Home screen widget |
+| #28 | OPEN | v1.1 Backlog | feat: SQLCipher encryption with Android Keystore and app lock |
+| #27 | OPEN | v0.1 MVP | chore(release): v0.1.0 |
+| #26 | OPEN | v0.1 MVP | test: manual device test pass |
+| #25 | OPEN | v0.1 MVP | chore(privacy): remove INTERNET permission and disable backup |
+| #24 | CLOSED | v0.1 MVP | feat(data): JSON export/import |
+| #23 | CLOSED | v0.1 MVP | feat(insight): Today/Week/Month summaries |
+| #22 | CLOSED | v0.1 MVP | feat(capture): notification listener with app allow-list and dedupe |
+| #21 | CLOSED | v0.1 MVP | feat(capture): share/paste to review inbox |
+| #20 | CLOSED | v0.1 MVP | feat(capture): rule builder UI |
+| #19 | CLOSED | v0.1 MVP | feat(capture): template model and parser |
+| #18 | CLOSED | v0.1 MVP | spike: notification listener with app closed |
+| #17 | CLOSED | v0.1 MVP | feat(banner): banner setup screen with live preview |
+| #16 | CLOSED | v0.1 MVP | feat(banner): ongoing notification banner |
+| #15 | CLOSED | v0.1 MVP | feat(limits): limit engine and status |
+| #14 | CLOSED | v0.1 MVP | feat(ledger): computed balances, transfers, fees |
+| #13 | CLOSED | v0.1 MVP | feat(data): local database and repositories |
+| #12 | CLOSED | v0.1 MVP | feat(ui): Me and personalisation settings |
+| #11 | CLOSED | v0.1 MVP | feat(ui): My money and unit pages |
+| #10 | CLOSED | v0.1 MVP | feat(ui): Activity screen and transaction detail |
+| #9 | CLOSED | v0.1 MVP | feat(ui): add-transaction sheet |
+| #8 | CLOSED | v0.1 MVP | feat(ui): Home (Today) screen |
+| #7 | CLOSED | v0.1 MVP | feat(ui): onboarding flow |
+| #6 | CLOSED | v0.1 MVP | feat(ui): app theme, tokens and personalisation shell |
+| #5 | CLOSED | v0.1 MVP | docs: devlog and testing checklist |
+| #4 | CLOSED | v0.1 MVP | docs: design doc (data model, architecture, decision records) |
+| #3 | CLOSED | v0.1 MVP | docs: UI design brief and design tokens |
+| #2 | CLOSED | v0.1 MVP | docs: requirements document |
+| #1 | CLOSED | v0.1 MVP | chore: initialise repo and Flutter project |
 </file>
 
 <file path="lib/ui/screens/home_screen.dart">

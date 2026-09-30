@@ -1,12 +1,33 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
     <!-- Issue #16: Android 13+ needs explicit permission to post the
          ongoing banner. Requested at first post (see BannerPlatform's
          _requestPermissionOnce), never at launch. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+
+    <!-- Issue #25 (US-16, ADR-009): Fuata never touches the network. The
+         release build must not hold INTERNET, so strip it (and the
+         connectivity-state permissions) if any plugin's manifest ever
+         merges it in. Debug and profile builds add INTERNET back from
+         their own manifests, which outrank this file, so hot reload
+         still works. Verified on the built APK by
+         scripts/verify-privacy.sh. -->
+    <uses-permission android:name="android.permission.INTERNET" tools:node="remove"/>
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" tools:node="remove"/>
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" tools:node="remove"/>
+
+    <!-- Issue #25: no Android auto-backup to Google Drive and no
+         device-to-device transfer of the database. allowBackup covers
+         Android 11 and below; dataExtractionRules covers 12+, where it
+         takes over from allowBackup for transfers. The only way data
+         leaves the phone is the person's own Back up & restore file. -->
     <application
         android:label="fuata"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher">
+        android:icon="@mipmap/ic_launcher"
+        android:allowBackup="false"
+        android:fullBackupContent="false"
+        android:dataExtractionRules="@xml/data_extraction_rules">
         <activity
             android:name=".MainActivity"
             android:exported="true"
