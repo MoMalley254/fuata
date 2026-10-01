@@ -1,4 +1,4 @@
-# Issue status (generated 2026-09-30T19:32Z)
+# Issue status (generated 2026-10-01T09:26Z)
 
 Source of truth: GitHub. Regenerate with `scripts/refresh-issue-status.sh`.
 
@@ -21,7 +21,7 @@ Source of truth: GitHub. Regenerate with `scripts/refresh-issue-status.sh`.
 | #28 | OPEN | v1.1 Backlog | feat: SQLCipher encryption with Android Keystore and app lock |
 | #27 | OPEN | v0.1 MVP | chore(release): v0.1.0 |
 | #26 | OPEN | v0.1 MVP | test: manual device test pass |
-| #25 | OPEN | v0.1 MVP | chore(privacy): remove INTERNET permission and disable backup |
+| #25 | CLOSED | v0.1 MVP | chore(privacy): remove INTERNET permission and disable backup |
 | #24 | CLOSED | v0.1 MVP | feat(data): JSON export/import |
 | #23 | CLOSED | v0.1 MVP | feat(insight): Today/Week/Month summaries |
 | #22 | CLOSED | v0.1 MVP | feat(capture): notification listener with app allow-list and dedupe |

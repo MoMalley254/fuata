@@ -21295,252 +21295,6 @@ class AppSettings {
 }
 </file>
 
-<file path="lib/ui/screens/unit_detail_screen.dart">
-import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:fuata/domain/logic/ledger.dart';
-import 'package:intl/intl.dart';
-
-import '../../domain/models/limit_rule.dart';
-import '../../domain/models/money.dart';
-import '../../widgets/activity/empty_activity.dart';
-import '../../widgets/activity/grouped_list.dart';
-import '../../widgets/limits/unit_limit_summary.dart';
-import '../../widgets/personalization/action_row.dart';
-import '../../widgets/sheets/edit_unit_limits_sheet.dart';
-import '../../widgets/sheets/edit_unit_sheet.dart';
-import '../../widgets/sheets/update_balance_sheet.dart';
-import '../providers/app_providers.dart';
-import '../theme/app_colors.dart';
-import '../theme/app_spacing.dart';
-import '../theme/app_typography.dart';
-import 'manage_rules_screen.dart';
-
-/// Unit page (ui-design-brief.md section 7.5): balance, "Update balance",
-/// edit name/icon/colour, archive, and that unit's recent activity —
-/// reusing GroupedList/showTransactionDetail from the Activity screen
-/// rather than a second implementation.
-///
-/// The per-unit limit row is live as of #63 (it opens the same sheet as
-/// Limits & alerts > More); the message-reading row is live as of #20 — it opens the rule builder
-/// pre-set to this unit and shows how many rules the unit already has.
-
-class UnitDetailScreen extends ConsumerWidget {
-  final String unitId;
-  const UnitDetailScreen({super.key, required this.unitId});
-
-  void _confirmArchive(
-      BuildContext context,
-      WidgetRef ref,
-      String unitId,
-      String name,
-      ) {
-    showDialog(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: Text('Archive $name?'),
-        content: const Text(
-          "It'll disappear from Home and My money, but its history stays safe.",
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () async {
-              await ref.read(unitRepositoryProvider).archiveUnit(unitId);
-              if (dialogContext.mounted) Navigator.of(dialogContext).pop();
-              if (context.mounted) Navigator.of(context).pop();
-            },
-            child: const Text('Archive'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final c = context.colors;
-    final unitsAsync = ref.watch(unitsProvider);
-    final txAsync = ref.watch(transactionsProvider);
-
-    return unitsAsync.when(
-      loading: () => const Center(child: CircularProgressIndicator.adaptive()),
-      error: (e, st) => Center(child: Text('Something went wrong: $e')),
-      data: (units) {
-        final unit = units.where((u) => u.id == unitId).firstOrNull;
-        if (unit == null) {
-          return Scaffold(
-            appBar: AppBar(),
-            body: Center(
-              child: Text(
-                "This one's gone.",
-                style: AppTypography.bodyMd.copyWith(color: c.onSurfaceVariant),
-              ),
-            ),
-          );
-        }
-
-        return txAsync.when(
-          loading: () =>
-          const Center(child: CircularProgressIndicator.adaptive()),
-          error: (e, st) => Center(child: Text('Something went wrong: $e')),
-          data: (allTransactions) {
-            final balance = Ledger.balanceOf(unit, allTransactions);
-            final unitTransactions =
-            allTransactions
-                .where((t) => t.unitId == unit.id && t.isConfirmed)
-                .toList()
-              ..sort((a, b) => b.occurredAt.compareTo(a.occurredAt));
-
-            return Scaffold(
-              appBar: AppBar(
-                title: Text(unit.name),
-                actions: [
-                  IconButton(
-                    tooltip: 'Edit',
-                    onPressed: () => showEditUnitSheet(context, existing: unit),
-                    icon: const Icon(Icons.edit_outlined),
-                  ),
-                  PopupMenuButton<String>(
-                    onSelected: (v) {
-                      if (v == 'archive') {
-                        _confirmArchive(context, ref, unit.id, unit.name);
-                      }
-                    },
-                    itemBuilder: (_) => const [
-                      PopupMenuItem(value: 'archive', child: Text('Archive')),
-                    ],
-                  ),
-                ],
-              ),
-              body: SafeArea(
-                child: ListView(
-                  padding: const EdgeInsets.fromLTRB(
-                    AppSpacing.margin,
-                    AppSpacing.sm,
-                    AppSpacing.margin,
-                    AppSpacing.xl,
-                  ),
-                  children: [
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(AppSpacing.lg),
-                      decoration: BoxDecoration(
-                        color: unit.color.withValues(alpha: 0.10),
-                        borderRadius: BorderRadius.circular(
-                          AppSpacing.cardRadiusHero,
-                        ),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              Text(
-                                unit.iconEmoji,
-                                style: const TextStyle(fontSize: 28),
-                              ),
-                              const SizedBox(width: AppSpacing.sm),
-                              Text(
-                                unit.name,
-                                style: AppTypography.headlineSm.copyWith(
-                                  color: c.onSurface,
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: AppSpacing.sm),
-                          Text(
-                            Money(balance, unit.currencyCode).format(),
-                            style: AppTypography.displayHeroMobile.copyWith(
-                              color: c.onSurface,
-                            ),
-                          ),
-                          const SizedBox(height: AppSpacing.xs),
-                          Text(
-                            unit.lastVerifiedAt == null
-                                ? 'Not checked yet'
-                                : 'Last checked ${DateFormat('d MMM, h:mm a').format(unit.lastVerifiedAt!)}',
-                            style: AppTypography.bodySm.copyWith(
-                              color: c.onSurfaceVariant,
-                            ),
-                          ),
-                          const SizedBox(height: AppSpacing.md),
-                          FilledButton.tonal(
-                            onPressed: () => showUpdateBalanceSheet(
-                              unit: unit,
-                              currentBalanceMinor: balance,
-                            ),
-                            child: const Text('Update balance'),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: AppSpacing.lg),
-                    ActionRow(
-                      icon: Icons.speed_rounded,
-                      title: 'Limit for this unit',
-                      subtitle: unitLimitSummary(
-                        ref.watch(limitsProvider).value ?? const <LimitRule>[],
-                        unit,
-                      ),
-                      onTap: () => showEditUnitLimitsSheet(unit: unit),
-                    ),
-                    const SizedBox(height: AppSpacing.sm),
-                    Builder(
-                      builder: (context) {
-                        final templates =
-                            ref.watch(unitTemplatesProvider(unit.id)).value ??
-                                [];
-                        return ActionRow(
-                          icon: Icons.mark_email_read_outlined,
-                          title: 'Reading messages',
-                          subtitle: templates.isEmpty
-                              ? 'Teach the app to read messages for this unit'
-                              : '${templates.length} rule${templates.length == 1 ? '' : 's'} · add or review',
-                          onTap: () => Navigator.of(context).push(
-                            MaterialPageRoute(
-                              builder: (_) =>
-                                  ManageRulesScreen(unitId: unit.id),
-                            ),
-                          ),
-                        );
-                      },
-                    ),
-                    const SizedBox(height: AppSpacing.lg),
-                    Text(
-                      'Recent activity',
-                      style: AppTypography.headlineSm.copyWith(
-                        color: c.onSurface,
-                      ),
-                    ),
-                    const SizedBox(height: AppSpacing.sm),
-                    if (unitTransactions.isEmpty)
-                      const EmptyActivity()
-                    else
-                      GroupedList(
-                        transactions: unitTransactions,
-                        unitById: {unit.id: unit},
-                      ),
-                  ],
-                ),
-              ),
-            );
-          },
-        );
-      },
-    );
-  }
-}
-
-extension _FirstOrNull<T> on Iterable<T> {
-  T? get firstOrNull => isEmpty ? null : first;
-}
-</file>
-
 <file path="docs/design.md">
 # Design: Fuata
 
@@ -22222,6 +21976,252 @@ Failures found during a run become GitHub issues labelled `type: bug`, with step
 - Import only adds and replaces; it never deletes. A transaction deleted on the phone comes back if an older backup that still has it is imported.
 - Backups don't include unparsed messages (kept 7 days by design) or which alerts were already shown, so a restored phone can nudge again for a period it had already warned about.
 - Backup files are plain, unencrypted JSON (ADR-010). Keep them somewhere safe.
+</file>
+
+<file path="lib/ui/screens/unit_detail_screen.dart">
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:fuata/domain/logic/ledger.dart';
+import 'package:intl/intl.dart';
+
+import '../../domain/models/limit_rule.dart';
+import '../../domain/models/money.dart';
+import '../../widgets/activity/empty_activity.dart';
+import '../../widgets/activity/grouped_list.dart';
+import '../../widgets/limits/unit_limit_summary.dart';
+import '../../widgets/personalization/action_row.dart';
+import '../../widgets/sheets/edit_unit_limits_sheet.dart';
+import '../../widgets/sheets/edit_unit_sheet.dart';
+import '../../widgets/sheets/update_balance_sheet.dart';
+import '../providers/app_providers.dart';
+import '../theme/app_colors.dart';
+import '../theme/app_spacing.dart';
+import '../theme/app_typography.dart';
+import 'manage_rules_screen.dart';
+
+/// Unit page (ui-design-brief.md section 7.5): balance, "Update balance",
+/// edit name/icon/colour, archive, and that unit's recent activity —
+/// reusing GroupedList/showTransactionDetail from the Activity screen
+/// rather than a second implementation.
+///
+/// The per-unit limit row is live as of #63 (it opens the same sheet as
+/// Limits & alerts > More); the message-reading row is live as of #20 — it opens the rule builder
+/// pre-set to this unit and shows how many rules the unit already has.
+
+class UnitDetailScreen extends ConsumerWidget {
+  final String unitId;
+  const UnitDetailScreen({super.key, required this.unitId});
+
+  void _confirmArchive(
+      BuildContext context,
+      WidgetRef ref,
+      String unitId,
+      String name,
+      ) {
+    showDialog(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text('Archive $name?'),
+        content: const Text(
+          "It'll disappear from Home and My money, but its history stays safe.",
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () async {
+              await ref.read(unitRepositoryProvider).archiveUnit(unitId);
+              if (dialogContext.mounted) Navigator.of(dialogContext).pop();
+              if (context.mounted) Navigator.of(context).pop();
+            },
+            child: const Text('Archive'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final c = context.colors;
+    final unitsAsync = ref.watch(unitsProvider);
+    final txAsync = ref.watch(transactionsProvider);
+
+    return unitsAsync.when(
+      loading: () => const Center(child: CircularProgressIndicator.adaptive()),
+      error: (e, st) => Center(child: Text('Something went wrong: $e')),
+      data: (units) {
+        final unit = units.where((u) => u.id == unitId).firstOrNull;
+        if (unit == null) {
+          return Scaffold(
+            appBar: AppBar(),
+            body: Center(
+              child: Text(
+                "This one's gone.",
+                style: AppTypography.bodyMd.copyWith(color: c.onSurfaceVariant),
+              ),
+            ),
+          );
+        }
+
+        return txAsync.when(
+          loading: () =>
+          const Center(child: CircularProgressIndicator.adaptive()),
+          error: (e, st) => Center(child: Text('Something went wrong: $e')),
+          data: (allTransactions) {
+            final balance = Ledger.balanceOf(unit, allTransactions);
+            final unitTransactions =
+            allTransactions
+                .where((t) => t.unitId == unit.id && t.isConfirmed)
+                .toList()
+              ..sort((a, b) => b.occurredAt.compareTo(a.occurredAt));
+
+            return Scaffold(
+              appBar: AppBar(
+                title: Text(unit.name),
+                actions: [
+                  IconButton(
+                    tooltip: 'Edit',
+                    onPressed: () => showEditUnitSheet(context, existing: unit),
+                    icon: const Icon(Icons.edit_outlined),
+                  ),
+                  PopupMenuButton<String>(
+                    onSelected: (v) {
+                      if (v == 'archive') {
+                        _confirmArchive(context, ref, unit.id, unit.name);
+                      }
+                    },
+                    itemBuilder: (_) => const [
+                      PopupMenuItem(value: 'archive', child: Text('Archive')),
+                    ],
+                  ),
+                ],
+              ),
+              body: SafeArea(
+                child: ListView(
+                  padding: const EdgeInsets.fromLTRB(
+                    AppSpacing.margin,
+                    AppSpacing.sm,
+                    AppSpacing.margin,
+                    AppSpacing.xl,
+                  ),
+                  children: [
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(AppSpacing.lg),
+                      decoration: BoxDecoration(
+                        color: unit.color.withValues(alpha: 0.10),
+                        borderRadius: BorderRadius.circular(
+                          AppSpacing.cardRadiusHero,
+                        ),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Text(
+                                unit.iconEmoji,
+                                style: const TextStyle(fontSize: 28),
+                              ),
+                              const SizedBox(width: AppSpacing.sm),
+                              Text(
+                                unit.name,
+                                style: AppTypography.headlineSm.copyWith(
+                                  color: c.onSurface,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: AppSpacing.sm),
+                          Text(
+                            Money(balance, unit.currencyCode).format(),
+                            style: AppTypography.displayHeroMobile.copyWith(
+                              color: c.onSurface,
+                            ),
+                          ),
+                          const SizedBox(height: AppSpacing.xs),
+                          Text(
+                            unit.lastVerifiedAt == null
+                                ? 'Not checked yet'
+                                : 'Last checked ${DateFormat('d MMM, h:mm a').format(unit.lastVerifiedAt!)}',
+                            style: AppTypography.bodySm.copyWith(
+                              color: c.onSurfaceVariant,
+                            ),
+                          ),
+                          const SizedBox(height: AppSpacing.md),
+                          FilledButton.tonal(
+                            onPressed: () => showUpdateBalanceSheet(
+                              unit: unit,
+                              currentBalanceMinor: balance,
+                            ),
+                            child: const Text('Update balance'),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: AppSpacing.lg),
+                    ActionRow(
+                      icon: Icons.speed_rounded,
+                      title: 'Limit for this unit',
+                      subtitle: unitLimitSummary(
+                        ref.watch(limitsProvider).value ?? const <LimitRule>[],
+                        unit,
+                      ),
+                      onTap: () => showEditUnitLimitsSheet(unit: unit),
+                    ),
+                    const SizedBox(height: AppSpacing.sm),
+                    Builder(
+                      builder: (context) {
+                        final templates =
+                            ref.watch(unitTemplatesProvider(unit.id)).value ??
+                                [];
+                        return ActionRow(
+                          icon: Icons.mark_email_read_outlined,
+                          title: 'Reading messages',
+                          subtitle: templates.isEmpty
+                              ? 'Teach the app to read messages for this unit'
+                              : '${templates.length} rule${templates.length == 1 ? '' : 's'} · add or review',
+                          onTap: () => Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) =>
+                                  ManageRulesScreen(unitId: unit.id),
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                    const SizedBox(height: AppSpacing.lg),
+                    Text(
+                      'Recent activity',
+                      style: AppTypography.headlineSm.copyWith(
+                        color: c.onSurface,
+                      ),
+                    ),
+                    const SizedBox(height: AppSpacing.sm),
+                    if (unitTransactions.isEmpty)
+                      const EmptyActivity()
+                    else
+                      GroupedList(
+                        transactions: unitTransactions,
+                        unitById: {unit.id: unit},
+                      ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+}
+
+extension _FirstOrNull<T> on Iterable<T> {
+  T? get firstOrNull => isEmpty ? null : first;
+}
 </file>
 
 <file path="lib/data/db/drift_repositories.dart">
@@ -23513,255 +23513,6 @@ class MeScreen extends ConsumerWidget {
 }
 </file>
 
-<file path="lib/domain/repositories/repositories.dart">
-import '../models/backup_snapshot.dart';
-import '../models/capture_source.dart';
-import '../models/limit_alert.dart';
-import '../models/limit_rule.dart';
-import '../models/settings.dart';
-import '../models/template.dart';
-import '../models/transaction.dart';
-import '../models/unit.dart';
-import '../models/unparsed_capture.dart';
-
-/// Screens depend only on these interfaces (design.md, "UI-first approach").
-/// Two implementations exist: MockUnitRepository etc. (data/mock, used by
-/// widget tests/previews) and Drift*Repository (data/db, wired up by
-/// default in app_providers.dart as of #13) — swapped via Riverpod
-/// provider overrides, with no screen changes needed either way.
-abstract class UnitRepository {
-  Stream<List<MoneyUnit>> watchUnits({bool includeArchived = false});
-  Future<void> addUnit(MoneyUnit unit);
-  Future<void> updateUnit(MoneyUnit unit);
-  Future<void> archiveUnit(String unitId);
-}
-
-abstract class TransactionRepository {
-  Stream<List<MoneyTransaction>> watchTransactions({String? unitId});
-  Future<void> addTransaction(MoneyTransaction transaction);
-  // In-place edit of an existing row (the review inbox's Fix, #21).
-  // Drift implements it as an upsert by primary key; the mock replaces
-  // the stored item with the same id.
-  Future<void> updateTransaction(MoneyTransaction transaction);
-  Future<void> confirmTransaction(String transactionId);
-  Future<void> deleteTransaction(String transactionId);
-}
-
-abstract class LimitRepository {
-  Stream<List<LimitRule>> watchLimits();
-  Future<void> setLimit(LimitRule limit);
-  Future<void> deleteLimit(String limitId);
-}
-
-/// Personalisation settings (design.md's `settings` key/value table).
-/// One object in, one object out — same reasoning as the other
-/// repositories: screens never see how it's stored.
-abstract class SettingsRepository {
-  Stream<AppSettings> watchSettings();
-  Future<void> updateSettings(AppSettings settings);
-}
-
-/// Capture templates (design.md TEMPLATE, ADR-007): built by the rule
-/// builder (#20) from a pasted sample plus user-labeled spans, consumed
-/// by the parser whenever a message is matched (#21/#22). The Templates
-/// drift table has existed since #13; this interface is the seam the
-/// rule builder talks through so it never learns that drift exists.
-abstract class TemplateRepository {
-  Stream<List<CaptureTemplate>> watchTemplates({String? unitId});
-  Future<void> saveTemplate(CaptureTemplate template);
-  Future<void> deleteTemplate(String templateId);
-}
-
-/// Unparsed captures (design.md's `unparsed_capture` table): messages
-/// nothing could read, kept for the review inbox's "Couldn't read these"
-/// list (US-11) and auto-purged after 7 days. #21 writes these from the
-/// share/paste paths; #22's notification listener writes the same table.
-abstract class CaptureRepository {
-  Stream<List<UnparsedCapture>> watchUnparsed();
-  Future<void> recordUnparsed({
-    required String id,
-    required String sourcePackage,
-    required String rawText,
-  });
-  Future<void> deleteUnparsed(String captureId);
-}
-
-/// The notification allow-list (design.md CAPTURE_SOURCE, US-10): which
-/// apps Fuata may read notifications from. Enabled rows *are* the
-/// allow-list. There is deliberately no delete: turning an app off flips
-/// `enabled`, because templates reference this table (see
-/// [CaptureSource]).
-abstract class CaptureSourceRepository {
-  Stream<List<CaptureSource>> watchSources();
-
-  /// Upsert by id — use [CaptureSource.idFor] so one package is one row.
-  Future<void> saveSource(CaptureSource source);
-}
-
-/// Which limit alerts have already been shown (issue #63, US-06: "fires
-/// once per threshold per period"). Lives in the database, not memory,
-/// because two isolates raise alerts and the answer has to survive the
-/// app being killed.
-abstract class AlertLogRepository {
-  Future<Set<AlertKey>> firedKeys();
-
-  /// Atomically records [key] as shown. True for exactly one caller ever;
-  /// false if it was already claimed (by anyone, including another
-  /// isolate) or could not be recorded — in both cases: do not show it.
-  Future<bool> claim(AlertKey key, DateTime at);
-
-  Future<void> purgeBefore(DateTime cutoff);
-}
-
-/// Whole-database access for export/import (issue #24). Unlike the other
-/// repositories this one is not a stream for a screen to watch: it is read
-/// once when exporting or planning an import, and written once — in a
-/// single transaction — when the person confirms.
-abstract class BackupRepository {
-  /// Everything a backup carries, including current settings.
-  Future<BackupSnapshot> readAll();
-
-  /// Writes [records] (upserting by id) and, when [settings] is given,
-  /// replaces the settings — all or nothing. Callers decide *what* to
-  /// write (see ImportPlan.recordsToWrite); this never decides to
-  /// overwrite anything on its own.
-  Future<void> apply(BackupSnapshot records, {AppSettings? settings});
-}
-</file>
-
-<file path="lib/main.dart">
-import 'dart:async';
-
-import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
-import 'package:fuata/platform/banner.dart';
-import 'package:fuata/platform/notification_capture.dart';
-import 'package:fuata/platform/share_intake.dart';
-import 'package:fuata/ui/providers/app_providers.dart';
-import 'package:fuata/ui/providers/alert_providers.dart';
-import 'package:fuata/ui/providers/banner_providers.dart';
-import 'package:fuata/ui/providers/capture_providers.dart';
-import 'package:fuata/ui/screens/app_gate.dart';
-import 'package:fuata/ui/theme/app_theme.dart';
-import 'package:fuata/widgets/sheets/add_transaction_sheet.dart';
-
-import 'domain/models/settings.dart';
-
-final rootNavigatorKey = GlobalKey<NavigatorState>();
-final rootScaffoldMessengerKey = GlobalKey<ScaffoldMessengerState>();
-
-void main() async {
-  WidgetsFlutterBinding.ensureInitialized();
-  // Issue #22: registers the background isolate entry point so Android
-  // can find it again later, even when the app process has been killed
-  // and the notification listener service starts it cold.
-  await registerCaptureCallback();
-
-  // Issue #21: receive text shared from other apps (ACTION_SEND), now and
-  // on every cold start launched from a share sheet.
-  await initShareIntake();
-
-  // Issue #16: create both notification channels and register the tap
-  // handler *before* runApp, so a cold start from a banner tap has
-  // somewhere to land.
-  await BannerPlatform.instance.init();
-
-  runApp(const ProviderScope(child: Fuata()));
-}
-
-class Fuata extends ConsumerStatefulWidget {
-  const Fuata({super.key});
-
-  @override
-  ConsumerState<Fuata> createState() => _FuataState();
-}
-
-class _FuataState extends ConsumerState<Fuata> with WidgetsBindingObserver {
-  StreamSubscription<BannerAction>? _bannerSub;
-
-  @override
-  void initState() {
-    super.initState();
-    // Starts the share subscription for the app's lifetime.
-    ref.read(shareIntakeListenerProvider);
-    // Issue #22: mirror the allow-list to the native listener, and hear
-    // about captures the background isolate wrote.
-    ref.read(allowListSyncProvider);
-    ref.read(captureRefreshProvider);
-    _bannerSub = BannerPlatform.instance.actions.listen(_onBannerAction);
-
-    // Cold start from a banner tap or its + Add — the callback fired
-    // before initState could subscribe.
-    final pending = BannerPlatform.instance.consumePendingAction();
-    if (pending != null) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) _onBannerAction(pending);
-      });
-    }
-    WidgetsBinding.instance.addObserver(this);
-  }
-
-  @override
-  void dispose() {
-    _bannerSub?.cancel();
-    WidgetsBinding.instance.removeObserver(this);
-    super.dispose();
-  }
-
-  void _onBannerAction(BannerAction action) {
-    switch (action) {
-      case BannerAction.open:
-      // The app is already coming to the front; nothing to route.
-        break;
-      case BannerAction.quickAdd:
-      // US-07: straight into the add sheet, no menus.
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          final ctx = rootNavigatorKey.currentContext;
-          if (ctx != null) showAddTransactionSheet(ctx);
-        });
-    }
-  }
-
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    // Belt and braces for the native "captures changed" ping: whatever the
-    // background isolate wrote while we were away, re-query on return.
-    if (state == AppLifecycleState.resumed) {
-      final db = ref.read(appDatabaseProvider);
-      db.markTablesUpdated([db.transactions, db.unparsedCaptures]);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    // Issue #16: keep the ongoing banner in step with the data. Watch,
-    // not read — a bare `ref.read` in initState instantiates the
-    // provider once but never re-runs its body when settings or
-    // homeState change, so the banner never re-posts. Watching it
-    // subscribes, which is what keeps it firing.
-    ref.watch(bannerSyncProvider);
-    // Issue #63: and announce limits being crossed (US-06).
-    ref.watch(alertSyncProvider);
-
-    final settings = ref.watch(currentSettingsProvider);
-
-    return MaterialApp(
-      debugShowCheckedModeBanner: false,
-      themeMode: settings.themeMode.flutterThemeMode,
-      theme: AppTheme.light(accent: settings.accent),
-      darkTheme: AppTheme.dark(accent: settings.accent),
-      // Issue #7: onboarding on first launch, the tabs afterwards.
-      home: const AppGate(),
-      navigatorKey: rootNavigatorKey,
-      scaffoldMessengerKey: rootScaffoldMessengerKey,
-      builder: FlutterSmartDialog.init(),
-      navigatorObservers: [FlutterSmartDialog.observer],
-    );
-  }
-}
-</file>
-
 <file path="docs/devlog.md">
 # Devlog
 
@@ -24035,55 +23786,253 @@ Nothing broke yet — the schema and repositories are new code with no prior imp
 **Tomorrow:** see Day 2.
 </file>
 
-<file path="docs/issue-status.md">
-# Issue status (generated 2026-09-30T19:32Z)
+<file path="lib/domain/repositories/repositories.dart">
+import '../models/backup_snapshot.dart';
+import '../models/capture_source.dart';
+import '../models/limit_alert.dart';
+import '../models/limit_rule.dart';
+import '../models/settings.dart';
+import '../models/template.dart';
+import '../models/transaction.dart';
+import '../models/unit.dart';
+import '../models/unparsed_capture.dart';
 
-Source of truth: GitHub. Regenerate with `scripts/refresh-issue-status.sh`.
+/// Screens depend only on these interfaces (design.md, "UI-first approach").
+/// Two implementations exist: MockUnitRepository etc. (data/mock, used by
+/// widget tests/previews) and Drift*Repository (data/db, wired up by
+/// default in app_providers.dart as of #13) — swapped via Riverpod
+/// provider overrides, with no screen changes needed either way.
+abstract class UnitRepository {
+  Stream<List<MoneyUnit>> watchUnits({bool includeArchived = false});
+  Future<void> addUnit(MoneyUnit unit);
+  Future<void> updateUnit(MoneyUnit unit);
+  Future<void> archiveUnit(String unitId);
+}
 
-| # | State | Milestone | Title |
-|---|---|---|---|
-| #63 | CLOSED | — | feat(limits): remaining 7.8 gaps — per-unit, alert levels, quiet hours, preview, firing alerts |
-| #56 | OPEN | v1.1 Backlog | feat(capture): user-defined custom fields in rule builder |
-| #55 | OPEN | v1.1 Backlog | feat(capture): "This part changes" wildcard in rule builder |
-| #39 | OPEN | v1.1 Backlog | feat: Open-source licence review and contribution guide |
-| #38 | OPEN | v1.1 Backlog | feat: iOS manual/share-sheet edition |
-| #37 | OPEN | v1.1 Backlog | feat: Opt-in redacted diagnostics copy button |
-| #36 | OPEN | v1.1 Backlog | feat: Listener-inactive detection and manufacturer keep-alive guides |
-| #35 | OPEN | v1.1 Backlog | feat: Scheduled encrypted export to a user-chosen folder |
-| #34 | OPEN | v1.1 Backlog | feat: Template packs: export/import/share by file or QR, bundled presets |
-| #33 | OPEN | v1.1 Backlog | feat: Recurring bills and expected income |
-| #32 | OPEN | v1.1 Backlog | feat: Recipient to category rules |
-| #31 | OPEN | v1.1 Backlog | feat: Scheduled daily/weekly/monthly summary notifications |
-| #30 | OPEN | v1.1 Backlog | feat: Outing mode (temporary budget with its own banner) |
-| #29 | OPEN | v1.1 Backlog | feat: Home screen widget |
-| #28 | OPEN | v1.1 Backlog | feat: SQLCipher encryption with Android Keystore and app lock |
-| #27 | OPEN | v0.1 MVP | chore(release): v0.1.0 |
-| #26 | OPEN | v0.1 MVP | test: manual device test pass |
-| #25 | OPEN | v0.1 MVP | chore(privacy): remove INTERNET permission and disable backup |
-| #24 | CLOSED | v0.1 MVP | feat(data): JSON export/import |
-| #23 | CLOSED | v0.1 MVP | feat(insight): Today/Week/Month summaries |
-| #22 | CLOSED | v0.1 MVP | feat(capture): notification listener with app allow-list and dedupe |
-| #21 | CLOSED | v0.1 MVP | feat(capture): share/paste to review inbox |
-| #20 | CLOSED | v0.1 MVP | feat(capture): rule builder UI |
-| #19 | CLOSED | v0.1 MVP | feat(capture): template model and parser |
-| #18 | CLOSED | v0.1 MVP | spike: notification listener with app closed |
-| #17 | CLOSED | v0.1 MVP | feat(banner): banner setup screen with live preview |
-| #16 | CLOSED | v0.1 MVP | feat(banner): ongoing notification banner |
-| #15 | CLOSED | v0.1 MVP | feat(limits): limit engine and status |
-| #14 | CLOSED | v0.1 MVP | feat(ledger): computed balances, transfers, fees |
-| #13 | CLOSED | v0.1 MVP | feat(data): local database and repositories |
-| #12 | CLOSED | v0.1 MVP | feat(ui): Me and personalisation settings |
-| #11 | CLOSED | v0.1 MVP | feat(ui): My money and unit pages |
-| #10 | CLOSED | v0.1 MVP | feat(ui): Activity screen and transaction detail |
-| #9 | CLOSED | v0.1 MVP | feat(ui): add-transaction sheet |
-| #8 | CLOSED | v0.1 MVP | feat(ui): Home (Today) screen |
-| #7 | CLOSED | v0.1 MVP | feat(ui): onboarding flow |
-| #6 | CLOSED | v0.1 MVP | feat(ui): app theme, tokens and personalisation shell |
-| #5 | CLOSED | v0.1 MVP | docs: devlog and testing checklist |
-| #4 | CLOSED | v0.1 MVP | docs: design doc (data model, architecture, decision records) |
-| #3 | CLOSED | v0.1 MVP | docs: UI design brief and design tokens |
-| #2 | CLOSED | v0.1 MVP | docs: requirements document |
-| #1 | CLOSED | v0.1 MVP | chore: initialise repo and Flutter project |
+abstract class TransactionRepository {
+  Stream<List<MoneyTransaction>> watchTransactions({String? unitId});
+  Future<void> addTransaction(MoneyTransaction transaction);
+  // In-place edit of an existing row (the review inbox's Fix, #21).
+  // Drift implements it as an upsert by primary key; the mock replaces
+  // the stored item with the same id.
+  Future<void> updateTransaction(MoneyTransaction transaction);
+  Future<void> confirmTransaction(String transactionId);
+  Future<void> deleteTransaction(String transactionId);
+}
+
+abstract class LimitRepository {
+  Stream<List<LimitRule>> watchLimits();
+  Future<void> setLimit(LimitRule limit);
+  Future<void> deleteLimit(String limitId);
+}
+
+/// Personalisation settings (design.md's `settings` key/value table).
+/// One object in, one object out — same reasoning as the other
+/// repositories: screens never see how it's stored.
+abstract class SettingsRepository {
+  Stream<AppSettings> watchSettings();
+  Future<void> updateSettings(AppSettings settings);
+}
+
+/// Capture templates (design.md TEMPLATE, ADR-007): built by the rule
+/// builder (#20) from a pasted sample plus user-labeled spans, consumed
+/// by the parser whenever a message is matched (#21/#22). The Templates
+/// drift table has existed since #13; this interface is the seam the
+/// rule builder talks through so it never learns that drift exists.
+abstract class TemplateRepository {
+  Stream<List<CaptureTemplate>> watchTemplates({String? unitId});
+  Future<void> saveTemplate(CaptureTemplate template);
+  Future<void> deleteTemplate(String templateId);
+}
+
+/// Unparsed captures (design.md's `unparsed_capture` table): messages
+/// nothing could read, kept for the review inbox's "Couldn't read these"
+/// list (US-11) and auto-purged after 7 days. #21 writes these from the
+/// share/paste paths; #22's notification listener writes the same table.
+abstract class CaptureRepository {
+  Stream<List<UnparsedCapture>> watchUnparsed();
+  Future<void> recordUnparsed({
+    required String id,
+    required String sourcePackage,
+    required String rawText,
+  });
+  Future<void> deleteUnparsed(String captureId);
+}
+
+/// The notification allow-list (design.md CAPTURE_SOURCE, US-10): which
+/// apps Fuata may read notifications from. Enabled rows *are* the
+/// allow-list. There is deliberately no delete: turning an app off flips
+/// `enabled`, because templates reference this table (see
+/// [CaptureSource]).
+abstract class CaptureSourceRepository {
+  Stream<List<CaptureSource>> watchSources();
+
+  /// Upsert by id — use [CaptureSource.idFor] so one package is one row.
+  Future<void> saveSource(CaptureSource source);
+}
+
+/// Which limit alerts have already been shown (issue #63, US-06: "fires
+/// once per threshold per period"). Lives in the database, not memory,
+/// because two isolates raise alerts and the answer has to survive the
+/// app being killed.
+abstract class AlertLogRepository {
+  Future<Set<AlertKey>> firedKeys();
+
+  /// Atomically records [key] as shown. True for exactly one caller ever;
+  /// false if it was already claimed (by anyone, including another
+  /// isolate) or could not be recorded — in both cases: do not show it.
+  Future<bool> claim(AlertKey key, DateTime at);
+
+  Future<void> purgeBefore(DateTime cutoff);
+}
+
+/// Whole-database access for export/import (issue #24). Unlike the other
+/// repositories this one is not a stream for a screen to watch: it is read
+/// once when exporting or planning an import, and written once — in a
+/// single transaction — when the person confirms.
+abstract class BackupRepository {
+  /// Everything a backup carries, including current settings.
+  Future<BackupSnapshot> readAll();
+
+  /// Writes [records] (upserting by id) and, when [settings] is given,
+  /// replaces the settings — all or nothing. Callers decide *what* to
+  /// write (see ImportPlan.recordsToWrite); this never decides to
+  /// overwrite anything on its own.
+  Future<void> apply(BackupSnapshot records, {AppSettings? settings});
+}
+</file>
+
+<file path="lib/main.dart">
+import 'dart:async';
+
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
+import 'package:fuata/platform/banner.dart';
+import 'package:fuata/platform/notification_capture.dart';
+import 'package:fuata/platform/share_intake.dart';
+import 'package:fuata/ui/providers/app_providers.dart';
+import 'package:fuata/ui/providers/alert_providers.dart';
+import 'package:fuata/ui/providers/banner_providers.dart';
+import 'package:fuata/ui/providers/capture_providers.dart';
+import 'package:fuata/ui/screens/app_gate.dart';
+import 'package:fuata/ui/theme/app_theme.dart';
+import 'package:fuata/widgets/sheets/add_transaction_sheet.dart';
+
+import 'domain/models/settings.dart';
+
+final rootNavigatorKey = GlobalKey<NavigatorState>();
+final rootScaffoldMessengerKey = GlobalKey<ScaffoldMessengerState>();
+
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  // Issue #22: registers the background isolate entry point so Android
+  // can find it again later, even when the app process has been killed
+  // and the notification listener service starts it cold.
+  await registerCaptureCallback();
+
+  // Issue #21: receive text shared from other apps (ACTION_SEND), now and
+  // on every cold start launched from a share sheet.
+  await initShareIntake();
+
+  // Issue #16: create both notification channels and register the tap
+  // handler *before* runApp, so a cold start from a banner tap has
+  // somewhere to land.
+  await BannerPlatform.instance.init();
+
+  runApp(const ProviderScope(child: Fuata()));
+}
+
+class Fuata extends ConsumerStatefulWidget {
+  const Fuata({super.key});
+
+  @override
+  ConsumerState<Fuata> createState() => _FuataState();
+}
+
+class _FuataState extends ConsumerState<Fuata> with WidgetsBindingObserver {
+  StreamSubscription<BannerAction>? _bannerSub;
+
+  @override
+  void initState() {
+    super.initState();
+    // Starts the share subscription for the app's lifetime.
+    ref.read(shareIntakeListenerProvider);
+    // Issue #22: mirror the allow-list to the native listener, and hear
+    // about captures the background isolate wrote.
+    ref.read(allowListSyncProvider);
+    ref.read(captureRefreshProvider);
+    _bannerSub = BannerPlatform.instance.actions.listen(_onBannerAction);
+
+    // Cold start from a banner tap or its + Add — the callback fired
+    // before initState could subscribe.
+    final pending = BannerPlatform.instance.consumePendingAction();
+    if (pending != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _onBannerAction(pending);
+      });
+    }
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    _bannerSub?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  void _onBannerAction(BannerAction action) {
+    switch (action) {
+      case BannerAction.open:
+      // The app is already coming to the front; nothing to route.
+        break;
+      case BannerAction.quickAdd:
+      // US-07: straight into the add sheet, no menus.
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          final ctx = rootNavigatorKey.currentContext;
+          if (ctx != null) showAddTransactionSheet(ctx);
+        });
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Belt and braces for the native "captures changed" ping: whatever the
+    // background isolate wrote while we were away, re-query on return.
+    if (state == AppLifecycleState.resumed) {
+      final db = ref.read(appDatabaseProvider);
+      db.markTablesUpdated([db.transactions, db.unparsedCaptures]);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Issue #16: keep the ongoing banner in step with the data. Watch,
+    // not read — a bare `ref.read` in initState instantiates the
+    // provider once but never re-runs its body when settings or
+    // homeState change, so the banner never re-posts. Watching it
+    // subscribes, which is what keeps it firing.
+    ref.watch(bannerSyncProvider);
+    // Issue #63: and announce limits being crossed (US-06).
+    ref.watch(alertSyncProvider);
+
+    final settings = ref.watch(currentSettingsProvider);
+
+    return MaterialApp(
+      debugShowCheckedModeBanner: false,
+      themeMode: settings.themeMode.flutterThemeMode,
+      theme: AppTheme.light(accent: settings.accent),
+      darkTheme: AppTheme.dark(accent: settings.accent),
+      // Issue #7: onboarding on first launch, the tabs afterwards.
+      home: const AppGate(),
+      navigatorKey: rootNavigatorKey,
+      scaffoldMessengerKey: rootScaffoldMessengerKey,
+      builder: FlutterSmartDialog.init(),
+      navigatorObservers: [FlutterSmartDialog.observer],
+    );
+  }
+}
 </file>
 
 <file path="lib/ui/screens/home_screen.dart">
@@ -24539,6 +24488,57 @@ class EmptyHome extends StatelessWidget {
     );
   }
 }
+</file>
+
+<file path="docs/issue-status.md">
+# Issue status (generated 2026-10-01T09:26Z)
+
+Source of truth: GitHub. Regenerate with `scripts/refresh-issue-status.sh`.
+
+| # | State | Milestone | Title |
+|---|---|---|---|
+| #63 | CLOSED | — | feat(limits): remaining 7.8 gaps — per-unit, alert levels, quiet hours, preview, firing alerts |
+| #56 | OPEN | v1.1 Backlog | feat(capture): user-defined custom fields in rule builder |
+| #55 | OPEN | v1.1 Backlog | feat(capture): "This part changes" wildcard in rule builder |
+| #39 | OPEN | v1.1 Backlog | feat: Open-source licence review and contribution guide |
+| #38 | OPEN | v1.1 Backlog | feat: iOS manual/share-sheet edition |
+| #37 | OPEN | v1.1 Backlog | feat: Opt-in redacted diagnostics copy button |
+| #36 | OPEN | v1.1 Backlog | feat: Listener-inactive detection and manufacturer keep-alive guides |
+| #35 | OPEN | v1.1 Backlog | feat: Scheduled encrypted export to a user-chosen folder |
+| #34 | OPEN | v1.1 Backlog | feat: Template packs: export/import/share by file or QR, bundled presets |
+| #33 | OPEN | v1.1 Backlog | feat: Recurring bills and expected income |
+| #32 | OPEN | v1.1 Backlog | feat: Recipient to category rules |
+| #31 | OPEN | v1.1 Backlog | feat: Scheduled daily/weekly/monthly summary notifications |
+| #30 | OPEN | v1.1 Backlog | feat: Outing mode (temporary budget with its own banner) |
+| #29 | OPEN | v1.1 Backlog | feat: Home screen widget |
+| #28 | OPEN | v1.1 Backlog | feat: SQLCipher encryption with Android Keystore and app lock |
+| #27 | OPEN | v0.1 MVP | chore(release): v0.1.0 |
+| #26 | OPEN | v0.1 MVP | test: manual device test pass |
+| #25 | CLOSED | v0.1 MVP | chore(privacy): remove INTERNET permission and disable backup |
+| #24 | CLOSED | v0.1 MVP | feat(data): JSON export/import |
+| #23 | CLOSED | v0.1 MVP | feat(insight): Today/Week/Month summaries |
+| #22 | CLOSED | v0.1 MVP | feat(capture): notification listener with app allow-list and dedupe |
+| #21 | CLOSED | v0.1 MVP | feat(capture): share/paste to review inbox |
+| #20 | CLOSED | v0.1 MVP | feat(capture): rule builder UI |
+| #19 | CLOSED | v0.1 MVP | feat(capture): template model and parser |
+| #18 | CLOSED | v0.1 MVP | spike: notification listener with app closed |
+| #17 | CLOSED | v0.1 MVP | feat(banner): banner setup screen with live preview |
+| #16 | CLOSED | v0.1 MVP | feat(banner): ongoing notification banner |
+| #15 | CLOSED | v0.1 MVP | feat(limits): limit engine and status |
+| #14 | CLOSED | v0.1 MVP | feat(ledger): computed balances, transfers, fees |
+| #13 | CLOSED | v0.1 MVP | feat(data): local database and repositories |
+| #12 | CLOSED | v0.1 MVP | feat(ui): Me and personalisation settings |
+| #11 | CLOSED | v0.1 MVP | feat(ui): My money and unit pages |
+| #10 | CLOSED | v0.1 MVP | feat(ui): Activity screen and transaction detail |
+| #9 | CLOSED | v0.1 MVP | feat(ui): add-transaction sheet |
+| #8 | CLOSED | v0.1 MVP | feat(ui): Home (Today) screen |
+| #7 | CLOSED | v0.1 MVP | feat(ui): onboarding flow |
+| #6 | CLOSED | v0.1 MVP | feat(ui): app theme, tokens and personalisation shell |
+| #5 | CLOSED | v0.1 MVP | docs: devlog and testing checklist |
+| #4 | CLOSED | v0.1 MVP | docs: design doc (data model, architecture, decision records) |
+| #3 | CLOSED | v0.1 MVP | docs: UI design brief and design tokens |
+| #2 | CLOSED | v0.1 MVP | docs: requirements document |
+| #1 | CLOSED | v0.1 MVP | chore: initialise repo and Flutter project |
 </file>
 
 </files>
