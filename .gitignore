@@ -49,3 +49,8 @@ app.*.map.json
 
 ## Generated code — regenerate with `dart run build_runner build`
 *.g.dart
+
+# Release signing (issue #27) — never commit.
+key.properties
+**/*.jks
+**/*.keystore
