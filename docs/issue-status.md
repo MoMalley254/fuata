@@ -1,4 +1,4 @@
-# Issue status (generated 2026-10-02T08:09Z)
+# Issue status (generated 2026-10-05T07:24Z)
 
 Source of truth: GitHub. Regenerate with `scripts/refresh-issue-status.sh`.
 
@@ -19,10 +19,10 @@ Source of truth: GitHub. Regenerate with `scripts/refresh-issue-status.sh`.
 | #75 | OPEN | v0.1 MVP | feat(permissions): notification-access primer dialog |
 | #74 | OPEN | v0.1 MVP | fix(capture): don't store unmatched notification text |
 | #73 | OPEN | v0.1 MVP | refactor(nav): adopt go_router and fix banner cold-start routing |
-| #72 | OPEN | v0.1 MVP | fix(capture): rule builder code, payee and date parsing |
-| #71 | OPEN | v0.1 MVP | fix(ui): add-unit action in My money app bar |
-| #70 | OPEN | v0.1 MVP | fix(ui): make Home units and transactions tappable |
-| #69 | OPEN | v0.1 MVP | fix(ui): Activity list doesn't scroll |
+| #72 | CLOSED | v0.1 MVP | fix(capture): rule builder code, payee and date parsing |
+| #71 | CLOSED | v0.1 MVP | fix(ui): add-unit action in My money app bar |
+| #70 | CLOSED | v0.1 MVP | fix(ui): make Home units and transactions tappable |
+| #69 | CLOSED | v0.1 MVP | fix(ui): Activity list doesn't scroll |
 | #63 | CLOSED | — | feat(limits): remaining 7.8 gaps — per-unit, alert levels, quiet hours, preview, firing alerts |
 | #56 | OPEN | v1.1 Backlog | feat(capture): user-defined custom fields in rule builder |
 | #55 | OPEN | v1.1 Backlog | feat(capture): "This part changes" wildcard in rule builder |
