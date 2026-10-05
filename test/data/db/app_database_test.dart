@@ -202,35 +202,6 @@ void main() {
     expect(saved.autoAcceptCaptures, isTrue);
   });
 
-  test('unparsed captures round-trip and purge after 7 days', () async {
-    final repo = DriftCaptureRepository(db);
-
-    // Seed an old row directly, as if recorded a week ago.
-    await db.into(db.unparsedCaptures).insert(
-      UnparsedCapturesCompanion.insert(
-        id: 'old',
-        receivedAt:
-        DateTime.now().toUtc().subtract(const Duration(days: 8)),
-        sourcePackage: 'shared',
-        rawText: 'an old unreadable message',
-      ),
-    );
-
-    await repo.recordUnparsed(
-      id: 'new',
-      sourcePackage: 'shared',
-      rawText: 'Confirmed. Ksh350.00 paid to JAVA HOUSE...',
-    );
-
-    final rows = await repo.watchUnparsed().first;
-    expect(rows, hasLength(1)); // the old one was purged on the way in
-    expect(rows.single.id, 'new');
-    expect(rows.single.rawText, contains('JAVA HOUSE'));
-
-    await repo.deleteUnparsed('new');
-    expect(await repo.watchUnparsed().first, isEmpty);
-  });
-
   group('limit alerts (#63)', () {
     const key = AlertKey('l_overall_day', '2026-09-30', AlertLevel.warning);
     final at = DateTime(2026, 9, 30, 12);
@@ -446,5 +417,60 @@ void main() {
       expect(batch.alerts, hasLength(1));
       expect(batch.quiet, isTrue);
     });
+  });
+  test('unparsed captures round-trip and purge after 14 days', () async {
+    final repo = DriftCaptureRepository(db);
+
+    await db.into(db.unparsedCaptures).insert(
+      UnparsedCapturesCompanion.insert(
+        id: 'old',
+        receivedAt:
+        DateTime.now().toUtc().subtract(const Duration(days: 15)),
+        sourcePackage: 'shared',
+        rawText: 'an old unreadable message',
+      ),
+    );
+
+    await repo.recordUnparsed(
+      id: 'new',
+      sourcePackage: 'shared',
+      rawText: 'Confirmed. Ksh350.00 paid to JAVA HOUSE...',
+    );
+
+    final rows = await repo.watchUnparsed().first;
+    expect(rows, hasLength(1)); // the old one was purged on the way in
+    expect(rows.single.id, 'new');
+
+    await repo.deleteUnparsed('new');
+    expect(await repo.watchUnparsed().first, isEmpty);
+  });
+
+  test('unparsed captures are capped at the newest 200', () async {
+    final repo = DriftCaptureRepository(db);
+
+    // Seed 199 "existing" rows directly, oldest first, all inside the
+    // retention window so only the cap can touch them.
+    final now = DateTime.now().toUtc();
+    for (var i = 0; i < 199; i++) {
+      await db.into(db.unparsedCaptures).insert(
+        UnparsedCapturesCompanion.insert(
+          id: 'seed_$i',
+          receivedAt: now.subtract(Duration(minutes: 199 - i)),
+          sourcePackage: 'shared',
+          rawText: 'seeded $i',
+        ),
+      );
+    }
+
+    // Two more through the repository: 201 total, so one oldest falls off.
+    await repo.recordUnparsed(
+        id: 'a', sourcePackage: 'shared', rawText: 'a');
+    await repo.recordUnparsed(
+        id: 'b', sourcePackage: 'shared', rawText: 'b');
+
+    final rows = await repo.watchUnparsed().first;
+    expect(rows, hasLength(200));
+    expect(rows.any((r) => r.id == 'seed_0'), isFalse);  // oldest gone
+    expect(rows.any((r) => r.id == 'b'), isTrue);        // newest kept
   });
 }
