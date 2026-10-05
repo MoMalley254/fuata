@@ -93,8 +93,10 @@ class BannerPlatform {
   }
 
   Future<void> _createChannels() async {
-    final android = _plugin.resolvePlatformSpecificImplementation<
-        AndroidFlutterLocalNotificationsPlugin>();
+    final android = _plugin
+        .resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin
+        >();
     if (android == null) return;
     await android.createNotificationChannel(
       const AndroidNotificationChannel(
@@ -157,9 +159,9 @@ class BannerPlatform {
   /// two can never disagree. [redactOnLockScreen] comes from the
   /// person's `redactedLockScreenBanner` setting.
   Future<void> show(
-      BannerContent content, {
-        required bool redactOnLockScreen,
-      }) async {
+    BannerContent content, {
+    required bool redactOnLockScreen,
+  }) async {
     await init();
     await _requestPermissionOnce();
     await _plugin.show(
@@ -177,10 +179,10 @@ class BannerPlatform {
   /// now" for the same limit instead of stacking beside it. [quiet] posts
   /// it on the silent channel (quiet hours).
   Future<void> showAlert(
-      LimitAlert alert, {
-        required bool quiet,
-        required bool redactOnLockScreen,
-      }) async {
+    LimitAlert alert, {
+    required bool quiet,
+    required bool redactOnLockScreen,
+  }) async {
     await init();
     await _requestPermissionOnce();
     final text = AlertText.build(alert);
@@ -192,8 +194,9 @@ class BannerPlatform {
         android: AndroidNotificationDetails(
           quiet ? quietAlertChannelId : alertChannelId,
           quiet ? quietAlertChannelName : alertChannelName,
-          channelDescription:
-          quiet ? quietAlertChannelDescription : alertChannelDescription,
+          channelDescription: quiet
+              ? quietAlertChannelDescription
+              : alertChannelDescription,
           importance: quiet ? Importance.low : Importance.high,
           priority: quiet ? Priority.low : Priority.high,
           autoCancel: true,
@@ -229,15 +232,17 @@ class BannerPlatform {
   Future<void> _requestPermissionOnce() async {
     if (_permissionAsked) return;
     _permissionAsked = true;
-    final android = _plugin.resolvePlatformSpecificImplementation<
-        AndroidFlutterLocalNotificationsPlugin>();
+    final android = _plugin
+        .resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin
+        >();
     await android?.requestNotificationsPermission();
   }
 
   AndroidNotificationDetails _androidDetails(
-      BannerContent content,
-      bool redactOnLockScreen,
-      ) {
+    BannerContent content,
+    bool redactOnLockScreen,
+  ) {
     final progress = content.progress;
     final body = _body(content);
 
@@ -287,8 +292,7 @@ class BannerPlatform {
           cancelNotification: false,
         ),
       ],
-      styleInformation:
-      body.isEmpty ? null : BigTextStyleInformation(body),
+      styleInformation: body.isEmpty ? null : BigTextStyleInformation(body),
     );
   }
 
@@ -310,4 +314,19 @@ class BannerPlatform {
     SpendStatus.danger => const Color(0xFFE5533D),
     SpendStatus.overdraft => const Color(0xFFB3123F),
   };
+
+  /// Reads the action that *launched a terminated app* — a banner tap or its
+  /// + Add pressed while Fuata was not running. The in-process `_onResponse`
+  /// callback cannot fire in that case; the plugin records the action in the
+  /// launch details instead. Returns null when the app was launched normally.
+  Future<BannerAction?> initialActionFromLaunch() async {
+    await init();
+    final details = await _plugin.getNotificationAppLaunchDetails();
+    if (details?.didNotificationLaunchApp != true) return null;
+    final response = details!.notificationResponse;
+    if (response == null) return null;
+    return response.actionId == 'quick_add'
+        ? BannerAction.quickAdd
+        : BannerAction.open;
+  }
 }
