@@ -353,3 +353,26 @@ without it, and it's a polish item rather than a correctness bug. See
 
 Alerts use `fuata_alerts` (high). Inside quiet hours they use `fuata_alerts_quiet` (low, no sound), because per-notification sound overrides are ignored on Android 8+. Notification id is derived from the limit id, so a later level replaces an earlier one. Not done: the banner/Home status ignores per-unit limits; there is no alert when a period ends.
 MockAlertLogRepository in data/mock/ mirrors the same contract in memory for widget tests and previews — same "claim once" semantics, no DB.
+
+
+### 5.5 Home-screen widget (issue #29)
+
+The widget is an Android `AppWidgetProvider`, not a Flutter surface. It
+runs briefly in the app process with no Flutter engine and no drift
+access, so it reads only what the app has already cached:
+Dart (either isolate)
+└── HomeWidgetBridge.push(snapshot) → fuata/home_widget
+└── HomeWidgetChannel → WidgetDataStore (SharedPreferences)
+└── FuataWidgetProvider.refreshAll → onUpdate → RemoteViews
+
+`WidgetSnapshot.fromData` is the single place that decides what the
+widget shows (today's spend, the first unit's currency, the overall
+daily limit if one exists) and is shared by `widgetSyncProvider` (UI
+isolate) and `_refreshWidget` (background isolate) — the same pattern
+as `loadBannerContent` for the ongoing notification. The widget does
+not read `AppSettings.banner*`: it always shows today.
+
+A tap launches `MainActivity` via the standard launcher `PendingIntent`.
+`updatePeriodMillis = 30 minutes` is a fallback for the case neither
+isolate fires a push — force-stop, reboot, or a fresh install before
+the app is opened once.
