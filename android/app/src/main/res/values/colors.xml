@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Issue #29. Duplicated from AppColors.light in
+     lib/ui/theme/app_colors.dart — RemoteViews can't read Flutter's
+     ThemeExtension, so the widget's palette lives here. -->
+<resources>
+    <color name="widget_surface">#FFFFFFFF</color>
+    <color name="widget_on_surface">#FF1B1C1A</color>
+    <color name="widget_on_surface_variant">#FF3E4948</color>
+    <color name="widget_outline">#FFBDC9C7</color>
+    <color name="widget_accent">#FF006762</color>
+
+    <!-- Status colours, same in both themes (matching AppColors). -->
+    <color name="status_safe">#FF2E9E6B</color>
+    <color name="status_warning">#FFE8A317</color>
+    <color name="status_danger">#FFE5533D</color>
+    <color name="status_overdraft">#FFB3123F</color>
+</resources>

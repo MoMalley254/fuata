@@ -18,10 +18,17 @@ class MainActivity : FlutterActivity() {
     private var captureChannel: CaptureChannel? = null
     private var backupFiles: BackupFilesChannel? = null
 
+    private var homeWidget: HomeWidgetChannel? = null
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
 
         captureChannel = CaptureChannel(
+            applicationContext,
+            flutterEngine.dartExecutor.binaryMessenger,
+        )
+
+        homeWidget = HomeWidgetChannel(
             applicationContext,
             flutterEngine.dartExecutor.binaryMessenger,
         )
@@ -41,6 +48,8 @@ class MainActivity : FlutterActivity() {
     override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
         captureChannel?.dispose()
         captureChannel = null
+        homeWidget?.dispose()
+        homeWidget = null
         backupFiles?.dispose()
         backupFiles = null
         super.cleanUpFlutterEngine(flutterEngine)

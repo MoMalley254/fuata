@@ -13,6 +13,7 @@ import 'package:fuata/ui/providers/alert_providers.dart';
 import 'package:fuata/ui/providers/app_providers.dart';
 import 'package:fuata/ui/providers/banner_providers.dart';
 import 'package:fuata/ui/providers/capture_providers.dart';
+import 'package:fuata/ui/providers/widget_providers.dart';
 import 'package:fuata/ui/theme/app_theme.dart';
 
 import 'domain/models/settings.dart';
@@ -105,6 +106,7 @@ class _FuataState extends ConsumerState<Fuata> with WidgetsBindingObserver {
   Widget build(BuildContext context) {
     ref.watch(bannerSyncProvider);
     ref.watch(alertSyncProvider);
+    ref.watch(widgetSyncProvider); //Issue #29
 
     final settings = ref.watch(currentSettingsProvider);
     final router = ref.watch(routerProvider);

@@ -80,6 +80,19 @@
                 <action android:name="android.service.notification.NotificationListenerService" />
             </intent-filter>
         </service>
+        <!-- Issue #29: the home-screen widget. A plain AppWidgetProvider
+     receiver; it reads only the cached snapshot HomeWidgetChannel
+     writes (see WidgetDataStore.kt) and never touches drift. -->
+        <receiver
+            android:name=".FuataWidgetProvider"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/fuata_widget_info" />
+        </receiver>
     </application>
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility and
