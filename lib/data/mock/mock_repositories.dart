@@ -11,6 +11,7 @@ import '../../domain/models/transaction.dart';
 import '../../domain/models/unit.dart';
 import '../../domain/models/unparsed_capture.dart';
 import '../../domain/repositories/repositories.dart';
+import '../constants/captures_constants.dart';
 
 /// Sample data matching docs/ui-design-brief.md section 6, so screens
 /// look real while the drift database (#13) isn't built yet.
@@ -150,6 +151,8 @@ class _Store<T> {
   final _controller = StreamController<List<T>>.broadcast();
 
   List<T> get _snapshot => List<T>.unmodifiable(_items);
+
+  List<T> get items => List<T>.unmodifiable(_items);
 
   Stream<List<T>> watch() async* {
     yield _snapshot;
@@ -334,8 +337,16 @@ class MockCaptureRepository implements CaptureRepository {
         rawText: rawText,
       ),
     );
-    final cutoff = DateTime.now().toUtc().subtract(const Duration(days: 7));
+    final cutoff = DateTime.now().toUtc().subtract(unparsedCaptureRetention);
     _store.removeWhere((u) => u.receivedAt.isBefore(cutoff));
+
+    // Cap by newest: keep the same 200-row ceiling the drift repo enforces.
+    final sorted = [..._store.items]
+      ..sort((a, b) => b.receivedAt.compareTo(a.receivedAt));
+    if (sorted.length > unparsedCaptureCap) {
+      final keep = sorted.take(unparsedCaptureCap).map((u) => u.id).toSet();
+      _store.removeWhere((u) => !keep.contains(u.id));
+    }
   }
 
   @override

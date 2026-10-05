@@ -1,7 +1,7 @@
 /// design.md's `unparsed_capture`: a message the parser couldn't read,
 /// kept only long enough for the review inbox's "Couldn't read these"
 /// list to offer "Teach me" (US-11), then deleted by the person or
-/// auto-purged after 7 days. Raw text is stored here *by design* — that
+/// auto-purged after 14 days. Raw text is stored here *by design* — that
 /// is the whole point of the list — unlike transactions, where rawText
 /// is opt-in only (ADR-009).
 class UnparsedCapture {
