@@ -28,6 +28,7 @@ void main() {
       'Confirmed. Ksh350.00 paid to JAVA HOUSE on 21/9/26 at 1:12 PM. '
       'Code QW12ABC3.';
   const withoutCode = 'Payment of Ksh350.00 to JAVA HOUSE';
+  const unmatched = 'Ksh99.00 paid to a merchant Fuata has not learned yet.';
 
   late AppDatabase db;
   late DriftTransactionRepository txs;
@@ -119,6 +120,72 @@ void main() {
   });
 
   tearDown(() => db.close());
+
+  group('#74: unmatched notification text is dropped unless it looks financial', () {
+    test('a plain chat message from an allowed app leaves nothing behind', () async {
+      await allow(messages);
+
+      final outcome = await processor.captureNotification(
+        messages,
+        'Hey, are we still on for 3?',
+      );
+
+      expect(outcome, isA<CaptureIgnored>());
+      expect(await txs.watchTransactions().first, isEmpty);
+      expect(await captures.watchUnparsed().first, isEmpty);
+    });
+
+    test('an OTP from an allowed app leaves nothing behind', () async {
+      await allow(messages);
+
+      final outcome = await processor.captureNotification(
+        messages,
+        'Your code is 445566. Do not share it with anyone.',
+      );
+
+      expect(outcome, isA<CaptureIgnored>());
+      expect(await captures.watchUnparsed().first, isEmpty);
+    });
+
+    test('a bank OTP that also mentions an amount is still dropped', () async {
+      await allow(messages);
+
+      final outcome = await processor.captureNotification(
+        messages,
+        'Code 456789. Card purchase KES 2,300.00 at SOME SHOP.',
+      );
+
+      expect(outcome, isA<CaptureIgnored>());
+      expect(await captures.watchUnparsed().first, isEmpty);
+    });
+
+    test('a financial-looking unmatched message is kept for Teach me', () async {
+      await allow(messages);
+
+      final outcome = await processor.captureNotification(
+        messages,
+        'Ksh99.00 paid to a merchant Fuata has not learned yet.',
+      );
+
+      expect(outcome, isA<CaptureUnparsed>());
+      expect(
+        (await captures.watchUnparsed().first).single.rawText,
+        contains('Ksh99.00'),
+      );
+    });
+
+    test('a user-pasted message is kept even when it looks non-financial', () async {
+      // Sharing or pasting is explicit: the person chose to hand Fuata the
+      // text, so the notification gate doesn't apply.
+      final outcome = await processor.capture(
+        'Let me try teaching you this odd format',
+        source: TxSource.shared,
+      );
+
+      expect(outcome, isA<CaptureUnparsed>());
+      expect(await captures.watchUnparsed().first, hasLength(1));
+    });
+  });
 
   group('US-10 allow-list: non-allowed notifications are never stored', () {
     test('an app that was never allowed creates nothing at all', () async {
@@ -230,7 +297,7 @@ void main() {
 
       for (var i = 0; i < 3; i++) {
         expect(
-          await processor.captureNotification(messages, 'Your OTP is 123456'),
+          await processor.captureNotification(messages, unmatched),
           isA<CaptureUnparsed>(),
         );
       }
@@ -238,15 +305,15 @@ void main() {
       final rows = await captures.watchUnparsed().first;
       expect(rows, hasLength(1));
       expect(rows.single.sourcePackage, messages);
-      expect(rows.single.rawText, 'Your OTP is 123456');
+      expect(rows.single.rawText, unmatched);
     });
 
     test('the same unreadable text from a different app is kept separately', () async {
       await allow(messages);
       await allow(bankApp);
 
-      await processor.captureNotification(messages, 'Your OTP is 123456');
-      await processor.captureNotification(bankApp, 'Your OTP is 123456');
+      await processor.captureNotification(messages, unmatched);
+      await processor.captureNotification(bankApp, unmatched);
 
       expect(await captures.watchUnparsed().first, hasLength(2));
     });

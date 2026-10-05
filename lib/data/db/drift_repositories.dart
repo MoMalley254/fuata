@@ -19,6 +19,7 @@ import '../../domain/models/transaction.dart';
 import '../../domain/models/unit.dart';
 import '../../domain/models/unparsed_capture.dart';
 import '../../domain/repositories/repositories.dart';
+import '../constants/captures_constants.dart';
 import 'app_database.dart';
 import 'mappers.dart';
 
@@ -446,9 +447,24 @@ class DriftCaptureRepository implements CaptureRepository {
           rawText: rawText,
         ),
       );
-      final cutoff = DateTime.now().toUtc().subtract(const Duration(days: 7));
+      // Time-based purge (issue #74): 14 days, matching the copy on the
+      // review inbox.
+      final cutoff = DateTime.now().toUtc().subtract(unparsedCaptureRetention);
       await (_db.delete(_db.unparsedCaptures)
         ..where((u) => u.receivedAt.isSmallerThanValue(cutoff)))
+          .go();
+
+      // Size cap: keep only the newest N by receivedAt. A busy phone with
+      // an unfamiliar bank format could otherwise grow this without bound
+      // until the time purge catches up.
+      final keepIds = await (_db.selectOnly(_db.unparsedCaptures)
+        ..addColumns([_db.unparsedCaptures.id])
+        ..orderBy([OrderingTerm.desc(_db.unparsedCaptures.receivedAt)])
+        ..limit(unparsedCaptureCap))
+          .map((row) => row.read(_db.unparsedCaptures.id)!)
+          .get();
+      await (_db.delete(_db.unparsedCaptures)
+        ..where((u) => u.id.isNotIn(keepIds)))
           .go();
     });
   }
