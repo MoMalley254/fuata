@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:fuata/ui/screens/unit_detail_screen.dart';
 import 'package:intl/intl.dart';
 
 import '../../domain/models/money.dart';
 import '../../domain/models/settings.dart';
+import '../../widgets/activity/grouped_list.dart';
 import '../../widgets/sheets/add_transaction_sheet.dart';
 import '../../widgets/sheets/edit_unit_sheet.dart';
 import 'summary_screen.dart';
@@ -145,22 +147,7 @@ class HomeContent extends StatelessWidget {
               ),
             )
           else
-            ...state.lately.map(
-                  (t) => TransactionRow(
-                title:
-                t.counterparty ??
-                    state.units.firstWhere((u) => u.id == t.unitId).name,
-                subtitle: _friendlyTime(t.occurredAt),
-                amount: Money(
-                  t.amountMinor,
-                  state.units.firstWhere((u) => u.id == t.unitId).currencyCode,
-                ).majorValue,
-                emoji: state.units
-                    .firstWhere((u) => u.id == t.unitId)
-                    .iconEmoji,
-                accent: state.units.firstWhere((u) => u.id == t.unitId).color,
-              ),
-            ),
+            GroupedList(transactions: state.lately, unitById: { for (final u in state.units) u.id: u})
         ],
         const SizedBox(height: AppSpacing.sm),
         Align(
@@ -395,6 +382,12 @@ class UnitRow extends StatelessWidget {
             balance: Money(balance, unit.currencyCode).majorValue,
             emoji: unit.iconEmoji,
             currencySymbol: currencySymbol(unit.currencyCode),
+            onTap: () {
+              Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => UnitDetailScreen(unitId: unit.id),
+                  ),);
+            },
           );
         },
       ),
