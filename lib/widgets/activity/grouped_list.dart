@@ -49,7 +49,7 @@ class GroupedList extends StatelessWidget {
 
     return ListView.builder(
         shrinkWrap: true,
-        physics: const NeverScrollableScrollPhysics(),
+        // physics: const NeverScrollableScrollPhysics(),
         padding: const EdgeInsets.fromLTRB(
           AppSpacing.margin, AppSpacing.sm, AppSpacing.margin, AppSpacing.xl,
         ),
