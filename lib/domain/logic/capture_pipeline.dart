@@ -17,6 +17,7 @@ import 'package:fuata/domain/logic/serial_queue.dart';
 import '../models/transaction.dart';
 import '../repositories/repositories.dart';
 import 'dedupe.dart';
+import 'looks_financial.dart';
 
 sealed class CaptureOutcome {
   const CaptureOutcome();
@@ -112,9 +113,10 @@ class CaptureProcessor {
     final templates = await _templates.watchTemplates().first;
 
     if (units.isEmpty) {
-      // Nothing to attach a transaction to — keep the message teachable.
-      await _recordUnparsed(sourcePackage, trimmed);
-      return const CaptureUnparsed();
+      // Nothing to attach a transaction to — keep the message teachable,
+      // unless it's an automatic notification that doesn't look like money
+      // (issue #74, US-10).
+      return _recordOrIgnore(sourcePackage, trimmed, source: source);
     }
 
     // Try each unit's templates in turn; a message belongs to whichever
@@ -193,7 +195,26 @@ class CaptureProcessor {
       return Captured(baseId, autoAccepted: autoAccept);
     }
 
-    await _recordUnparsed(sourcePackage, trimmed);
+    // No template matched. Gate the same way before recording.
+    return _recordOrIgnore(sourcePackage, trimmed, source: source);
+  }
+
+  /// Where the pipeline has decided nothing matched. Records the text as
+  /// "Couldn't read this" — or refuses to, when it arrived automatically
+  /// (a notification from an allowed app) and doesn't look like a payment.
+  ///
+  /// The gate is notifications-only on purpose: a share or paste is the
+  /// person handing Fuata the text, and gating that would tell them "I
+  /// can't help with that" for no reason they can act on. Issue #74.
+  Future<CaptureOutcome> _recordOrIgnore(
+      String sourcePackage,
+      String rawText, {
+        required TxSource source,
+      }) async {
+    if (source == TxSource.notification && !LooksFinancial.check(rawText)) {
+      return const CaptureIgnored();
+    }
+    await _recordUnparsed(sourcePackage, rawText);
     return const CaptureUnparsed();
   }
 
