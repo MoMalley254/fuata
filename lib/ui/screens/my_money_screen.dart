@@ -29,7 +29,15 @@ class _MyMoneyScreenState extends ConsumerState<MyMoneyScreen> {
     final c = context.colors;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('My Money')),
+      appBar: AppBar(
+          title: const Text('My Money'),
+        actions: [
+          IconButton(
+              onPressed: () => showEditUnitSheet(context),
+              icon: Icon(Icons.add)
+          )
+        ],
+      ),
       body: SafeArea(
         child: homeAsync.when(
           loading: () =>
