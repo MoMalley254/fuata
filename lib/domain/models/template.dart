@@ -63,10 +63,15 @@ class CaptureTemplate {
 
   /// Compiled on demand rather than cached, since a Template is an
   /// immutable value object handed around freely (Parser compiles it once
-  /// per parse attempt); `dotAll` so a `date`/`person` group's `[\s\S]+?`
-  /// isn't the only thing standing between us and a multi-line message
-  /// silently failing to match.
+  /// per parse attempt); `dotAll` so literal `.` in older saved patterns
+  /// still spans line breaks.
   RegExp get compiled => RegExp(pattern, dotAll: true);
+
+  /// #72: true when this rule's pattern matches the very sample it was
+  /// built from. A label that covers text its field pattern can't match
+  /// (the old `Ref:AC123` code bug) makes this false, and the rule
+  /// builder uses it to stop the person saving a rule that can never fire.
+  bool get readsOwnSample => compiled.hasMatch(sampleText);
 
   /// ADR-007: builds a regex from a pasted sample plus the spans the user
   /// labeled over it. Literal text between, before and after the labels is
@@ -99,10 +104,17 @@ class CaptureTemplate {
     final usedCounts = <TemplateFieldType, int>{};
     var cursor = 0;
 
-    for (final span in sorted) {
+    for (var i = 0; i < sorted.length; i++) {
+      final span = sorted[i];
       buffer.write(_escapeLiteral(sampleText.substring(cursor, span.start)));
       final groupName = _nextGroupName(span.type, usedCounts);
-      buffer.write('(?<$groupName>${_fieldPattern(span.type)})');
+      // #72 (F11b): a lazy person match with nothing after it stops at one
+      // character, so the *last* label needs an explicit boundary.
+      final fieldPattern =
+          span.type == TemplateFieldType.person && i == sorted.length - 1
+          ? _lastPersonPattern(sampleText.substring(span.end))
+          : _fieldPattern(span.type);
+      buffer.write('(?<$groupName>$fieldPattern)');
       fieldMap[groupName] = span.type;
       cursor = span.end;
     }
@@ -214,15 +226,42 @@ class CaptureTemplate {
         // Optional currency label/prefix, digits with optional thousands
         // separators, optional decimal part — "Ksh350.00", "KES 1,250",
         // "350" all match (testing.md P-02).
-      return r'(?:[A-Za-z]{2,5}\.?\s*)?[\d,]+(?:\.\d+)?[.,;:!?]?';
+        return r'(?:[A-Za-z]{2,5}\.?\s*)?[\d,]+(?:\.\d+)?[.,;:!?]?';
       case TemplateFieldType.code:
-        return r'[A-Za-z0-9]+';
+        // #72 (F11a): letters and digits, with punctuation allowed
+        // *between* them (Ref:AC123, TXN-45/B, ab_12.3) but never leading
+        // or trailing, so a sentence-ending "." or ":" stays outside.
+        return r'[A-Za-z0-9]+(?:[:_\-./][A-Za-z0-9]+)*';
       case TemplateFieldType.date:
+        // #72 (F11c): a real date shape rather than a lazy match, so it
+        // doesn't depend on what follows. Numeric dates (28/9/26,
+        // 28-09-2026, 28.09.2026, 2026-09-28) or "28 Sep 2026" /
+        // "28-Sep-26", then an optional time (12 or 24 hour, optional
+        // "at", optional seconds, optional AM/PM). Parser._parseDate reads
+        // the same shapes.
+        return r'(?:(?:on|at)\s+)?'
+            r'(?:\d{1,4}[-/.]\d{1,2}[-/.]\d{1,4}'
+            r'|\d{1,2}[ -][A-Za-z]{3,9}[ -]\d{2,4})'
+            r'(?:(?:[ ,]*|T)(?:at\s+)?\d{1,2}:\d{2}(?::\d{2})?'
+            r'(?:\s*[AaPp][Mm])?)?';
       case TemplateFieldType.person:
         // Non-greedy so it stops at the next literal chunk once compiled,
-        // rather than swallowing the rest of the message.
-        return r'[\s\S]+?';
+        // rather than swallowing the rest of the message. Never crosses a
+        // line break.
+        return r'[^\n]+?';
     }
   }
 
+  /// #72 (F11b): the pattern for a person label that is the *last* label.
+  /// [rest] is the sample text after the label. With text after it, stop at
+  /// the next few literal characters (a zero-width lookahead, so the
+  /// variable tail of the message stays unconstrained). With nothing after
+  /// it, take the rest of the line.
+  static String _lastPersonPattern(String rest) {
+    final lineEnd = rest.indexOf('\n');
+    final line = lineEnd < 0 ? rest : rest.substring(0, lineEnd);
+    if (line.isEmpty) return r'[^\n]+';
+    final boundary = line.length <= 4 ? line : line.substring(0, 4);
+    return '[^\\n]+?(?=${_escapeLiteral(boundary)})';
+  }
 }

@@ -130,7 +130,7 @@ Use several fake messages, never real ones.
 | P-06 | Multiple templates on one unit (sent, received, withdrawal) | Correct template and direction chosen |
 | P-07 | Same transaction code seen twice | Second is deduped, no duplicate row |
 | P-08 | Same payment as SMS and push, no code | Deduped by unit + amount + 2-minute window |
-| P-09 | Date formats (e.g. "21/9/26 at 1:12 PM", ISO) | Parsed to correct UTC timestamp |
+| P-09 | Date formats (e.g. "21/9/26 at 1:12 PM", "28-09-2026 11:03 PM", "28-Sep-26", "28 Sep 2026 14:05", ISO), day first | Parsed to correct timestamp; unreadable date reported, not hidden (#72) |
 | P-10 | Balance in message differs from computed | Unit flagged for reconciliation |
 | P-11 | Template round trip: export to JSON, import | Identical behaviour |
 | P-12 | Very long or empty message | No crash |

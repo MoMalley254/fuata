@@ -16,6 +16,12 @@ class ParsedFields {
   final DateTime? occurredAt;
   final String? counterparty;
 
+  /// #72 (F11c): fields the person labelled but whose text couldn't be
+  /// read as that kind of value (e.g. a date in a shape we don't know),
+  /// keyed by field type with the raw text. Lets the Found card tell
+  /// "labelled but unreadable" apart from "never labelled".
+  final Map<TemplateFieldType, String> unreadable;
+
   const ParsedFields({
     this.amountMinor,
     this.feeMinor,
@@ -23,6 +29,7 @@ class ParsedFields {
     this.code,
     this.occurredAt,
     this.counterparty,
+    this.unreadable = const {},
   });
 
   @override
@@ -79,6 +86,7 @@ class Parser {
       String? code;
       DateTime? occurredAt;
       String? counterparty;
+      final unreadable = <TemplateFieldType, String>{};
 
       for (final entry in template.fieldMap.entries) {
         final raw = match.namedGroup(entry.key);
@@ -89,15 +97,21 @@ class Parser {
             break;
           case TemplateFieldType.fee:
             feeMinor = _parseAmountMinor(raw, currencyCode);
+            if (feeMinor == null) unreadable[entry.value] = raw.trim();
             break;
           case TemplateFieldType.balance:
             balanceAfterMinor = _parseAmountMinor(raw, currencyCode);
+            if (balanceAfterMinor == null) unreadable[entry.value] = raw.trim();
             break;
           case TemplateFieldType.code:
+            // Several codes in one message: the last labelled one wins
+            // (documented in issue-26 F11d; split into reference vs other
+            // code later).
             code = raw.trim();
             break;
           case TemplateFieldType.date:
             occurredAt = _parseDate(raw.trim());
+            if (occurredAt == null) unreadable[entry.value] = raw.trim();
             break;
           case TemplateFieldType.person:
             counterparty = raw.trim();
@@ -119,6 +133,7 @@ class Parser {
           code: code,
           occurredAt: occurredAt,
           counterparty: counterparty,
+          unreadable: unreadable,
         ),
       );
     }
@@ -156,12 +171,64 @@ class Parser {
     }
   }
 
-  /// testing.md P-09: "21/9/26 at 1:12 PM" and ISO both need to parse to
-  /// the correct timestamp. `DateTime.tryParse` covers ISO 8601 (with a
-  /// "T" or a space separator); a short list of `intl` patterns covers the
-  /// common bank/mobile-money shapes. Returns null rather than throwing —
-  /// a message that otherwise matched shouldn't be discarded over a date
-  /// the app doesn't yet know how to read.
+  /// Date shapes tried after [_normaliseDate], most specific first. Order
+  /// matters: 12-hour (with AM/PM) before 24-hour and time before date-only,
+  /// so a pattern that would stop early never wins over the full one. Day
+  /// first (d/M), as everywhere this app's messages come from. `yyyy` is
+  /// tried before `yy`; a two-digit year read by `yyyy` gives year 26 AD,
+  /// which [_parseDate] rejects, so `yy` then handles it.
+  static final List<String> _datePatterns = () {
+    const dates = [
+      'd/M/yyyy',
+      'd/M/yy',
+      'd MMM yyyy',
+      'd MMM yy',
+      'd MMMM yyyy',
+      'd-MMM-yyyy',
+      'd-MMM-yy',
+    ];
+    const times = ['h:mm:ss a', 'h:mm a', 'HH:mm:ss', 'HH:mm'];
+    const joiners = [" 'at' ", ' '];
+    return [
+      for (final d in dates)
+        for (final t in times)
+          for (final j in joiners) '$d$j$t',
+      ...dates,
+    ];
+  }();
+
+  /// Makes the many ways a message writes a date line up with
+  /// [_datePatterns]: drops a leading "on"/"at", lowercases "at", writes
+  /// AM/PM as " AM"/" PM", turns "-" and "." between numbers into "/" (so
+  /// 28-09-2026 and 28.09.2026 read like 28/09/2026), and collapses
+  /// commas and repeated spaces. "28-Sep-26" keeps its hyphens.
+  static String _normaliseDate(String raw) {
+    var s = raw.trim();
+    s = s.replaceFirst(RegExp(r'^(?:on|at)\s+', caseSensitive: false), '');
+    s = s.replaceAll(',', ' ');
+    s = s.replaceAllMapped(
+      RegExp(r'\bat\b', caseSensitive: false),
+      (_) => 'at',
+    );
+    s = s.replaceAllMapped(
+      RegExp(r'(\d)\s*([AaPp])\.?[Mm]\.?(?![A-Za-z])'),
+      (m) => '${m[1]} ${m[2]!.toUpperCase()}M',
+    );
+    s = s.replaceAllMapped(
+      RegExp(r'(\d)[-.](?=\d)'),
+      (m) => '${m[1]}/',
+    );
+    return s.replaceAll(RegExp(r'\s+'), ' ').trim();
+  }
+
+  /// testing.md P-09 and #72 (F11c): "21/9/26 at 1:12 PM", "28-09-2026
+  /// 11:03 PM", "28 Sep 2026", "28-Sep-26 14:05" and ISO all need to parse
+  /// to the correct timestamp. `DateTime.tryParse` covers ISO 8601 (with a
+  /// "T" or a space separator); [_normaliseDate] plus [_datePatterns] cover
+  /// the day-first bank/mobile-money shapes. Returns null rather than
+  /// throwing — a message that otherwise matched shouldn't be discarded
+  /// over a date the app doesn't yet know how to read (the Found card
+  /// shows a "couldn't read" state for it).
   static DateTime? _parseDate(String raw) {
     final cleaned = raw.replaceAll(RegExp(r'[.,;:!?]+$'), '').trim();
     if (cleaned.isEmpty) return null;
@@ -169,21 +236,22 @@ class Parser {
     final iso = DateTime.tryParse(cleaned);
     if (iso != null) return iso;
 
-    const patterns = [
-      "d/M/yy 'at' h:mm a",
-      "d/M/yyyy 'at' h:mm a",
-      'd/M/yy HH:mm',
-      'd/M/yyyy HH:mm',
-      'd/M/yy',
-      'd/M/yyyy',
-    ];
-    for (final p in patterns) {
+    final normalised = _normaliseDate(cleaned);
+    if (normalised.isEmpty) return null;
+    final isoAgain = DateTime.tryParse(normalised);
+    if (isoAgain != null) return isoAgain;
+
+    for (final p in _datePatterns) {
       try {
         //#20
         // Pin the locale: without it DateFormat uses the device locale,
         // which may not have a 12-hour AM/PM pattern defined and can fail
         // to parse "10:19 AM" on some devices.
-        return DateFormat(p, 'en_US').parse(cleaned);
+        final parsed = DateFormat(p, 'en_US').parse(normalised);
+        // `yyyy` reading a two-digit year yields year 26 AD: not a date
+        // we want, so let the `yy` pattern have it.
+        if (parsed.year < 1900) continue;
+        return parsed;
       } on FormatException {
         continue;
       }
