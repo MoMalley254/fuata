@@ -187,7 +187,16 @@ class _RuleBuilderScreenState extends ConsumerState<RuleBuilderScreen> {
       _sampleText.trim().isNotEmpty &&
       _labels.any((l) => l.type == TemplateFieldType.amount) &&
       _unitId != null &&
-      _nameController.text.trim().isNotEmpty;
+      _nameController.text.trim().isNotEmpty &&
+      _readsOwnSample;
+
+  /// #72 (F11a): a rule whose pattern can't match the sample it was built
+  /// from can never fire, so saving it would silently do nothing. True when
+  /// there is nothing to check yet.
+  bool get _readsOwnSample {
+    final template = _previewTemplate;
+    return template == null || template.readsOwnSample;
+  }
 
   (int, int)? get _selection {
     final a = _rangeAnchor;
@@ -534,6 +543,13 @@ class _RuleBuilderScreenState extends ConsumerState<RuleBuilderScreen> {
         c: c,
         message:
             'Tap a word above and pick what it is — start with the amount.',
+      );
+    }
+    if (!template.readsOwnSample) {
+      return HintCard(
+        c: c,
+        message:
+            "This rule can't read its own sample, so a label probably includes something it can't match. Try labeling a smaller part of the message.",
       );
     }
     try {
