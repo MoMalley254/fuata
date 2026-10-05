@@ -49,8 +49,8 @@ class AutoCatchStep extends StatelessWidget {
             icon: Icons.block_rounded,
             title: 'What it ignores',
             text:
-                'Everything else. Other notifications are dropped the '
-                'moment they arrive.',
+            'Anything that doesn\'t look like a payment. Chats, one-time '
+                'codes and everything else are dropped the moment they arrive.',
           ),
           SizedBox(height: AppSpacing.md),
           _Point(

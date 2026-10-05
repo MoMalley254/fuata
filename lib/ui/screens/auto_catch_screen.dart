@@ -128,14 +128,13 @@ class _AutoCatchScreenState extends ConsumerState<AutoCatchScreen> with WidgetsB
                 title: 'Notification access',
                 children: [
                   Text(
-                    'Fuata can read the notification a bank or mobile-money '
-                        'message makes and turn it into a transaction for you to '
-                        'check. It only looks at the apps you switch on below. '
-                        'Every other notification is dropped the moment it '
-                        'arrives and is never stored. Nothing leaves this phone.',
-                    style: AppTypography.bodySm.copyWith(
-                      color: c.onSurfaceVariant,
-                    ),
+                    'Fuata can read the notification a bank or mobile-money message '
+                        'makes and turn it into a transaction for you to check. It only '
+                        'looks at the apps you switch on below, and only keeps '
+                        'notifications that look like a payment. Chats, one-time codes '
+                        'and everything else are dropped the moment they arrive and are '
+                        'never stored. Nothing leaves this phone.',
+                    style: AppTypography.bodySm.copyWith(color: c.onSurfaceVariant),
                   ),
                   const SizedBox(height: AppSpacing.md,),
                   Container(
