@@ -17,10 +17,11 @@ import '../../domain/models/capture_source.dart';
 import '../../domain/models/transaction.dart';
 import '../../domain/models/unparsed_capture.dart';
 import '../../domain/repositories/repositories.dart';
-import '../../main.dart';
 import '../../platform/notification_capture.dart';
 import '../../platform/share_intake.dart';
-import '../screens/review_inbox_screen.dart';
+import '../../routing/app_keys.dart';
+import '../../routing/app_router.dart';
+import '../../routing/routes.dart';
 import 'app_providers.dart';
 
 // The outcome types moved to the domain layer with the pipeline; re-exported
@@ -154,9 +155,7 @@ final shareIntakeListenerProvider = Provider<void>((ref) {
     final outcome = await capture.capture(text, source: TxSource.shared);
 
     ref.read(reviewInboxNudgeProvider.notifier).state++; // see below
-    rootNavigatorKey.currentState?.push(
-      MaterialPageRoute(builder: (_) => const ReviewInboxScreen()),
-    );
+    ref.read(routerProvider).push(Routes.inboxPath);
     // Snackbar via a global messenger key so we don't need a BuildContext.
     final msg = rootScaffoldMessengerKey.currentState;
     msg?.showSnackBar(SnackBar(content: Text(_outcomeMessage(outcome))));
@@ -170,9 +169,7 @@ final shareIntakeListenerProvider = Provider<void>((ref) {
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       final capture = ref.read(captureServiceProvider);
       final outcome = await capture.capture(pending, source: TxSource.shared);
-      rootNavigatorKey.currentState?.push(
-        MaterialPageRoute(builder: (_) => const ReviewInboxScreen()),
-      );
+      ref.read(routerProvider).push(Routes.inboxPath);
       rootScaffoldMessengerKey.currentState?.showSnackBar(
         SnackBar(content: Text(_outcomeMessage(outcome))),
       );

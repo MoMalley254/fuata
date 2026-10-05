@@ -3,9 +3,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:fuata/domain/models/transaction.dart';
 import 'package:fuata/domain/models/unit.dart';
 import 'package:fuata/ui/providers/capture_providers.dart';
-import 'package:fuata/ui/screens/review_inbox_screen.dart';
-import 'package:fuata/ui/screens/summary_screen.dart';
+import 'package:go_router/go_router.dart';
 
+import '../../routing/routes.dart';
 import '../../widgets/activity/empty_activity.dart';
 import '../../widgets/activity/grouped_list.dart';
 import '../../widgets/app_chips.dart';
@@ -65,9 +65,7 @@ class _ActivityScreenState extends ConsumerState<ActivityScreen> {
           IconButton(
             tooltip: 'Summaries',
             icon: const Icon(Icons.insights_rounded),
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const SummaryScreen()),
-            ),
+            onPressed: () => context.push(Routes.summaryPath),
           ),
           IconButton(
             tooltip: 'Caught from my messages',
@@ -101,9 +99,7 @@ class _ActivityScreenState extends ConsumerState<ActivityScreen> {
                   ),
               ],
             ),
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const ReviewInboxScreen()),
-            ),
+            onPressed: () => context.push(Routes.inboxPath),
           ),
         ],
       ),

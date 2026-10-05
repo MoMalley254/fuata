@@ -237,7 +237,7 @@ limit id + period key + level is the atomic claim described in §5.4).
 
 ### ADR-006: Notification listener over SMS permission
 - **Context:** Reading SMS directly is the most reliable capture but is heavily restricted by Google Play policy.
-- **Decision:** Use `NotificationListenerService` (special access granted by the user) plus share/paste as a permission-free path; manual entry always works.
+- **Decision:** Use `NotificationListenerService` (special access granted by the user) plus share/paste as a permission-free path; manual entry always works. Navigation lives in lib/routing/app_router.dart; see issue-26 F1.
 - - **Consequences:** Only sees what the SMS app shows (may be truncated); sideloaded builds hit Android's "restricted settings" step, so onboarding must explain it; some manufacturers kill background services (**see §5.1 for a confirmed MIUI case: the listener is granted but not bound unless the grant goes through the UI toggle**). Everything not on the user's allow-list is discarded immediately.
 
 ### ADR-007: Template-based parsing (user-labeled), not ML

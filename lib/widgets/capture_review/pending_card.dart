@@ -7,7 +7,7 @@ import '../../domain/logic/ledger.dart';
 import '../../domain/models/money.dart';
 import '../../domain/models/transaction.dart';
 import '../../domain/models/unit.dart';
-import '../../main.dart';
+import '../../routing/app_keys.dart';
 import '../../ui/providers/app_providers.dart';
 import '../../ui/theme/app_spacing.dart';
 import '../../ui/theme/app_typography.dart';

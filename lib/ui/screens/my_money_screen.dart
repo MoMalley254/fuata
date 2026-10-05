@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:fuata/ui/providers/app_providers.dart';
-import 'package:fuata/ui/screens/unit_detail_screen.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../domain/models/money.dart';
+import '../../routing/routes.dart';
 import '../../widgets/sheets/edit_unit_sheet.dart';
 import '../../widgets/unit_list_tile.dart';
 import '../theme/app_colors.dart';
@@ -101,11 +102,7 @@ class _MyMoneyScreenState extends ConsumerState<MyMoneyScreen> {
                     ).format(),
                     lastVerifiedAt: unit.lastVerifiedAt,
                     hideAmount: _hidden,
-                    onTap: () => Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => UnitDetailScreen(unitId: unit.id),
-                      ),
-                    ),
+                    onTap: () => context.push(Routes.unitFor(unit.id)),
                   ),
                   const SizedBox(height: AppSpacing.sm),
                 ],
