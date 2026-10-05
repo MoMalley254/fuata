@@ -22,6 +22,7 @@ import 'dart:ui';
 
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
+import 'package:fuata/platform/widget_bridge.dart';
 
 import '../data/constants/method_channels_constants.dart';
 import '../data/db/app_database.dart';
@@ -29,6 +30,7 @@ import '../data/db/drift_repositories.dart';
 import '../domain/logic/banner_loader.dart';
 import '../domain/logic/capture_pipeline.dart';
 import '../domain/logic/serial_queue.dart';
+import '../domain/logic/widget_content.dart';
 import 'alerts.dart';
 import 'banner.dart';
 
@@ -213,6 +215,13 @@ Future<bool> _captureOne(String packageName, String text) async {
       } catch (e) {
         debugPrint('[capture] alert failed: ${e.runtimeType}');
       }
+
+      //Issue #29
+      try {
+        await _refreshWidget(db);
+      } catch (e) {
+        debugPrint('[capture] widget push failed: ${e.runtimeType}');
+      }
     }
     return wrote;
   } catch (e, st) {
@@ -246,4 +255,16 @@ Future<void> _refreshBanner(AppDatabase db) async {
           .redactedLockScreenBanner,
     );
   }
+}
+
+/// Rebuilds the home-screen widget's snapshot from the same repositories
+/// the capture just wrote through. Issue #29; the widget has no other
+/// source of truth when the app is closed.
+Future<void> _refreshWidget(AppDatabase db) async {
+  final snapshot = WidgetSnapshot.fromData(
+    units: await DriftUnitRepository(db).watchUnits().first,
+    transactions: await DriftTransactionRepository(db).watchTransactions().first,
+    limits: await DriftLimitRepository(db).watchLimits().first,
+  );
+  await AndroidHomeWidgetBridge().push(snapshot);
 }
