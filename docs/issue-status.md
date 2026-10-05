@@ -1,9 +1,28 @@
-# Issue status (generated 2026-10-01T09:26Z)
+# Issue status (generated 2026-10-02T08:09Z)
 
 Source of truth: GitHub. Regenerate with `scripts/refresh-issue-status.sh`.
 
 | # | State | Milestone | Title |
 |---|---|---|---|
+| #87 | OPEN | v0.1 MVP | fix(ui): educational empty state for reading rules |
+| #86 | OPEN | v0.1 MVP | feat(banner): "no units" option |
+| #85 | OPEN | v0.1 MVP | feat(data): erase everything |
+| #84 | OPEN | v0.1 MVP | feat(privacy): FLAG_SECURE for Recents |
+| #83 | OPEN | v0.1 MVP | feat(categories): rename and add categories |
+| #82 | OPEN | v0.1 MVP | feat(ui): Week Peek home widget |
+| #81 | OPEN | v0.1 MVP | feat(privacy): global hide amounts switch |
+| #80 | OPEN | v0.1 MVP | feat(units): archived units screen and unarchive |
+| #79 | OPEN | v0.1 MVP | refactor(ui): split Profile out of Me |
+| #78 | OPEN | v0.1 MVP | feat(permissions): apps-to-watch explainer |
+| #77 | OPEN | v0.1 MVP | feat(onboarding): welcome screen, StepFrame layout and units explainer |
+| #76 | OPEN | v0.1 MVP | feat(onboarding): auto-catch walkthrough and banner permission copy |
+| #75 | OPEN | v0.1 MVP | feat(permissions): notification-access primer dialog |
+| #74 | OPEN | v0.1 MVP | fix(capture): don't store unmatched notification text |
+| #73 | OPEN | v0.1 MVP | refactor(nav): adopt go_router and fix banner cold-start routing |
+| #72 | OPEN | v0.1 MVP | fix(capture): rule builder code, payee and date parsing |
+| #71 | OPEN | v0.1 MVP | fix(ui): add-unit action in My money app bar |
+| #70 | OPEN | v0.1 MVP | fix(ui): make Home units and transactions tappable |
+| #69 | OPEN | v0.1 MVP | fix(ui): Activity list doesn't scroll |
 | #63 | CLOSED | — | feat(limits): remaining 7.8 gaps — per-unit, alert levels, quiet hours, preview, firing alerts |
 | #56 | OPEN | v1.1 Backlog | feat(capture): user-defined custom fields in rule builder |
 | #55 | OPEN | v1.1 Backlog | feat(capture): "This part changes" wildcard in rule builder |
@@ -20,7 +39,7 @@ Source of truth: GitHub. Regenerate with `scripts/refresh-issue-status.sh`.
 | #29 | OPEN | v1.1 Backlog | feat: Home screen widget |
 | #28 | OPEN | v1.1 Backlog | feat: SQLCipher encryption with Android Keystore and app lock |
 | #27 | OPEN | v0.1 MVP | chore(release): v0.1.0 |
-| #26 | OPEN | v0.1 MVP | test: manual device test pass |
+| #26 | CLOSED | v0.1 MVP | test: manual device test pass |
 | #25 | CLOSED | v0.1 MVP | chore(privacy): remove INTERNET permission and disable backup |
 | #24 | CLOSED | v0.1 MVP | feat(data): JSON export/import |
 | #23 | CLOSED | v0.1 MVP | feat(insight): Today/Week/Month summaries |
