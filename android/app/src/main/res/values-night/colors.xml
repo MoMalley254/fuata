@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Issue #29. Dark counterpart, matching AppColors.dark. The status
+     colours stay in values/colors.xml — they are the same in both
+     themes. -->
+<resources>
+    <color name="widget_surface">#FF1F2329</color>
+    <color name="widget_on_surface">#FFF1F3F7</color>
+    <color name="widget_on_surface_variant">#FF9DA6B5</color>
+    <color name="widget_outline">#FF3C4A46</color>
+    <color name="widget_accent">#FF57F1DB</color>
+</resources>
