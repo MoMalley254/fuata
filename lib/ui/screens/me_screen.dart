@@ -1,13 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:fuata/ui/providers/capture_providers.dart';
-import 'package:fuata/ui/screens/auto_catch_screen.dart';
-import 'package:fuata/ui/screens/review_inbox_screen.dart';
-import 'package:fuata/ui/screens/rule_builder_screen.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../domain/models/limit_rule.dart';
 import '../../domain/models/money.dart';
 import '../../domain/models/settings.dart';
+import '../../routing/routes.dart';
 import '../../widgets/coming_soon_row.dart';
 import '../../widgets/personalization/action_row.dart';
 import '../../widgets/personalization/detail_level_example.dart';
@@ -149,9 +148,7 @@ class MeScreen extends ConsumerWidget {
                       : watchedApps == 1
                       ? 'Watching 1 app'
                       : 'Watching $watchedApps apps',
-                  onTap: () => Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => const AutoCatchScreen()),
-                  ),
+                  onTap: () => context.push(Routes.autoCatchPath),
                 ),
                 const SizedBox(height: AppSpacing.sm),
                 ActionRow(
@@ -160,11 +157,7 @@ class MeScreen extends ConsumerWidget {
                   subtitle: pendingCount == 0
                       ? 'Nothing waiting for your check'
                       : '$pendingCount waiting for your check',
-                  onTap: () => Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (_) => const ReviewInboxScreen(),
-                    ),
-                  ),
+                  onTap: () => context.push(Routes.inboxPath)
                 ),
                 const SizedBox(height: AppSpacing.sm),
                 ActionRow(
@@ -172,11 +165,7 @@ class MeScreen extends ConsumerWidget {
                   title: 'Message reading rules',
                   subtitle:
                       'Teach Fuata to read a bank or mobile-money message',
-                  onTap: () => Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (_) => const RuleBuilderScreen(),
-                    ),
-                  ),
+                  onTap: () => context.push(Routes.ruleBuilderNewPath)
                 ),
                 const SizedBox(height: AppSpacing.sm),
                 ActionRow(
@@ -185,9 +174,7 @@ class MeScreen extends ConsumerWidget {
                   subtitle: dailyLimit == null
                       ? 'Set how much you can spend each day, week or month'
                       : 'Daily limit: ${Money(dailyLimit.amountMinor, dailyLimit.currencyCode).format()}',
-                  onTap: () => Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => const LimitsScreen()),
-                  ),
+                  onTap: () => context.push(Routes.limitsPath)
                 ),
                 SizedBox(height: AppSpacing.sm),
                 ActionRow(
@@ -196,11 +183,7 @@ class MeScreen extends ConsumerWidget {
                   subtitle: settings.bannerEnabled
                       ? 'On — choose what it shows'
                       : 'Off — choose what the notification banner shows',
-                  onTap: () => Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (_) => const BannerSetupScreen(),
-                    ),
-                  ),
+                  onTap: () => context.push(Routes.bannerPath),
                 ),
                 SizedBox(height: AppSpacing.sm),
                 ComingSoonRow(
@@ -239,9 +222,7 @@ class MeScreen extends ConsumerWidget {
             PrivacyCard(
               settings: settings,
               onChanged: update,
-              onOpenBackup: () => Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const DataBackupScreen()),
-              ),
+              onOpenBackup: () => context.push(Routes.backupPath)
             ),
           ],
         ),

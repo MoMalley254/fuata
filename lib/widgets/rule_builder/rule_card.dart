@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../domain/models/template.dart';
+import '../../routing/routes.dart';
 import '../../ui/providers/app_providers.dart';
-import '../../ui/screens/rule_builder_screen.dart';
 import '../../ui/theme/app_colors.dart';
 import '../../ui/theme/app_spacing.dart';
 import '../../ui/theme/app_typography.dart';
@@ -120,11 +121,7 @@ class RuleCard extends ConsumerWidget {
   }
 
   void _openEditor(BuildContext context) {
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => RuleBuilderScreen(existing: template),
-      ),
-    );
+    context.push(Routes.ruleBuilderEditPath, extra: template);
   }
 
   Future<void> _confirmDelete(BuildContext context, WidgetRef ref) async {

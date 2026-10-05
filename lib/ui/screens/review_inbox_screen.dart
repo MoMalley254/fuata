@@ -1,11 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:fuata/ui/screens/rule_builder_screen.dart';
 import 'package:fuata/ui/theme/app_colors.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../domain/models/transaction.dart';
 import '../../domain/models/unparsed_capture.dart';
+import '../../routing/routes.dart';
 import '../../widgets/capture_review/all_caught_up.dart';
 import '../../widgets/capture_review/pending_card.dart';
 import '../../widgets/capture_review/unparsed_card.dart';
@@ -84,10 +85,9 @@ class ReviewInboxScreen extends ConsumerWidget {
       WidgetRef ref,
       UnparsedCapture entry,
       ) async {
-    await Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => RuleBuilderScreen(sampleText: entry.rawText),
-      ),
+    await context.push<String>(
+      Routes.ruleBuilderNewPath,
+      extra: entry.rawText,
     );
     if (!context.mounted) return;
     final outcome = await ref.read(captureServiceProvider).capture(

@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:fuata/domain/logic/ledger.dart';
+import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
 import '../../domain/models/limit_rule.dart';
 import '../../domain/models/money.dart';
+import '../../routing/routes.dart';
 import '../../widgets/activity/empty_activity.dart';
 import '../../widgets/activity/grouped_list.dart';
 import '../../widgets/limits/unit_limit_summary.dart';
@@ -16,7 +18,6 @@ import '../providers/app_providers.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_spacing.dart';
 import '../theme/app_typography.dart';
-import 'manage_rules_screen.dart';
 
 /// Unit page (ui-design-brief.md section 7.5): balance, "Update balance",
 /// edit name/icon/colour, archive, and that unit's recent activity —
@@ -203,12 +204,7 @@ class UnitDetailScreen extends ConsumerWidget {
                           subtitle: templates.isEmpty
                               ? 'Teach the app to read messages for this unit'
                               : '${templates.length} rule${templates.length == 1 ? '' : 's'} · add or review',
-                          onTap: () => Navigator.of(context).push(
-                            MaterialPageRoute(
-                              builder: (_) =>
-                                  ManageRulesScreen(unitId: unit.id),
-                            ),
-                          ),
+                          onTap: () => context.push(Routes.manageRulesFor(unit.id)),
                         );
                       },
                     ),

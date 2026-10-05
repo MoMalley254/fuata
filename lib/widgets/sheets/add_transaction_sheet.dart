@@ -3,27 +3,24 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:fuata/domain/models/unit.dart';
 import 'package:fuata/ui/providers/app_providers.dart';
 import 'package:fuata/ui/theme/app_colors.dart';
+import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
 import '../../domain/models/money.dart';
 import '../../domain/models/transaction.dart';
+import '../../routing/routes.dart';
 import '../../ui/theme/app_spacing.dart';
 import '../../ui/theme/app_typography.dart';
 import '../app_chips.dart';
 
-/// Opens the add-transaction sheet (ui-design-brief.md section 7.3).
-/// Call this instead of building AddTransactionSheet directly — it wraps
-/// the sheet in the rounded, theme-aware modal shell used everywhere.
+/// Opens the add-transaction sheet. Wraps the real route so callers keep
+/// the one-line API: /add is a deep-linkable, back-button-aware route now
+/// (issue-26 F1), not a raw modal.
 Future<void> showAddTransactionSheet(
   BuildContext context, {
   String? initialUnitId,
 }) {
-  return showModalBottomSheet(
-    context: context,
-    isScrollControlled: true,
-    backgroundColor: Colors.transparent,
-    builder: (_) => AddTransactionSheet(initialUnitId: initialUnitId),
-  );
+  return context.push(Routes.addFor(initialUnitId));
 }
 
 class AddTransactionSheet extends ConsumerStatefulWidget {
@@ -347,7 +344,15 @@ class _AddTransactionSheetState extends ConsumerState<AddTransactionSheet> {
         }
       }
 
-      if (mounted) Navigator.of(context).pop();
+      if (mounted) {
+        if (context.canPop()) {
+          context.pop();
+        } else {
+          // Shouldn't happen after the nesting fix, but never leave the
+          // person on an empty navigator.
+          context.go(Routes.homePath);
+        }
+      }
     } catch (e) {
       setState(() {
         _saving = false;

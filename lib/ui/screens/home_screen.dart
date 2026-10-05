@@ -1,10 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:fuata/ui/screens/unit_detail_screen.dart';
+import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
 import '../../domain/models/money.dart';
 import '../../domain/models/settings.dart';
+import '../../routing/routes.dart';
 import '../../widgets/activity/grouped_list.dart';
 import '../../widgets/sheets/add_transaction_sheet.dart';
 import '../../widgets/sheets/edit_unit_sheet.dart';
@@ -16,19 +17,9 @@ import '../theme/app_spacing.dart';
 import '../theme/app_typography.dart';
 import '../../widgets/status_ring_card.dart';
 import '../../widgets/unit_card.dart';
-import '../../widgets/transaction_row.dart';
 
 class HomeScreen extends ConsumerWidget {
-  final VoidCallback? onSeeAllActivity;
-
-  /// Opens the review inbox (#21) — e.g. from the "N waiting for your
-  /// check" nudge that design.md's status rule asks Home to show.
-  final VoidCallback? onOpenInbox;
-  const HomeScreen({
-    super.key,
-    required this.onSeeAllActivity,
-    this.onOpenInbox,
-  });
+  const HomeScreen({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -50,13 +41,14 @@ class HomeScreen extends ConsumerWidget {
           data: (state) => state.units.isEmpty
               ? const EmptyHome()
               : HomeContent(
-            state: state,
-            settings: settings,
-            inboxCount: inboxCount,
-            pendingCount: pendingCount,
-            onSeeAllActivity: onSeeAllActivity,
-            onOpenInbox: onOpenInbox,
-          ),
+                  state: state,
+                  settings: settings,
+                  inboxCount: inboxCount,
+                  pendingCount: pendingCount,
+                  onSeeAllActivity: () =>
+                      StatefulNavigationShell.of(context).goBranch(1),
+                  onOpenInbox: () => context.push(Routes.inboxPath),
+                ),
         ),
       ),
       floatingActionButton: FloatingActionButton(
@@ -130,9 +122,10 @@ class HomeContent extends StatelessWidget {
                   color: context.colors.onSurface,
                 ),
               ),
-              TextButton(
-                onPressed: onSeeAllActivity,
-                child: const Text('See all'),
+              TextButton.icon(
+                onPressed: () => context.push(Routes.summaryPath),
+                icon: const Icon(Icons.insights_rounded),
+                label: const Text('See my summaries'),
               ),
             ],
           ),
@@ -147,15 +140,17 @@ class HomeContent extends StatelessWidget {
               ),
             )
           else
-            GroupedList(transactions: state.lately, unitById: { for (final u in state.units) u.id: u})
+            GroupedList(
+              transactions: state.lately,
+              unitById: {for (final u in state.units) u.id: u},
+            ),
         ],
         const SizedBox(height: AppSpacing.sm),
         Align(
           alignment: Alignment.centerLeft,
           child: TextButton.icon(
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const SummaryScreen()),
-            ),
+            onPressed: () => Navigator.of(context)
+                .push(MaterialPageRoute(builder: (_) => const SummaryScreen())),
             icon: const Icon(Icons.insights_rounded),
             label: const Text('See my summaries'),
           ),
@@ -172,8 +167,8 @@ class HomeContent extends StatelessWidget {
     final yesterday = now.subtract(const Duration(days: 1));
     final isYesterday =
         t.year == yesterday.year &&
-            t.month == yesterday.month &&
-            t.day == yesterday.day;
+        t.month == yesterday.month &&
+        t.day == yesterday.day;
     if (isYesterday) return 'yesterday';
     return DateFormat('EEE, d MMM').format(t);
   }
@@ -185,9 +180,11 @@ class _InboxNudge extends StatelessWidget {
   final int inboxCount;
   final int pendingCount;
   final VoidCallback? onTap;
-  const _InboxNudge({required this.inboxCount,
+  const _InboxNudge({
+    required this.inboxCount,
     required this.pendingCount,
-    this.onTap,});
+    this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -299,21 +296,21 @@ class HeroSection extends StatelessWidget {
       final c = context.colors;
       final (label, amountMinor, caption) = switch (headline) {
         HomeHeadline.leftToday => (
-        'Altogether you have',
-        total,
-        'Set a daily limit to see how today is going.',
+          'Altogether you have',
+          total,
+          'Set a daily limit to see how today is going.',
         ),
         HomeHeadline.totalIHave => (
-        'Altogether you have',
-        total,
-        'Across everything you\'ve told Fuata about.',
+          'Altogether you have',
+          total,
+          'Across everything you\'ve told Fuata about.',
         ),
         HomeHeadline.spentToday => (
-        'Spent today',
-        state.spentToday,
-        limit == null
-            ? 'Set a daily limit to see how today is going.'
-            : 'of ${Money(limit.amountMinor, currency).format()} · resets at midnight',
+          'Spent today',
+          state.spentToday,
+          limit == null
+              ? 'Set a daily limit to see how today is going.'
+              : 'of ${Money(limit.amountMinor, currency).format()} · resets at midnight',
         ),
       };
       return Container(
@@ -382,12 +379,7 @@ class UnitRow extends StatelessWidget {
             balance: Money(balance, unit.currencyCode).majorValue,
             emoji: unit.iconEmoji,
             currencySymbol: currencySymbol(unit.currencyCode),
-            onTap: () {
-              Navigator.of(context).push(
-                  MaterialPageRoute(
-                    builder: (_) => UnitDetailScreen(unitId: unit.id),
-                  ),);
-            },
+            onTap: () => context.push(Routes.unitFor(unit.id)),
           );
         },
       ),
