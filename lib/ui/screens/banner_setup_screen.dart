@@ -5,6 +5,8 @@ import '../../domain/logic/banner_content.dart';
 import '../../domain/models/limit_rule.dart';
 import '../../domain/models/money.dart';
 import '../../domain/models/settings.dart';
+import '../../platform/banner.dart';
+import '../../platform/notification_capture.dart';
 import '../../widgets/app_chips.dart';
 import '../../widgets/banner/banner_preview.dart';
 import '../../widgets/personalization/section_card.dart';
@@ -48,6 +50,7 @@ class _BannerSetupScreenState extends ConsumerState<BannerSetupScreen> {
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
+
     final s = ref.watch(currentSettingsProvider);
     final home = ref.watch(homeStateProvider).value ?? HomeState.empty;
     final units = home.units.where((u) => !u.archived).toList();
@@ -95,6 +98,56 @@ class _BannerSetupScreenState extends ConsumerState<BannerSetupScreen> {
           padding: const EdgeInsets.fromLTRB(
               AppSpacing.margin, AppSpacing.md, AppSpacing.margin, AppSpacing.xl),
           children: [
+            if (s.bannerEnabled)
+              FutureBuilder<bool>(
+                future: BannerPlatform.instance.areNotificationsEnabled(),
+                builder: (context, snap) {
+                  final enabled = snap.data ?? true;
+                  if (enabled) return const SizedBox.shrink();
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: AppSpacing.md),
+                    child: Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(AppSpacing.md),
+                      decoration: BoxDecoration(
+                        color: c.statusWarningContainer,
+                        borderRadius: BorderRadius.circular(AppSpacing.unitTileRadius),
+                        border: Border.all(color: c.statusWarningBorder),
+                      ),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Icon(Icons.info_outline_rounded,
+                              color: c.statusWarning, size: 20),
+                          const SizedBox(width: AppSpacing.sm),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  "Android is blocking Fuata's notifications",
+                                  style: AppTypography.bodyMd.copyWith(color: c.onSurface),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  'Turn them on in Android\'s settings to see the banner.',
+                                  style: AppTypography.bodySm
+                                      .copyWith(color: c.onSurfaceVariant),
+                                ),
+                                const SizedBox(height: AppSpacing.sm),
+                                TextButton(
+                                  onPressed: () => openAppNotificationSettings(),
+                                  child: const Text('Open settings'),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
             SectionCard(
               title: 'Preview',
               children: [

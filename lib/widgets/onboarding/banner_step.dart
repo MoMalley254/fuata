@@ -97,11 +97,36 @@ class BannerStep extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           BannerPreview(content: content),
-          const SizedBox(height: AppSpacing.sm),
-          Text(
-            'Shown with example spending. You can change what it shows, or '
-            'turn it off, in Me.',
-            style: AppTypography.bodySm.copyWith(color: c.onSurfaceVariant),
+          const SizedBox(height: AppSpacing.md),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(AppSpacing.md),
+            decoration: BoxDecoration(
+              color: c.statusWarningContainer,
+              borderRadius: BorderRadius.circular(AppSpacing.unitTileRadius),
+              border: Border.all(color: c.statusWarningBorder),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(
+                  Icons.info_outline_rounded,
+                  size: 18,
+                  color: c.statusWarning,
+                ),
+                const SizedBox(width: AppSpacing.sm),
+                Expanded(
+                  child: Text(
+                    'Heads-up: when you tap Yes, Android will ask "Allow Fuata to '
+                    'send you notifications?" Please choose Allow — that\'s how '
+                    "the banner shows up. If you choose Don't allow, Fuata still "
+                    "works. You just won't see the banner or limit alerts, and "
+                    'you can turn them on later in Me → Banner.',
+                    style: AppTypography.bodySm.copyWith(color: c.onSurface),
+                  ),
+                ),
+              ],
+            ),
           ),
         ],
       ),

@@ -5,6 +5,8 @@ import 'package:fuata/widgets/personalization/section_card.dart';
 
 import '../../domain/models/capture_source.dart';
 import '../../platform/notification_capture.dart';
+import '../../widgets/permissions/app_to_watch_dialog.dart';
+import '../../widgets/permissions/notification_access_primer.dart';
 import '../../widgets/personalization/action_row.dart';
 import '../../widgets/personalization/label.dart';
 import '../../widgets/personalization/toggle_row.dart';
@@ -29,7 +31,8 @@ class AutoCatchScreen extends ConsumerStatefulWidget {
   ConsumerState<AutoCatchScreen> createState() => _AutoCatchScreenState();
 }
 
-class _AutoCatchScreenState extends ConsumerState<AutoCatchScreen> with WidgetsBindingObserver {
+class _AutoCatchScreenState extends ConsumerState<AutoCatchScreen>
+    with WidgetsBindingObserver {
   bool? _accessEnabled; // null until the first check returns
   List<InstalledApp>? _apps; // null while loading
   String _query = '';
@@ -39,7 +42,8 @@ class _AutoCatchScreenState extends ConsumerState<AutoCatchScreen> with WidgetsB
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _refreshAccess();
+    _refreshAccess();   // read the current grant — do not open settings
+    // _handleTurnOnAccess();
     _loadApps();
   }
 
@@ -57,9 +61,39 @@ class _AutoCatchScreenState extends ConsumerState<AutoCatchScreen> with WidgetsB
     if (state == AppLifecycleState.resumed) _refreshAccess();
   }
 
+  /// Read the current notification-access grant and update the status card.
+  /// A pure read: never opens a dialog, never opens Android's settings.
   Future<void> _refreshAccess() async {
     final enabled = await isNotificationAccessEnabled();
-    if (mounted) setState(() => _accessEnabled = enabled);
+    if (!mounted) return;
+
+    final wasNull = _accessEnabled == null;
+    final changed = !wasNull && _accessEnabled != enabled;
+    setState(() => _accessEnabled = enabled);
+
+    // Only speak up when the person just came back from a *change*: on a
+    // fresh open, and on a resume where nothing moved, the status card
+    // already says everything.
+    if (changed && enabled) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Access is on 🎉')),
+      );
+    }
+  }
+
+  /// The "Turn on access" / "Manage access" button: explain what's about to
+  /// happen (F17), then send the person to Android's settings.
+  ///
+  /// When access is already on this is "Manage access": skip the primer and
+  /// jump straight to Android, so the person isn't told about a dialog they
+  /// already agreed to.
+  Future<void> _handleTurnOnAccess() async {
+    if (_accessEnabled != true) {
+      final proceed = await showNotificationAccessPrimer(context);
+      if (!proceed) return;
+      if (!mounted) return;
+    }
+    await openNotificationAccessSettings();
   }
 
   Future<void> _loadApps() async {
@@ -67,17 +101,81 @@ class _AutoCatchScreenState extends ConsumerState<AutoCatchScreen> with WidgetsB
     if (mounted) setState(() => _apps = apps);
   }
 
-  Future<void> _toggle(String packageName, String label, bool on) {
+  bool _looksLikeMessagesApp(String packageName, String label) {
+    final p = packageName.toLowerCase();
+    final l = label.toLowerCase();
+    return p.contains('messag') ||
+        p.contains('sms') ||
+        p.contains('mms') ||
+        l.contains('message') ||
+        l.contains('sms') ||
+        l.contains('messaging');
+  }
+
+  /// Apps most people want first: their messages app, then anything that
+  /// looks like a bank or M-PESA. Pure heuristic — the person is still the
+  /// one choosing — but it stops the top of a long A–Z list being whatever
+  /// happens to start with "A".
+  bool _looksRecommended(String packageName, String label) {
+    final p = packageName.toLowerCase();
+    final l = label.toLowerCase();
+    if (_looksLikeMessagesApp(packageName, label)) return true;
+    return p.contains('safaricom') ||
+        p.contains('mpesa') ||
+        p.contains('bank') ||
+        p.contains('equity') ||
+        p.contains('kcb') ||
+        p.contains('coop') ||
+        l.contains('m-pesa') ||
+        l.contains('mpesa') ||
+        l.contains('bank') ||
+        l.contains('co-op') ||
+        l.contains('coop');
+  }
+
+  Future<void> _toggle(String packageName, String label, bool on) async {
+    if (on) {
+      final allowed = ref.read(allowedPackagesProvider);
+      final isMessages = _looksLikeMessagesApp(packageName, label);
+      final firstEver = allowed.isEmpty;
+
+      if (firstEver || isMessages) {
+        final proceed = await showAppsToWatchExplainer(
+          context,
+          appLabel: label,
+          isMessagesApp: isMessages,
+        );
+        if (!proceed) return;
+        if (!mounted) return;
+      }
+
+      // Access is off: it will start working the moment it's on, but the
+      // person shouldn't be left wondering why nothing's happening.
+      if (_accessEnabled != true && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text(
+              "This will start working once notification access is on.",
+            ),
+            action: SnackBarAction(
+              label: 'Turn on access',
+              onPressed: _handleTurnOnAccess,
+            ),
+          ),
+        );
+      }
+    }
+
     return ref
         .read(captureSourceRepositoryProvider)
         .saveSource(
-      CaptureSource(
-        id: CaptureSource.idFor(packageName),
-        packageName: packageName,
-        displayName: label,
-        enabled: on,
-      ),
-    );
+          CaptureSource(
+            id: CaptureSource.idFor(packageName),
+            packageName: packageName,
+            displayName: label,
+            enabled: on,
+          ),
+        );
   }
 
   @override
@@ -95,26 +193,30 @@ class _AutoCatchScreenState extends ConsumerState<AutoCatchScreen> with WidgetsB
     };
     final q = _query.trim().toLowerCase();
     final rows =
-    byPackage.entries
-        .where(
-          (e) =>
-      q.isEmpty ||
-          e.value.toLowerCase().contains(q) ||
-          e.key.toLowerCase().contains(q),
-    )
-        .toList()
-      ..sort((a, b) {
-        // Watched apps first, then A-Z.
-        final aOn = allowed.contains(a.key) ? 0 : 1;
-        final bOn = allowed.contains(b.key) ? 0 : 1;
-        if (aOn != bOn) return aOn.compareTo(bOn);
-        return a.value.toLowerCase().compareTo(b.value.toLowerCase());
-      });
+        byPackage.entries
+            .where(
+              (e) =>
+                  q.isEmpty ||
+                  e.value.toLowerCase().contains(q) ||
+                  e.key.toLowerCase().contains(q),
+            )
+            .toList()
+          ..sort((a, b) {
+            int tier(MapEntry<String, String> e) {
+              if (allowed.contains(e.key)) return 0;
+              if (_looksRecommended(e.key, e.value)) return 1;
+              return 2;
+            }
+
+            final t = tier(a).compareTo(tier(b));
+            if (t != 0) return t;
+            return a.value.toLowerCase().compareTo(b.value.toLowerCase());
+          });
 
     final accessOn = _accessEnabled == true;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Auto-Catch'),),
+      appBar: AppBar(title: const Text('Auto-Catch')),
       body: SafeArea(
         child: ListView(
           padding: const EdgeInsets.fromLTRB(
@@ -125,71 +227,73 @@ class _AutoCatchScreenState extends ConsumerState<AutoCatchScreen> with WidgetsB
           ),
           children: [
             SectionCard(
-                title: 'Notification access',
-                children: [
-                  Text(
-                    'Fuata can read the notification a bank or mobile-money message '
-                        'makes and turn it into a transaction for you to check. It only '
-                        'looks at the apps you switch on below, and only keeps '
-                        'notifications that look like a payment. Chats, one-time codes '
-                        'and everything else are dropped the moment they arrive and are '
-                        'never stored. Nothing leaves this phone.',
-                    style: AppTypography.bodySm.copyWith(color: c.onSurfaceVariant),
+              title: 'Notification access',
+              children: [
+                Text(
+                  'Fuata can read the notification a bank or mobile-money message '
+                  'makes and turn it into a transaction for you to check. It only '
+                  'looks at the apps you switch on below, and only keeps '
+                  'notifications that look like a payment. Chats, one-time codes '
+                  'and everything else are dropped the moment they arrive and are '
+                  'never stored. Nothing leaves this phone.',
+                  style: AppTypography.bodySm.copyWith(
+                    color: c.onSurfaceVariant,
                   ),
-                  const SizedBox(height: AppSpacing.md,),
-                  Container(
-                    padding: const EdgeInsets.all(AppSpacing.md),
-                    decoration: BoxDecoration(
-                      color: accessOn
-                          ? c.statusSafeContainer
-                          : c.statusWarningContainer,
-                      borderRadius: BorderRadius.circular(
-                        AppSpacing.unitTileRadius,
+                ),
+                const SizedBox(height: AppSpacing.md),
+                Container(
+                  padding: const EdgeInsets.all(AppSpacing.md),
+                  decoration: BoxDecoration(
+                    color: accessOn
+                        ? c.statusSafeContainer
+                        : c.statusWarningContainer,
+                    borderRadius: BorderRadius.circular(
+                      AppSpacing.unitTileRadius,
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        accessOn
+                            ? Icons.check_circle_outline_rounded
+                            : Icons.info_outline_rounded,
+                        color: accessOn ? c.statusSafe : c.statusWarning,
                       ),
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(
-                          accessOn
-                              ? Icons.check_circle_outline_rounded
-                              : Icons.info_outline_rounded,
-                          color: accessOn ? c.statusSafe : c.statusWarning,
-                        ),
-                        const SizedBox(width: AppSpacing.sm),
-                        Expanded(
-                          child: Text(
-                            _accessEnabled == null
-                                ? 'Checking…'
-                                : accessOn
-                                ? 'Access is on.'
-                                : 'Access is off, so nothing is caught from '
-                                'notifications yet.',
-                            style: AppTypography.bodySm.copyWith(
-                              color: c.onSurface,
-                            ),
+                      const SizedBox(width: AppSpacing.sm),
+                      Expanded(
+                        child: Text(
+                          _accessEnabled == null
+                              ? 'Checking…'
+                              : accessOn
+                              ? 'Access is on.'
+                              : 'Access is off, so nothing is caught from '
+                                    'notifications yet.',
+                          style: AppTypography.bodySm.copyWith(
+                            color: c.onSurface,
                           ),
-                        )
-                      ],
-                    ),
+                        ),
+                      ),
+                    ],
                   ),
-                  const SizedBox(height: AppSpacing.sm),
-                  ActionRow(
-                    icon: Icons.notifications_active_outlined,
-                    title: accessOn ? 'Manage access' : 'Turn on access',
-                    subtitle: 'Opens Android’s notification access list',
-                    onTap: openNotificationAccessSettings,
+                ),
+                const SizedBox(height: AppSpacing.sm),
+                ActionRow(
+                  icon: Icons.notifications_active_outlined,
+                  title: accessOn ? 'Manage access' : 'Turn on access',
+                  subtitle: 'Opens Android’s notification access list',
+                  onTap: _handleTurnOnAccess,
+                ),
+                const SizedBox(height: AppSpacing.sm),
+                Text(
+                  'If Fuata’s switch is greyed out, open Fuata’s App info, '
+                  'tap ⋮ and choose “Allow restricted settings”. On some '
+                  'phones the switch only takes effect after turning it '
+                  'off and on again.',
+                  style: AppTypography.bodySm.copyWith(
+                    color: c.onSurfaceTertiary,
                   ),
-                  const SizedBox(height: AppSpacing.sm),
-                  Text(
-                    'If Fuata’s switch is greyed out, open Fuata’s App info, '
-                        'tap ⋮ and choose “Allow restricted settings”. On some '
-                        'phones the switch only takes effect after turning it '
-                        'off and on again.',
-                    style: AppTypography.bodySm.copyWith(
-                      color: c.onSurfaceTertiary,
-                    ),
-                  ),
-                ]
+                ),
+              ],
             ),
             const SizedBox(height: AppSpacing.lg),
             SectionCard(
@@ -197,7 +301,7 @@ class _AutoCatchScreenState extends ConsumerState<AutoCatchScreen> with WidgetsB
               children: [
                 Text(
                   'Pick your messages app, and any bank or mobile-money app '
-                      'that sends you payment notifications.',
+                  'that sends you payment notifications.',
                   style: AppTypography.bodySm.copyWith(
                     color: c.onSurfaceVariant,
                   ),
@@ -252,18 +356,24 @@ class _AutoCatchScreenState extends ConsumerState<AutoCatchScreen> with WidgetsB
                     ),
                   )
                 else ...[
-                    Label('${allowed.length} on · ${rows.length} shown'),
+                  Label(
+                    allowed.isEmpty
+                        ? 'Not watching any apps yet'
+                        : allowed.length == 1
+                        ? 'Watching 1 app'
+                        : 'Watching ${allowed.length} apps',
+                  ),
+                  const SizedBox(height: AppSpacing.sm),
+                  for (final e in rows) ...[
+                    ToggleRow(
+                      title: e.value,
+                      subtitle: e.key,
+                      value: allowed.contains(e.key),
+                      onChanged: (v) => _toggle(e.key, e.value, v),
+                    ),
                     const SizedBox(height: AppSpacing.sm),
-                    for (final e in rows) ...[
-                      ToggleRow(
-                        title: e.value,
-                        subtitle: e.key,
-                        value: allowed.contains(e.key),
-                        onChanged: (v) => _toggle(e.key, e.value, v),
-                      ),
-                      const SizedBox(height: AppSpacing.sm),
-                    ],
                   ],
+                ],
               ],
             ),
           ],

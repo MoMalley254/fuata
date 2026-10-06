@@ -32,8 +32,9 @@ class LimitStep extends StatelessWidget {
     return StepFrame(
       title: 'A daily limit?',
       subtitle:
-          'Optional. Home will show how much is left today, and warn you '
-          'before you run out.',
+          'Optional. Home will show how much is left today, and warn you before '
+          'you run out. Fuata never stops you spending — it just tells you '
+          'early. You can change this any time in Settings > Limits & alerts.',
       primaryLabel: 'Set my daily limit',
       onPrimary: onSet,
       skipLabel: "Skip, I'll decide later",
@@ -49,7 +50,9 @@ class LimitStep extends StatelessWidget {
             decoration: BoxDecoration(
               color: c.surface,
               borderRadius: BorderRadius.circular(AppSpacing.cardRadiusHero),
-              border: Border.all(color: c.outlineVariant.withValues(alpha: 0.35)),
+              border: Border.all(
+                color: c.outlineVariant.withValues(alpha: 0.35),
+              ),
             ),
             child: Column(
               children: [

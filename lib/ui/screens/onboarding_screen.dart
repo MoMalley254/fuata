@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:fuata/widgets/onboarding/hello_step.dart';
 
 import '../../domain/logic/onboarding.dart';
 import '../../domain/models/limit_rule.dart';
 import '../../domain/models/unit.dart';
+import '../../platform/banner.dart';
 import '../../widgets/onboarding/auto_catch_step.dart';
 import '../../widgets/onboarding/banner_step.dart';
 import '../../widgets/onboarding/limit_step.dart';
@@ -29,7 +31,7 @@ class OnboardingScreen extends ConsumerStatefulWidget {
 }
 
 class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
-  static const _stepCount = 5;
+  static const _stepCount = 6;
 
   final _name = TextEditingController();
   late OnboardingDraft _draft = OnboardingDraft(
@@ -68,8 +70,8 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
     ref
         .read(settingsRepositoryProvider)
         .updateSettings(
-      ref.read(currentSettingsProvider).copyWith(accent: accent),
-    );
+          ref.read(currentSettingsProvider).copyWith(accent: accent),
+        );
   }
 
   void _saveUnit(MoneyUnit unit) =>
@@ -87,8 +89,31 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
     _next();
   }
 
-  void _setBanner(bool on) {
-    setState(() => _draft = _draft.copyWith(bannerOn: on));
+  Future<void> _setBanner(bool on) async {
+    if (!on) {
+      setState(() => _draft = _draft.copyWith(bannerOn: false));
+      _next();
+      return;
+    }
+
+    // F15: ask for the permission *now*, while the person is looking at the
+    // banner explainer, instead of implicitly on the first post after
+    // onboarding. If they say no, the banner is switched off — not left on
+    // and silently doing nothing.
+    final granted = await BannerPlatform.instance
+        .requestNotificationPermission();
+    if (!mounted) return;
+
+    setState(() => _draft = _draft.copyWith(bannerOn: granted));
+    if (!granted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'No problem. You can turn the banner on later in Me → Banner.',
+          ),
+        ),
+      );
+    }
     _next();
   }
 
@@ -120,9 +145,7 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
       // limit are saved by id, so a retry doesn't duplicate them).
       await ref
           .read(settingsRepositoryProvider)
-          .updateSettings(
-        draft.settingsFor(ref.read(currentSettingsProvider)),
-      );
+          .updateSettings(draft.settingsFor(ref.read(currentSettingsProvider)));
     } catch (e) {
       if (mounted) {
         setState(() => _finishing = false);
@@ -144,27 +167,28 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
 
   Widget _stepBody() {
     return switch (_step) {
-      0 => WelcomeStep(
+      0 => HelloStep(onContinue: _next,),
+      1 => WelcomeStep(
         nameController: _name,
         accent: _draft.accent,
         onAccent: _setAccent,
         onContinue: _next,
         onSkip: _next,
       ),
-      1 => MoneyStep(
+      2 => MoneyStep(
         units: _draft.units,
         onSaveUnit: _saveUnit,
         onRemoveUnit: _removeUnit,
         onContinue: _next,
         onSkip: _next,
       ),
-      2 => LimitStep(
+      3 => LimitStep(
         value: _limitValue,
         onChanged: (v) => setState(() => _limitValue = v),
         onSet: () => _setLimit(_limitValue),
         onSkip: () => _setLimit(null),
       ),
-      3 => BannerStep(
+      4 => BannerStep(
         draft: _draft,
         onYes: () => _setBanner(true),
         onNotNow: () => _setBanner(false),
@@ -198,13 +222,16 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
                       child: _step == 0
                           ? null
                           : IconButton(
-                        tooltip: 'Back',
-                        onPressed: _finishing ? null : _back,
-                        icon: const Icon(Icons.arrow_back_rounded),
-                      ),
+                              tooltip: 'Back',
+                              onPressed: _finishing ? null : _back,
+                              icon: const Icon(Icons.arrow_back_rounded),
+                            ),
                     ),
                     Expanded(
-                      child: StepDots(count: _stepCount, index: _step),
+                      // F12: no step dots on the welcome screen.
+                      child: _step == 0
+                          ? const SizedBox.shrink()
+                          : StepDots(count: _stepCount, index: _step),
                     ),
                     const SizedBox(width: 48),
                   ],
@@ -213,10 +240,7 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
               Expanded(
                 child: AnimatedSwitcher(
                   duration: const Duration(milliseconds: 220),
-                  child: KeyedSubtree(
-                    key: ValueKey(_step),
-                    child: _stepBody(),
-                  ),
+                  child: KeyedSubtree(key: ValueKey(_step), child: _stepBody()),
                 ),
               ),
             ],
