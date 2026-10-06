@@ -27,7 +27,6 @@ class PrivacyCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = context.colors;
     return SectionCard(
-      title: 'Privacy & data',
       children: [
         Container(
           padding: const EdgeInsets.all(AppSpacing.md),

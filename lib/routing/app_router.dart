@@ -15,12 +15,17 @@ import '../ui/screens/data_backup_screen.dart';
 import '../ui/screens/home_screen.dart';
 import '../ui/screens/limits_screen.dart';
 import '../ui/screens/manage_rules_screen.dart';
-import '../ui/screens/me_screen.dart';
 import '../ui/screens/my_money_screen.dart';
 import '../ui/screens/onboarding_screen.dart';
+import '../ui/screens/profile_screen.dart';
 import '../ui/screens/review_inbox_screen.dart';
 import '../ui/screens/root_shell.dart';
 import '../ui/screens/rule_builder_screen.dart';
+import '../ui/screens/settings/appearance_screen.dart';
+import '../ui/screens/settings/detail_level_screen.dart';
+import '../ui/screens/settings/home_settings_screen.dart';
+import '../ui/screens/settings/privacy_data_screen.dart';
+import '../ui/screens/settings/settings_screen.dart';
 import '../ui/screens/summary_screen.dart';
 import '../ui/screens/unit_detail_screen.dart';
 import '../widgets/sheets/add_transaction_sheet.dart';
@@ -144,7 +149,7 @@ final routerProvider = Provider<GoRouter>((ref) {
               GoRoute(
                 path: Routes.settingsPath,
                 name: Routes.settings,
-                builder: (_, _) => const MeScreen(),
+                builder: (_, _) => const SettingsScreen(),
               ),
             ]),
           ]
@@ -232,6 +237,36 @@ final routerProvider = Provider<GoRouter>((ref) {
           name: Routes.backup,
           parentNavigatorKey: rootNavigatorKey,
           builder: (_, _) => const DataBackupScreen(),
+        ),
+        GoRoute(
+          path: Routes.profilePath,
+          name: Routes.profile,
+          parentNavigatorKey: rootNavigatorKey,
+          builder: (_, _) => const ProfileScreen(),
+        ),
+        GoRoute(
+          path: Routes.settingsHomePath,
+          name: Routes.settingsHome,
+          parentNavigatorKey: rootNavigatorKey,
+          builder: (_, _) => const HomeSettingsScreen(),
+        ),
+        GoRoute(
+          path: Routes.settingsDetailPath,
+          name: Routes.settingsDetail,
+          parentNavigatorKey: rootNavigatorKey,
+          builder: (_, _) => const DetailLevelScreen(),
+        ),
+        GoRoute(
+          path: Routes.settingsAppearancePath,
+          name: Routes.settingsAppearance,
+          parentNavigatorKey: rootNavigatorKey,
+          builder: (_, _) => const AppearanceScreen(),
+        ),
+        GoRoute(
+          path: Routes.settingsPrivacyPath,
+          name: Routes.settingsPrivacy,
+          parentNavigatorKey: rootNavigatorKey,
+          builder: (_, _) => const PrivacyDataScreen(),
         ),
       ]
   );

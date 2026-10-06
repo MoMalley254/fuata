@@ -20,6 +20,12 @@ class Routes {
   static const autoCatch = 'autoCatch';
   static const backup = 'backup';
 
+  static const profile = 'profile';
+  static const settingsHome = 'settingsHome';
+  static const settingsDetail = 'settingsDetail';
+  static const settingsAppearance = 'settingsAppearance';
+  static const settingsPrivacy = 'settingsPrivacy';
+
   // ---- Paths ----
   static const splashPath = '/splash';
   static const onboardingPath = '/onboarding';
@@ -38,6 +44,12 @@ class Routes {
   static const bannerPath = '/settings/banner';
   static const autoCatchPath = '/settings/auto-catch';
   static const backupPath = '/settings/backup';
+
+  static const profilePath = '/profile';
+  static const settingsHomePath = '/settings/home';
+  static const settingsDetailPath = '/settings/detail';
+  static const settingsAppearancePath = '/settings/appearance';
+  static const settingsPrivacyPath = '/settings/privacy';
 
   // ---- Helpers ----
   static String unitFor(String id) => '/unit/$id';

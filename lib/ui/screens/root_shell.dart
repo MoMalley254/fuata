@@ -39,8 +39,8 @@ class RootShell extends StatelessWidget {
             label: 'My money',
           ),
           NavigationDestination(
-            icon: Icon(Icons.person_rounded),
-            label: 'Me',
+            icon: Icon(Icons.settings_rounded),
+            label: 'Settings',
           ),
         ],
       ),

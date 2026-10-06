@@ -35,7 +35,6 @@ class _ProfileBlockState extends State<ProfileBlock> {
   Widget build(BuildContext context) {
     final c = context.colors;
     return SectionCard(
-      title: 'Profile',
       children: [
         Row(
           children: [
