@@ -55,9 +55,7 @@ extension HomeSectionsLabel on HomeSection {
   String get description => switch (this) {
     HomeSection.units => 'The scrolling row of units cards.',
     HomeSection.lately => 'Your most recent transactions.',
-  // Not built yet (design.md open item) — the toggle exists so the
-  // preference survives until the widget does.
-    HomeSection.weekPeek => 'A tiny 7-day bar strip. Coming soon',
+    HomeSection.weekPeek => 'A tiny 7-day bar strip, tap for the week',
   };
 }
 
@@ -199,7 +197,7 @@ class AppSettings {
     accent: AppAccents.teal,
     themeMode: AppThemeMode.system,
     homeHeadline: HomeHeadline.leftToday,
-    homeSections: {HomeSection.units, HomeSection.lately},
+    homeSections: {HomeSection.units, HomeSection.lately, HomeSection.weekPeek},
     detailLevel: DetailLevel.balanced,
     amountsHiddenInRecents: false,
     redactedLockScreenBanner: true,

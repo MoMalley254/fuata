@@ -3,10 +3,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
+import '../../domain/logic/summary.dart';
 import '../../domain/models/money.dart';
 import '../../domain/models/settings.dart';
 import '../../routing/routes.dart';
 import '../../widgets/activity/grouped_list.dart';
+import '../../widgets/home/week_peek.dart';
 import '../../widgets/sheets/add_transaction_sheet.dart';
 import '../../widgets/sheets/edit_unit_sheet.dart';
 import 'summary_screen.dart';
@@ -80,6 +82,7 @@ class HomeContent extends StatelessWidget {
   Widget build(BuildContext context) {
     final showUnits = settings.homeSections.contains(HomeSection.units);
     final showLately = settings.homeSections.contains(HomeSection.lately);
+    final showWeekPeek = settings.homeSections.contains(HomeSection.weekPeek);
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(
@@ -146,6 +149,23 @@ class HomeContent extends StatelessWidget {
             ),
         ],
         const SizedBox(height: AppSpacing.sm),
+        if (showWeekPeek) ...[
+          const SizedBox(height: AppSpacing.lg),
+          WeekPeekCard(
+            spentByDay: state.spentByDay,
+            dailyLimit: state.dailyLimit,
+            currencyCode: state.units.isNotEmpty
+                ? state.units.first.currencyCode
+                : 'KES',
+            // Opens the same Summary the button below does, at the week view.
+            // The query-parameter form is how the router already reads it (see
+            // app_router.dart's summary route), so this adds no new shape.
+            onTap: () => context.push(
+              '${Routes.summaryPath}?period=${SummaryPeriod.week.name}',
+            ),
+          ),
+        ],
+        const SizedBox(height: AppSpacing.md,),
         Align(
           alignment: Alignment.centerLeft,
           child: TextButton.icon(

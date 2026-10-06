@@ -76,4 +76,32 @@ class Ledger {
     if (limit == null || !limit.enabled) return SpendStatus.safe;
     return limit.statusFor(spentMinor);
   }
+
+  /// Spending per day for the last [days] days, oldest first, today last.
+  ///
+  /// Same "confirmed spending only" rule as [spentInPeriod]: `moved`,
+  /// `adjustment` and `pending` rows are all excluded, so the strip can never
+  /// disagree with the summary it opens (findings F6; testing.md S-20 to S-23).
+  ///
+  /// [now] is injectable so tests can pin the window; production callers
+  /// leave it out. Boundaries are local calendar days — a transaction at
+  /// 23:59 belongs to the day it happened, not the day it was confirmed.
+  static List<int> spentByDay(
+      Iterable<MoneyTransaction> all, {
+        required DateTime now,
+        int days = 7,
+      }) {
+    final today = DateTime(now.year, now.month, now.day);
+    final start = today.subtract(Duration(days: days - 1));
+    final out = List<int>.filled(days, 0);
+
+    for (final t in all) {
+      if (!t.countsAsSpending) continue;
+      final at = t.occurredAt;
+      final day = DateTime(at.year, at.month, at.day);
+      if (day.isBefore(start) || day.isAfter(today)) continue;
+      out[day.difference(start).inDays] += -t.amountMinor;
+    }
+    return out;
+  }
 }
