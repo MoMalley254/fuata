@@ -44,12 +44,14 @@ class Routes {
   static const bannerPath = '/settings/banner';
   static const autoCatchPath = '/settings/auto-catch';
   static const backupPath = '/settings/backup';
+  static const archivedUnits = 'archivedUnits';
 
   static const profilePath = '/profile';
   static const settingsHomePath = '/settings/home';
   static const settingsDetailPath = '/settings/detail';
   static const settingsAppearancePath = '/settings/appearance';
   static const settingsPrivacyPath = '/settings/privacy';
+  static const archivedUnitsPath = '/archived-units';
 
   // ---- Helpers ----
   static String unitFor(String id) => '/unit/$id';

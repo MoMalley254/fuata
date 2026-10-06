@@ -81,6 +81,34 @@ final unitsProvider = StreamProvider<List<MoneyUnit>>((ref) {
   return ref.watch(unitRepositoryProvider).watchUnits();
 });
 
+/// Every unit, archived ones included. History (Activity, transaction
+/// detail) watches this so a row whose unit has been put away reads
+/// "Cash (archived)" rather than "Unknown" (finding F9).
+final allUnitsProvider = StreamProvider<List<MoneyUnit>>((ref) {
+  return ref.watch(unitRepositoryProvider).watchUnits(includeArchived: true);
+});
+
+/// Just the archived ones, most recently archived first. Plain provider,
+/// not a stream — it's derived from [allUnitsProvider] and falls back to
+/// an empty list while the underlying stream is still loading, the same
+/// shape as [pendingTransactionsProvider] and [allowedPackagesProvider].
+///
+/// Sorted by `archivedAt` when both units have it; when one doesn't (an
+/// older backup, or a unit archived before the column existed), sortOrder
+/// is the tiebreak so the list still has a stable order.
+final archivedUnitsProvider = Provider<List<MoneyUnit>>((ref) {
+  final all = ref.watch(allUnitsProvider).value ?? const <MoneyUnit>[];
+  return all.where((u) => u.archived).toList()
+    ..sort((a, b) {
+      final ad = a.archivedAt;
+      final bd = b.archivedAt;
+      if (ad != null && bd != null) return bd.compareTo(ad);
+      if (ad != null) return -1;
+      if (bd != null) return 1;
+      return a.sortOrder.compareTo(b.sortOrder);
+    });
+});
+
 final transactionsProvider = StreamProvider<List<MoneyTransaction>>((ref) {
   return ref.watch(transactionRepositoryProvider).watchTransactions();
 });

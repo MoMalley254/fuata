@@ -54,6 +54,36 @@ void main() {
     expect(await repo.watchUnits(includeArchived: true).first, hasLength(1));
   });
 
+  test('unit archive and unarchive round-trip (#80)', () async {
+    final repo = DriftUnitRepository(db);
+    await repo.addUnit(
+      MoneyUnit(
+        id: 'u1',
+        name: 'Cash',
+        kind: UnitKind.cash,
+        currencyCode: 'KES',
+        iconEmoji: '💵',
+        color: const Color(0xFF2E9E6B),
+        openingBalanceMinor: 0,
+        sortOrder: 7,   // deliberately not 0, so a stray reset would show
+        createdAt: DateTime(2026, 9, 21),
+      ),
+    );
+
+    await repo.archiveUnit('u1');
+    final archived = (await repo.watchUnits(includeArchived: true).first).single;
+    expect(archived.archived, isTrue);
+    expect(archived.archivedAt, isNotNull);
+
+    await repo.unarchiveUnit('u1');
+    final restored = (await repo.watchUnits().first).single;
+    expect(restored.archived, isFalse);
+    expect(restored.archivedAt, isNull);
+    // Sort position survives the round trip: the whole point of clearing
+    // only `archived` and `archivedAt`.
+    expect(restored.sortOrder, 7);
+  });
+
   test('transaction round-trips, including a moved pair', () async {
     final units = DriftUnitRepository(db);
     final txs = DriftTransactionRepository(db);

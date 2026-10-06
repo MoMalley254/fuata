@@ -130,6 +130,7 @@ class BackupCodec {
     'openingBalanceMinor': u.openingBalanceMinor,
     'sortOrder': u.sortOrder,
     'archived': u.archived,
+    'archivedAt': _iso(u.archivedAt),
     'lastVerifiedAt': _iso(u.lastVerifiedAt),
     'createdAt': _iso(u.createdAt),
   };
@@ -252,7 +253,7 @@ class BackupCodec {
       data,
       'units',
       ctx,
-      (r) => MoneyUnit(
+          (r) => MoneyUnit(
         id: r.nonEmpty('id'),
         name: r.nonEmpty('name'),
         kind: r.oneOf('kind', UnitKind.values),
@@ -262,6 +263,10 @@ class BackupCodec {
         openingBalanceMinor: r.integer('openingBalanceMinor', orElse: 0),
         sortOrder: r.integer('sortOrder', orElse: 0),
         archived: r.boolean('archived', orElse: false),
+        // `dateOrNull` returns null both when the key is absent (a backup
+        // made before #80) and when it is present-but-null (a unit that
+        // isn't archived). The screen treats both the same way.
+        archivedAt: r.dateOrNull('archivedAt'),
         lastVerifiedAt: r.dateOrNull('lastVerifiedAt'),
         createdAt: r.date('createdAt'),
       ),

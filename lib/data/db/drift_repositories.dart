@@ -50,7 +50,23 @@ class DriftUnitRepository implements UnitRepository {
   @override
   Future<void> archiveUnit(String unitId) {
     return (_db.update(_db.units)..where((u) => u.id.equals(unitId))).write(
-      const UnitsCompanion(archived: Value(true)),
+      UnitsCompanion(
+        archived: const Value(true),
+        // UTC so the Archived screen can format it in the device zone.
+        archivedAt: Value(DateTime.now().toUtc()),
+      ),
+    );
+  }
+
+  @override
+  Future<void> unarchiveUnit(String unitId) {
+    return (_db.update(_db.units)..where((u) => u.id.equals(unitId))).write(
+      UnitsCompanion(
+        archived: const Value(false),
+        // Explicit null, not Value.absent(): the whole point of this write
+        // is to clear the timestamp.
+        archivedAt: const Value<DateTime?>(null),
+      ),
     );
   }
 }

@@ -55,7 +55,7 @@ class _ActivityScreenState extends ConsumerState<ActivityScreen> {
   @override
   Widget build(BuildContext context) {
     final txAsync = ref.watch(transactionsProvider);
-    final unitsAsync = ref.watch(unitsProvider);
+    final unitsAsync = ref.watch(allUnitsProvider);
     final inboxCount = ref.watch(reviewInboxCountProvider);
 
     return Scaffold(

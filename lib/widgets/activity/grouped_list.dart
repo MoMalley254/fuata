@@ -83,7 +83,10 @@ class GroupedList extends StatelessWidget {
               ...dayTx.map((t) {
                 final unit = unitById[t.unitId];
                 return TransactionRow(
-                  title: t.counterparty ?? unit?.name ?? 'Unknown',
+                  // `?.displayName` appends "(archived)" once the unit has been put
+                  // away, so a row's title still reads as the unit it belongs to
+                  // rather than "Unknown".
+                  title: t.counterparty ?? unit?.displayName ?? 'Unknown',
                   subtitle: DateFormat('h:mm a').format(t.occurredAt),
                   amount: Money(t.amountMinor, unit?.currencyCode ?? 'KES').majorValue,
                   emoji: unit?.iconEmoji ?? '💰',

@@ -17,7 +17,14 @@ abstract class UnitRepository {
   Stream<List<MoneyUnit>> watchUnits({bool includeArchived = false});
   Future<void> addUnit(MoneyUnit unit);
   Future<void> updateUnit(MoneyUnit unit);
+
+  /// Sets [archived] true and stamps [archivedAt] with the current time.
   Future<void> archiveUnit(String unitId);
+
+  /// Clears [archived] and [archivedAt]. The unit's sortOrder is untouched,
+  /// so a restored unit comes back to the same place in the list it left
+  /// from (finding F9's "restored units keep their sort position").
+  Future<void> unarchiveUnit(String unitId);
 }
 
 abstract class TransactionRepository {

@@ -9,6 +9,7 @@ import 'package:go_router/go_router.dart';
 import '../domain/logic/summary.dart';
 import '../domain/models/template.dart';
 import '../ui/screens/activity_screen.dart';
+import '../ui/screens/archived_units_screen.dart';
 import '../ui/screens/auto_catch_screen.dart';
 import '../ui/screens/banner_setup_screen.dart';
 import '../ui/screens/data_backup_screen.dart';
@@ -267,6 +268,12 @@ final routerProvider = Provider<GoRouter>((ref) {
           name: Routes.settingsPrivacy,
           parentNavigatorKey: rootNavigatorKey,
           builder: (_, _) => const PrivacyDataScreen(),
+        ),
+        GoRoute(
+          path: Routes.archivedUnitsPath,
+          name: Routes.archivedUnits,
+          parentNavigatorKey: rootNavigatorKey,
+          builder: (_, _) => const ArchivedUnitsScreen(),
         ),
       ]
   );

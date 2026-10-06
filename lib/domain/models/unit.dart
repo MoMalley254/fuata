@@ -15,6 +15,11 @@ class MoneyUnit {
   final int openingBalanceMinor;
   final int sortOrder;
   final bool archived;
+
+  /// When the unit was archived; null when it isn't, or when the install
+  /// predates the field. Presentation-only — the domain never reasons
+  /// about "how long ago".
+  final DateTime? archivedAt;
   final DateTime? lastVerifiedAt;
   final DateTime createdAt;
 
@@ -29,8 +34,15 @@ class MoneyUnit {
     required this.sortOrder,
     required this.createdAt,
     this.archived = false,
+    this.archivedAt,
     this.lastVerifiedAt,
   });
+
+  /// Sentinel for the two nullable-with-meaning fields: passing `null`
+  /// explicitly means "clear it", omitting the argument means "leave it".
+  /// Same trick freezed generates; without it there is no way to tell
+  /// `copyWith(archivedAt: null)` from a call that didn't mention it.
+  static const _unset = Object();
 
   MoneyUnit copyWith({
     String? name,
@@ -38,7 +50,8 @@ class MoneyUnit {
     Color? color,
     int? sortOrder,
     bool? archived,
-    DateTime? lastVerifiedAt,
+    Object? archivedAt = _unset,
+    Object? lastVerifiedAt = _unset,
   }) {
     return MoneyUnit(
       id: id,
@@ -51,7 +64,19 @@ class MoneyUnit {
       sortOrder: sortOrder ?? this.sortOrder,
       createdAt: createdAt,
       archived: archived ?? this.archived,
-      lastVerifiedAt: lastVerifiedAt ?? this.lastVerifiedAt,
+      archivedAt: identical(archivedAt, _unset)
+          ? this.archivedAt
+          : archivedAt as DateTime?,
+      lastVerifiedAt: identical(lastVerifiedAt, _unset)
+          ? this.lastVerifiedAt
+          : lastVerifiedAt as DateTime?,
     );
   }
+}
+
+/// The name to show a unit by once it's been put away: "Cash (archived)".
+/// Only the row labels in history use this — the unit page has its own,
+/// longer notice. See Activity and the transaction detail sheet.
+extension MoneyUnitDisplay on MoneyUnit {
+  String get displayName => archived ? '$name (archived)' : name;
 }

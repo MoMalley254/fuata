@@ -37,9 +37,14 @@ class Units extends Table {
   IntColumn get colorValue => integer()();
   IntColumn get openingBalanceMinor => integer().withDefault(const Constant(0))();
   IntColumn get sortOrder => integer().withDefault(const Constant(0))();
-  BoolColumn get archived => boolean().withDefault(const Constant(false))();
   DateTimeColumn get lastVerifiedAt => dateTime().nullable()();
   DateTimeColumn get createdAt => dateTime()();
+
+  BoolColumn get archived => boolean().withDefault(const Constant(false))();
+// When the unit was archived, so the Archived screen can say "Archived
+// on 15 Oct". Nullable: an existing archived unit has no date, and an
+// unarchived one has no reason to carry a stale one.
+  DateTimeColumn get archivedAt => dateTime().nullable()();
 
   @override
   Set<Column> get primaryKey => {id};
