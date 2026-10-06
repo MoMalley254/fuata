@@ -6,6 +6,7 @@ import 'package:intl/intl.dart';
 
 import '../../domain/models/limit_rule.dart';
 import '../../domain/models/money.dart';
+import '../../domain/models/unit.dart';
 import '../../routing/routes.dart';
 import '../../widgets/activity/empty_activity.dart';
 import '../../widgets/activity/grouped_list.dart';
@@ -32,18 +33,15 @@ class UnitDetailScreen extends ConsumerWidget {
   final String unitId;
   const UnitDetailScreen({super.key, required this.unitId});
 
-  void _confirmArchive(
-      BuildContext context,
-      WidgetRef ref,
-      String unitId,
-      String name,
-      ) {
+  void _confirmArchive(BuildContext context, WidgetRef ref, MoneyUnit unit) {
     showDialog(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: Text('Archive $name?'),
+        title: Text('Archive ${unit.name}?'),
         content: const Text(
-          "It'll disappear from Home and My money, but its history stays safe.",
+          "It'll disappear from Home, My money and the banner. Its history "
+              'stays safe, and its reading rules pause.\n\n'
+              "You can restore it any time from My money → Archived.",
         ),
         actions: [
           TextButton(
@@ -52,9 +50,12 @@ class UnitDetailScreen extends ConsumerWidget {
           ),
           FilledButton(
             onPressed: () async {
-              await ref.read(unitRepositoryProvider).archiveUnit(unitId);
+              await ref.read(unitRepositoryProvider).archiveUnit(unit.id);
               if (dialogContext.mounted) Navigator.of(dialogContext).pop();
-              if (context.mounted) Navigator.of(context).pop();
+              // Stay on the page: an archived unit now has a page worth
+              // looking at (the notice, the Restore button) rather than
+              // being a dead end, so there's no reason to bounce the
+              // person back.
             },
             child: const Text('Archive'),
           ),
@@ -63,10 +64,26 @@ class UnitDetailScreen extends ConsumerWidget {
     );
   }
 
+  void _confirmUnarchive(
+      BuildContext context,
+      WidgetRef ref,
+      MoneyUnit unit,
+      ) {
+    // No dialog here: restoring is not destructive, and the notice on the
+    // page already says what the button does. A confirm step would just be
+    // an extra tap on the only action a person came here to take.
+    ref.read(unitRepositoryProvider).unarchiveUnit(unit.id).then((_) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('${unit.name} is back.')),
+      );
+    });
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final c = context.colors;
-    final unitsAsync = ref.watch(unitsProvider);
+    final unitsAsync = ref.watch(allUnitsProvider);
     final txAsync = ref.watch(transactionsProvider);
 
     return unitsAsync.when(
@@ -102,21 +119,47 @@ class UnitDetailScreen extends ConsumerWidget {
               appBar: AppBar(
                 title: Text(unit.name),
                 actions: [
-                  IconButton(
-                    tooltip: 'Edit',
-                    onPressed: () => showEditUnitSheet(context, existing: unit),
-                    icon: const Icon(Icons.edit_outlined),
-                  ),
+                  if (!unit.archived)
+                    IconButton(
+                      tooltip: 'Edit',
+                      onPressed: () => showEditUnitSheet(context, existing: unit),
+                      icon: const Icon(Icons.edit_outlined),
+                    ),
                   PopupMenuButton<String>(
                     onSelected: (v) {
-                      if (v == 'archive') {
-                        _confirmArchive(context, ref, unit.id, unit.name);
+                      switch (v) {
+                        case 'archive':
+                          _confirmArchive(context, ref, unit);
+                        case 'restore':
+                          _confirmUnarchive(context, ref, unit);
                       }
                     },
-                    itemBuilder: (_) => const [
-                      PopupMenuItem(value: 'archive', child: Text('Archive')),
+                    itemBuilder: (_) => [
+                      if (unit.archived)
+                        const PopupMenuItem(
+                          value: 'restore',
+                          child: Row(
+                            children: [
+                              Icon(Icons.unarchive_outlined, size: 18),
+                              SizedBox(width: AppSpacing.sm),
+                              Text('Restore'),
+                            ],
+                          ),
+                        )
+                      else
+                        const PopupMenuItem(
+                          value: 'archive',
+                          child: Row(
+                            children: [
+                              Icon(Icons.archive_outlined, size: 18),
+                              SizedBox(width: AppSpacing.sm),
+                              Text('Archive'),
+                            ],
+                          ),
+                        ),
                     ],
                   ),
+
                 ],
               ),
               body: SafeArea(
@@ -140,6 +183,36 @@ class UnitDetailScreen extends ConsumerWidget {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
+                          if (unit.archived) ...[
+                            Container(
+                              width: double.infinity,
+                              padding: const EdgeInsets.all(AppSpacing.md),
+                              decoration: BoxDecoration(
+                                color: c.statusWarningContainer,
+                                borderRadius: BorderRadius.circular(AppSpacing.unitTileRadius),
+                                border: Border.all(color: c.statusWarningBorder),
+                              ),
+                              child: Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Icon(
+                                    Icons.archive_outlined,
+                                    size: 20,
+                                    color: c.statusWarning,
+                                  ),
+                                  const SizedBox(width: AppSpacing.sm),
+                                  Expanded(
+                                    child: Text(
+                                      "This one's archived. Its history still counts, and its "
+                                          'reading rules are paused. Use Restore above to bring it back.',
+                                      style: AppTypography.bodySm.copyWith(color: c.onSurface),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(height: AppSpacing.md),
+                          ],
                           Row(
                             children: [
                               Text(
@@ -173,7 +246,12 @@ class UnitDetailScreen extends ConsumerWidget {
                           ),
                           const SizedBox(height: AppSpacing.md),
                           FilledButton.tonal(
-                            onPressed: () => showUpdateBalanceSheet(
+                            // Disabled when archived: a balance you can't spend isn't a balance
+                            // you update. The button stays visible (rather than disappearing) so
+                            // the layout doesn't jump and the tooltip can say why.
+                            onPressed: unit.archived
+                                ? null
+                                : () => showUpdateBalanceSheet(
                               unit: unit,
                               currentBalanceMinor: balance,
                             ),

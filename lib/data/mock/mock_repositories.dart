@@ -210,8 +210,20 @@ class MockUnitRepository implements UnitRepository {
       _store.update((u) => u.id == unit.id, (_) => unit);
 
   @override
-  Future<void> archiveUnit(String unitId) async =>
-      _store.update((u) => u.id == unitId, (u) => u.copyWith(archived: true));
+  Future<void> archiveUnit(String unitId) async {
+    _store.update(
+          (u) => u.id == unitId,
+          (u) => u.copyWith(archived: true, archivedAt: DateTime.now().toUtc()),
+    );
+  }
+
+  @override
+  Future<void> unarchiveUnit(String unitId) async {
+    _store.update(
+          (u) => u.id == unitId,
+          (u) => u.copyWith(archived: false, archivedAt: null),
+    );
+  }
 }
 
 class MockTransactionRepository implements TransactionRepository {

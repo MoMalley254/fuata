@@ -59,13 +59,12 @@ MoneyUnit unitFromRow(UnitRow row) {
     name: row.name,
     kind: _unitKindFromText(row.kind),
     currencyCode: row.currency,
-    // v0.1 only ever writes iconType == 'emoji' (see tables.dart); any
-    // other value falls back to the raw stored value rather than crashing.
     iconEmoji: row.iconValue,
     color: Color(row.colorValue),
     openingBalanceMinor: row.openingBalanceMinor,
     sortOrder: row.sortOrder,
     archived: row.archived,
+    archivedAt: row.archivedAt,
     lastVerifiedAt: row.lastVerifiedAt,
     createdAt: row.createdAt,
   );
@@ -83,6 +82,7 @@ UnitsCompanion unitToCompanion(MoneyUnit unit) {
     openingBalanceMinor: Value(unit.openingBalanceMinor),
     sortOrder: Value(unit.sortOrder),
     archived: Value(unit.archived),
+    archivedAt: Value(unit.archivedAt),
     lastVerifiedAt: Value(unit.lastVerifiedAt),
     createdAt: unit.createdAt,
   );

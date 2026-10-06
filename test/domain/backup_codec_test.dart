@@ -4,6 +4,7 @@ import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fuata/domain/logic/backup_codec.dart';
+import 'package:fuata/domain/models/backup_snapshot.dart';
 import 'package:fuata/domain/models/limit_rule.dart';
 import 'package:fuata/domain/models/settings.dart';
 
@@ -262,5 +263,37 @@ void main() {
       expect(r.ok, isTrue);
       expect(r.snapshot!.settings, isNull);
     });
+  });
+  test('an archived unit keeps both its flag and its date (#80)', () {
+    final archivedAt = DateTime.utc(2026, 10, 15, 12);
+    final snapshot = BackupSnapshot(units: [
+      unit('u1').copyWith(archived: true, archivedAt: archivedAt),
+    ]);
+
+    final encoded = BackupCodec.encode(snapshot, exportedAt: exportedAt);
+    final decoded = BackupCodec.decode(encoded);
+
+    expect(decoded.errors, isEmpty);
+    final u = decoded.snapshot!.units.single;
+    expect(u.archived, isTrue);
+    expect(u.archivedAt, archivedAt);
+  });
+
+  test('a backup made before #80 still reads as archived, without a date', () {
+    // Encode a unit with the archived flag but no archivedAt key at all,
+    // the shape an older Fuata would have produced.
+    final root = jsonDecode(
+      BackupCodec.encode(
+        BackupSnapshot(units: [unit('u1').copyWith(archived: true)]),
+        exportedAt: exportedAt,
+      ),
+    ) as Map<String, dynamic>;
+    final unitJson = (root['data']['units'] as List).first as Map;
+    unitJson.remove('archivedAt');
+
+    final decoded = BackupCodec.decode(jsonEncode(root));
+    expect(decoded.errors, isEmpty);
+    expect(decoded.snapshot!.units.single.archived, isTrue);
+    expect(decoded.snapshot!.units.single.archivedAt, isNull);
   });
 }

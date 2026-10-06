@@ -27,6 +27,7 @@ class _MyMoneyScreenState extends ConsumerState<MyMoneyScreen> {
   @override
   Widget build(BuildContext context) {
     final homeAsync = ref.watch(homeStateProvider);
+    final archivedCount = ref.watch(archivedUnitsProvider).length;
     final c = context.colors;
 
     return Scaffold(
@@ -36,7 +37,29 @@ class _MyMoneyScreenState extends ConsumerState<MyMoneyScreen> {
           IconButton(
               onPressed: () => showEditUnitSheet(context),
               icon: Icon(Icons.add)
-          )
+          ),
+          // Only shown when there is something to show. The count lives in the
+          // menu item rather than on the app bar itself, so a person isn't
+          // nagged by a badge for units they deliberately put away.
+          if (archivedCount > 0)
+            PopupMenuButton<String>(
+              tooltip: 'More',
+              onSelected: (v) {
+                if (v == 'archived') context.push(Routes.archivedUnitsPath);
+              },
+              itemBuilder: (_) => [
+                PopupMenuItem(
+                  value: 'archived',
+                  child: Row(
+                    children: [
+                      const Icon(Icons.archive_outlined, size: 18),
+                      const SizedBox(width: AppSpacing.sm),
+                      Text('Archived ($archivedCount)'),
+                    ],
+                  ),
+                ),
+              ],
+            ),
         ],
       ),
       body: SafeArea(

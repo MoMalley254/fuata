@@ -88,7 +88,9 @@ class _TransactionDetailSheetState extends ConsumerState<TransactionDetailSheet>
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        t.counterparty ?? unit?.name ?? 'Unknown',
+                        // `?.displayName` is the archived-aware name (finding F9). The
+                        // counterparty wins when it's set; otherwise the unit names the row.
+                        t.counterparty ?? unit?.displayName ?? 'Unknown',
                         style: AppTypography.headlineSm.copyWith(color: c.onSurface),
                       ),
                       Text(
@@ -142,7 +144,7 @@ class _TransactionDetailSheetState extends ConsumerState<TransactionDetailSheet>
     if (_level == DetailLevel.simple) return const [];
 
     // Balanced: unit and a friendly type label.
-    rows.add(MapEntry('Money', unit?.name ?? 'Unknown'));
+    rows.add(MapEntry('Money', unit?.displayName ?? 'Unknown'));
     rows.add(MapEntry('Type', switch (t.type) {
       TxType.spent => 'Spent',
       TxType.got => 'Got',
