@@ -250,9 +250,9 @@ Future<void> _refreshBanner(AppDatabase db) async {
       content,
       // Read once here from the *current* settings so the background
       // isolate sees the same lock-screen choice the UI isolate would.
-      redactOnLockScreen:
-      (await DriftSettingsRepository(db).watchSettings().first)
-          .redactedLockScreenBanner,
+      redactOnLockScreen: (await DriftSettingsRepository(
+        db,
+      ).watchSettings().first).redactedLockScreenBanner,
     );
   }
 }
@@ -263,8 +263,22 @@ Future<void> _refreshBanner(AppDatabase db) async {
 Future<void> _refreshWidget(AppDatabase db) async {
   final snapshot = WidgetSnapshot.fromData(
     units: await DriftUnitRepository(db).watchUnits().first,
-    transactions: await DriftTransactionRepository(db).watchTransactions().first,
+    transactions: await DriftTransactionRepository(db)
+        .watchTransactions()
+        .first,
     limits: await DriftLimitRepository(db).watchLimits().first,
   );
   await AndroidHomeWidgetBridge().push(snapshot);
+}
+
+/// Opens Android's per-app notification settings for Fuata (F15: the
+/// "Android is blocking Fuata's notifications" warning on the Banner
+/// screen). Distinct from [openNotificationAccessSettings], which is the
+/// special-access list for the listener.
+Future<void> openAppNotificationSettings() async {
+  try {
+    await _channel.invokeMethod('openAppNotificationSettings');
+  } on MissingPluginException {
+    // no native side
+  }
 }

@@ -66,6 +66,15 @@ class CaptureChannel(
                     }
                 }
 
+                "openAppNotificationSettings" -> {
+                    val intent = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+                        putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    context.startActivity(intent)
+                    result.success(null)
+                }
+
                 else -> result.notImplemented()
             }
         }

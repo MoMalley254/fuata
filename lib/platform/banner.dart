@@ -329,4 +329,33 @@ class BannerPlatform {
         ? BannerAction.quickAdd
         : BannerAction.open;
   }
+
+  /// Ask for notification permission (Android 13+), waiting for the
+  /// answer. Unlike [_requestPermissionOnce], this always asks — used from
+  /// onboarding's banner step (F15), where the person just said yes and is
+  /// looking at the explanation. Returns true when notifications are on
+  /// (either just granted, or the OS has no prompt to show).
+  Future<bool> requestNotificationPermission() async {
+    await init();
+    final android = _plugin
+        .resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin
+        >();
+    if (android == null) return true;
+    final granted = await android.requestNotificationsPermission();
+    _permissionAsked = true;
+    return granted ?? true;
+  }
+
+  /// Whether Android will actually deliver Fuata's notifications. False
+  /// when the person denied the permission (Android 13+) or turned the
+  /// app's notifications off in system settings.
+  Future<bool> areNotificationsEnabled() async {
+    await init();
+    final android = _plugin
+        .resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin
+        >();
+    return await android?.areNotificationsEnabled() ?? true;
+  }
 }
