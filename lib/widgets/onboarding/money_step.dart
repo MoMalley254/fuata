@@ -45,6 +45,8 @@ class MoneyStep extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          _WhatIsAUnitCard(),
+          const SizedBox(height: AppSpacing.md),
           Wrap(
             spacing: AppSpacing.sm,
             runSpacing: AppSpacing.sm,
@@ -87,6 +89,88 @@ class MoneyStep extends StatelessWidget {
               style: AppTypography.bodySm.copyWith(color: c.onSurfaceTertiary),
             ),
           ],
+        ],
+      ),
+    );
+  }
+}
+
+class _WhatIsAUnitCard extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(AppSpacing.md),
+      decoration: BoxDecoration(
+        color: c.surfaceContainer,
+        borderRadius: BorderRadius.circular(AppSpacing.unitTileRadius),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'What\'s a "unit"?',
+            style: AppTypography.labelLg.copyWith(color: c.onSurface),
+          ),
+          const SizedBox(height: AppSpacing.xs),
+          Text(
+            'A unit is just a place your money lives: your cash, your '
+            'M-PESA, a bank account.',
+            style: AppTypography.bodySm.copyWith(color: c.onSurfaceVariant),
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          Text(
+            'Why add them?',
+            style: AppTypography.labelMd.copyWith(color: c.onSurface),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            "You can see what's in each one, moving money between them "
+            "doesn't count as spending, and Fuata can read messages for "
+            'each one.',
+            style: AppTypography.bodySm.copyWith(color: c.onSurfaceVariant),
+          ),
+          const SizedBox(height: AppSpacing.md),
+          // A tiny illustration of three tiles — same shape and colour as
+          // the picker below, so the connection is obvious.
+          Row(
+            children: [
+              for (var i = 0; i < 3; i++) ...[
+                _MiniTile(defaults: kindQuickPicks[i]),
+                if (i < 2) const SizedBox(width: 6),
+              ],
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _MiniTile extends StatelessWidget {
+  const _MiniTile({required this.defaults});
+  final KindDefaults defaults;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: c.surface,
+        borderRadius: BorderRadius.circular(AppSpacing.sm),
+        border: Border.all(color: c.outlineVariant.withValues(alpha: 0.5)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(defaults.emoji, style: const TextStyle(fontSize: 14)),
+          const SizedBox(width: 4),
+          Text(
+            defaults.label,
+            style: AppTypography.labelSm.copyWith(color: c.onSurface),
+          ),
         ],
       ),
     );

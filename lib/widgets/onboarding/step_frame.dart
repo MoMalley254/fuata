@@ -10,27 +10,27 @@ import '../../ui/theme/app_typography.dart';
 class StepFrame extends StatelessWidget {
   const StepFrame({
     super.key,
+    this.hero,
     required this.title,
     this.subtitle,
     required this.child,
     required this.primaryLabel,
     required this.onPrimary,
-    required this.skipLabel,
-    required this.onSkip,
+    this.skipLabel,
+    this.onSkip,
   });
 
+  final Widget? hero;
   final String title;
   final String? subtitle;
   final Widget child;
-
   final String primaryLabel;
-
-  /// Null disables the primary button (e.g. nothing to confirm yet).
   final VoidCallback? onPrimary;
 
-  /// The skip link is always present: every step can be skipped.
-  final String skipLabel;
-  final VoidCallback onSkip;
+  /// Every onboarding step can be skipped except the welcome (F12); when
+  /// [skipLabel] is null the skip link is hidden.
+  final String? skipLabel;
+  final VoidCallback? onSkip;
 
   @override
   Widget build(BuildContext context) {
@@ -38,33 +38,58 @@ class StepFrame extends StatelessWidget {
     return Column(
       children: [
         Expanded(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.fromLTRB(
-              AppSpacing.margin,
-              AppSpacing.md,
-              AppSpacing.margin,
-              AppSpacing.md,
-            ),
-            keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: AppTypography.headlineLg.copyWith(color: c.onSurface),
-                ),
-                if (subtitle != null) ...[
-                  const SizedBox(height: AppSpacing.sm),
-                  Text(
-                    subtitle!,
-                    style: AppTypography.bodyLg.copyWith(
-                      color: c.onSurfaceVariant,
-                    ),
+          // F13: short content sits around 35–40% down the screen instead
+          // of leaving a hole above the buttons; long content still
+          // scrolls. Spacer(flex: 1) above and Spacer(flex: 2) below split
+          // the free space 1:2, which is what puts the content there.
+          //
+          // IntrinsicHeight gives the Column a bounded height so Spacer
+          // works inside a SingleChildScrollView (which would otherwise
+          // give it unbounded height, and Spacer would throw). This is the
+          // standard "footer in a scrollable" pattern and it stays
+          // keyboard-safe.
+          child: LayoutBuilder(
+            builder: (context, constraints) => SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(
+                AppSpacing.margin,
+                AppSpacing.md,
+                AppSpacing.margin,
+                AppSpacing.md,
+              ),
+              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+              child: ConstrainedBox(
+                constraints: BoxConstraints(minHeight: constraints.maxHeight),
+                child: IntrinsicHeight(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Spacer(flex: 1),
+                      if (hero != null) ...[
+                        hero!,
+                        const SizedBox(height: AppSpacing.md),
+                      ],
+                      Text(
+                        title,
+                        style: AppTypography.headlineLg.copyWith(
+                          color: c.onSurface,
+                        ),
+                      ),
+                      if (subtitle != null) ...[
+                        const SizedBox(height: AppSpacing.sm),
+                        Text(
+                          subtitle!,
+                          style: AppTypography.bodyLg.copyWith(
+                            color: c.onSurfaceVariant,
+                          ),
+                        ),
+                      ],
+                      const SizedBox(height: AppSpacing.lg),
+                      child,
+                      const Spacer(flex: 2),
+                    ],
                   ),
-                ],
-                const SizedBox(height: AppSpacing.lg),
-                child,
-              ],
+                ),
+              ),
             ),
           ),
         ),
@@ -85,8 +110,10 @@ class StepFrame extends StatelessWidget {
                   child: Text(primaryLabel),
                 ),
               ),
-              const SizedBox(height: AppSpacing.xs),
-              TextButton(onPressed: onSkip, child: Text(skipLabel)),
+              if (skipLabel != null && onSkip != null) ...[
+                const SizedBox(height: AppSpacing.xs),
+                TextButton(onPressed: onSkip, child: Text(skipLabel!)),
+              ],
             ],
           ),
         ),
