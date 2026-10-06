@@ -44,6 +44,10 @@ flutter test --coverage    # optional
 | L-10 | Edit or delete a transaction | Balance recomputes correctly (never stale) |
 | L-11 | Spending "today" across midnight boundary | Rows before/after local midnight land in the right day |
 | L-12 | Archived unit | Excluded from totals but history kept |
+| L-13 | Spending by day for the last 7 days | Oldest first, today last; seven entries always |
+| L-14 | Moved, adjustment and pending rows in the strip | All excluded |
+| L-15 | Custom day count (e.g. 3) | Length matches; oldest first |
+| L-16 | 23:59 vs 00:00 the next day | Each lands on its own day |
 
 ### Limit engine (US-04, US-06)
 | ID | Case | Expected |
@@ -188,6 +192,10 @@ Run against real drift repositories on an in-memory database (`test/domain/captu
 - [ ] Moved money does not change "spent today"
 - [ ] Editing and deleting a transaction updates balances immediately
 - [ ] Update balance creates an adjustment entry
+- [ ] Week peek toggle on → strip appears; off → gone (issue #82)
+- [ ] A day with no spending draws a short track, not nothing
+- [ ] The dashed limit line is drawn only when a daily limit exists
+- [ ] Tapping the strip opens Summary on the Week view
 
 ### Limits and status (US-04, US-06)
 - [ ] Setting a daily limit changes the Home hero card

@@ -111,6 +111,10 @@ class HomeState {
   final LimitRule? dailyLimit;
   final SpendStatus status;
   final List<MoneyTransaction> lately;
+  /// Spending for the last seven days, oldest first, today last (issue #82).
+  /// Minor units. Computed here rather than in the widget so the strip and
+  /// the summary it opens read from the same rule (Ledger.spentByDay).
+  final List<int> spentByDay;
 
   const HomeState({
     required this.units,
@@ -119,6 +123,7 @@ class HomeState {
     required this.dailyLimit,
     required this.status,
     required this.lately,
+    this.spentByDay = const [0, 0, 0, 0, 0, 0, 0],
   });
 
   static const empty = HomeState(
@@ -156,6 +161,7 @@ final homeStateProvider = Provider<AsyncValue<HomeState>>((ref) {
   final now = DateTime.now();
   final (start, end) = Ledger.todayRange(now);
   final spentToday = Ledger.spentInPeriod(transactions, start, end);
+  final spentByDay = Ledger.spentByDay(transactions, now: now);
 
   final dailyLimit = limits
       .where(
@@ -179,6 +185,7 @@ final homeStateProvider = Provider<AsyncValue<HomeState>>((ref) {
       dailyLimit: dailyLimit,
       status: status,
       lately: lately.take(3).toList(),
+      spentByDay: spentByDay
     ),
   );
 });
