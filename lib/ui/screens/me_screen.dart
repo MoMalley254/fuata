@@ -165,7 +165,7 @@ class MeScreen extends ConsumerWidget {
                   title: 'Message reading rules',
                   subtitle:
                       'Teach Fuata to read a bank or mobile-money message',
-                  onTap: () => context.push(Routes.ruleBuilderNewPath)
+                  onTap: () => context.push(Routes.ruleBuilderNewFor(null))
                 ),
                 const SizedBox(height: AppSpacing.sm),
                 ActionRow(

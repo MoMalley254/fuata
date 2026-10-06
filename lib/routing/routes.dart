@@ -42,6 +42,12 @@ class Routes {
   // ---- Helpers ----
   static String unitFor(String id) => '/unit/$id';
   static String manageRulesFor(String unitId) => '/unit/$unitId/rules';
+  /// `/rules/new`, optionally pre-set to one unit. The builder falls back
+  /// to the first unit if [unitId] is null, so `ruleBuilderNewFor(null)`
+  /// is the same as `ruleBuilderNewPath`.
+  static String ruleBuilderNewFor(String? unitId) => unitId == null
+      ? ruleBuilderNewPath
+      : '$ruleBuilderNewPath?unitId=${Uri.encodeQueryComponent(unitId)}';
 
   /// `/add`, optionally pinned to one unit. The sheet falls back to the
   /// first unit if [unitId] is null.
