@@ -255,9 +255,19 @@ class Greeting extends StatelessWidget {
             ),
           ],
         ),
-        CircleAvatar(
-          backgroundColor: c.surfaceContainerHigh,
-          child: Icon(Icons.person, color: c.onSurfaceVariant),
+        // The avatar is how you reach your profile now that name and
+        // accent live on their own screen (#79, F3). It's an IconButton
+        // rather than a bare CircleAvatar so the tap target is the full
+        // 48dp minimum and the tooltip gives it a name for screen
+        // readers — "Profile" rather than the icon's own "person", which
+        // reads the right word but the wrong meaning.
+        IconButton(
+          tooltip: 'Profile',
+          onPressed: () => context.push(Routes.profilePath),
+          icon: CircleAvatar(
+            backgroundColor: c.surfaceContainerHigh,
+            child: Icon(Icons.person, color: c.onSurfaceVariant),
+          ),
         ),
       ],
     );

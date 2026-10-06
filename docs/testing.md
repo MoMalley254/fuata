@@ -173,7 +173,7 @@ Run against real drift repositories on an in-memory database (`test/domain/captu
 - [x] Skipping every step lands on Home with no units, no limit, no banner, greeting "Hi there" (no name)
 - [x] Quitting mid-onboarding and reopening starts onboarding again; finishing it once never shows it again
 - [x] Units added in step 2 (with an opening balance) appear on Home and My money after finishing
-- [x] Daily limit set in step 3 shows on Home's hero card and in Me → Limits
+- [x] Daily limit set in step 3 shows on Home's hero card and in Settings → Limits & alerts
 - [x] Banner step preview uses the units and limit just entered; "Yes, show it" posts the banner after finishing (Android 13+: asks for notification permission then, not before)
 - [x] "Turn on" on the last step opens Auto-Catch on top of Home; "Set it up later" lands on Home
 - [x] An install upgraded from a build without onboarding does not see it; nor does a restore from backup on a fresh install
@@ -230,7 +230,7 @@ Run against real drift repositories on an in-memory database (`test/domain/captu
 - [ ] Revoke notification access: app detects it and warns; re-grant restores capture
 - [ ] Duplicate notification (same code) produces one transaction only
 - [ ] Banner updates when a captured transaction is confirmed
-- [ ] Me → Auto-catch lists installed apps; switching one on/off survives closing the app
+- [ ] Settings → Auto-catch lists installed apps; switching one on/off survives closing the app
 - [ ] Auto-catch shows "Access is on/off" correctly, and updates after coming back from Android's settings
 - [ ] **Open app on Home, then trigger an allow-listed notification: the pending item appears without restarting or switching tabs** (the background isolate writes through its own connection)
 - [ ] Same, with the app closed, then open it: the pending item is there
@@ -247,7 +247,7 @@ Run against real drift repositories on an in-memory database (`test/domain/captu
 - [ ] Simple, Balanced and Detailed levels show the intended fields only
 
 ### Data and privacy (US-15, US-16)
-- [ ] Me > Privacy & data > Back up & restore opens
+- [ ] Settings > Privacy & data > Back up & restore opens
 - [ ] Save opens the system file window suggesting `fuata-backup-YYYY-MM-DD.json`; the saved file opens as readable JSON in a text editor
 - [ ] Backing out of the file window shows no error
 - [ ] The saved file contains no original message text unless "Include original message text" was on
@@ -259,6 +259,7 @@ Run against real drift repositories on an in-memory database (`test/domain/captu
 - [ ] A backup opened from Downloads and from a cloud drive both import
 - [ ] Privacy screen states data stays on the phone
 - [ ] Amounts are hidden in the recents screen (if enabled)
+- [ ] Tapping the avatar on Today opens Profile; Settings contains no inline pickers
 
 ### Performance and robustness
 - [ ] With 5,000 seeded transactions: Home opens under 2 s; Activity scrolls smoothly
