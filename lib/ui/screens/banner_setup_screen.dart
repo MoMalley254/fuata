@@ -86,7 +86,7 @@ class _BannerSetupScreenState extends ConsumerState<BannerSetupScreen> {
       selectedUnitIds: s.bannerUnitIds,
       showProgress: s.bannerShowProgress,
       showQuickAdd: s.bannerShowQuickAdd,
-      redacted: _lockScreen && s.redactedLockScreenBanner,
+      redacted: s.amountsHidden || (_lockScreen && s.redactedLockScreenBanner),
     );
 
     final allUnits = s.bannerUnitIds.isEmpty;
