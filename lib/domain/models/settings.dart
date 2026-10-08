@@ -170,6 +170,16 @@ class AppSettings {
   // rows but no such key, and are read as true (see DriftSettingsRepository).
   final bool onboardingComplete;
 
+  /// Whether every amount the app shows is replaced by a mask (issue #81,
+  /// finding F7). Set by the eye on Today, My money and a unit page, and
+  /// by the toggle on Privacy & data.
+  ///
+  /// Deliberately separate from [amountsHiddenInRecents] (which blanks the
+  /// app switcher) and [redactedLockScreenBanner] (which redacts the posted
+  /// notification): three different places money could be seen, three
+  /// different switches.
+  final bool amountsHidden;
+
   const AppSettings({
     required this.name,
     required this.accent,
@@ -190,6 +200,7 @@ class AppSettings {
     this.quietStartMinute = 22 * 60,
     this.quietEndMinute = 7 * 60,
     this.onboardingComplete = false,
+    this.amountsHidden = false,
   });
 
   static final defaults = AppSettings(
@@ -212,6 +223,7 @@ class AppSettings {
     quietStartMinute: 22 * 60,
     quietEndMinute: 7 * 60,
     onboardingComplete: false,
+    amountsHidden: false,
   );
 
   AppSettings copyWith({
@@ -234,6 +246,7 @@ class AppSettings {
     int? quietStartMinute,
     int? quietEndMinute,
     bool? onboardingComplete,
+    bool? amountsHidden,
   }) {
     return AppSettings(
       name: name ?? this.name,
@@ -257,6 +270,7 @@ class AppSettings {
       quietStartMinute: quietStartMinute ?? this.quietStartMinute,
       quietEndMinute: quietEndMinute ?? this.quietEndMinute,
       onboardingComplete: onboardingComplete ?? this.onboardingComplete,
+      amountsHidden: amountsHidden ?? this.amountsHidden,
     );
   }
 }

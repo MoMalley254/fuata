@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../domain/models/limit_rule.dart';
 import '../../domain/models/unit.dart';
+import '../../ui/providers/app_providers.dart';
 import '../../ui/theme/app_colors.dart';
 import '../../ui/theme/app_spacing.dart';
 import '../../ui/theme/app_typography.dart';
@@ -12,13 +14,15 @@ import 'unit_limit_summary.dart';
 /// "More": limits for one money unit at a time (ui-design-brief.md 7.8,
 /// issue #63). Collapsed unless some unit already has a limit, so the
 /// simple Daily / Weekly / Monthly cards stay the whole story by default.
-class UnitLimitsSection extends StatelessWidget {
+class UnitLimitsSection extends ConsumerWidget {
   final List<MoneyUnit> units;
   final List<LimitRule> limits;
   const UnitLimitsSection({super.key, required this.units, required this.limits});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final hidden = ref.watch(currentSettingsProvider).amountsHidden;
+
     final c = context.colors;
     final active = units.where((u) => !u.archived).toList();
     if (active.isEmpty) return const SizedBox.shrink();
@@ -45,7 +49,7 @@ class UnitLimitsSection extends StatelessWidget {
             ActionRow(
               icon: Icons.tune_rounded,
               title: u.name,
-              subtitle: unitLimitSummary(limits, u),
+              subtitle: unitLimitSummary(limits, u, masked: hidden),
               onTap: () => showEditUnitLimitsSheet(unit: u),
             ),
             const SizedBox(height: AppSpacing.sm),

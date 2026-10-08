@@ -106,11 +106,9 @@ class DriftTransactionRepository implements TransactionRepository {
 
   @override
   Future<void> confirmTransaction(String transactionId) {
-    return (_db.update(
-      _db.transactions,
-    )..where((t) => t.id.equals(transactionId))).write(
-      TransactionsCompanion(status: Value(TxStatus.confirmed.name)),
-    );
+    return (_db.update(_db.transactions)
+          ..where((t) => t.id.equals(transactionId)))
+        .write(TransactionsCompanion(status: Value(TxStatus.confirmed.name)));
   }
 
   @override
@@ -127,9 +125,10 @@ class DriftLimitRepository implements LimitRepository {
 
   @override
   Stream<List<LimitRule>> watchLimits() {
-    return _db.select(_db.limitRules).watch().map(
-          (rows) => rows.map(limitRuleFromRow).toList(),
-    );
+    return _db
+        .select(_db.limitRules)
+        .watch()
+        .map((rows) => rows.map(limitRuleFromRow).toList());
   }
 
   @override
@@ -140,8 +139,9 @@ class DriftLimitRepository implements LimitRepository {
       // and the person should be nudged again as they approach 5,000).
       // Editing only the alert levels or the on/off switch keeps them, so
       // dragging a slider never repeats an alert the person already saw.
-      final existing = await (_db.select(_db.limitRules)
-        ..where((l) => l.id.equals(limit.id))).getSingleOrNull();
+      final existing = await (_db.select(
+        _db.limitRules,
+      )..where((l) => l.id.equals(limit.id))).getSingleOrNull();
       if (existing != null && existing.amountMinor != limit.amountMinor) {
         await _clearAlerts(limit.id);
       }
@@ -155,13 +155,15 @@ class DriftLimitRepository implements LimitRepository {
   Future<void> deleteLimit(String limitId) {
     return _db.transaction(() async {
       await _clearAlerts(limitId);
-      await (_db.delete(_db.limitRules)
-        ..where((l) => l.id.equals(limitId))).go();
+      await (_db.delete(
+        _db.limitRules,
+      )..where((l) => l.id.equals(limitId))).go();
     });
   }
 
-  Future<void> _clearAlerts(String limitId) => (_db.delete(_db.alertFirings)
-    ..where((f) => f.limitId.equals(limitId))).go();
+  Future<void> _clearAlerts(String limitId) => (_db.delete(
+    _db.alertFirings,
+  )..where((f) => f.limitId.equals(limitId))).go();
 }
 
 class DriftAlertLogRepository implements AlertLogRepository {
@@ -177,7 +179,7 @@ class DriftAlertLogRepository implements AlertLogRepository {
           r.limitId,
           r.periodKey,
           AlertLevel.values.firstWhere(
-                (l) => l.name == r.level,
+            (l) => l.name == r.level,
             orElse: () => AlertLevel.warning,
           ),
         ),
@@ -192,14 +194,16 @@ class DriftAlertLogRepository implements AlertLogRepository {
       // isolate that loses gets an exception here, and "could not record
       // it" is treated as "do not show it" — a missed nudge is better
       // than one that repeats forever because it can't be remembered.
-      await _db.into(_db.alertFirings).insert(
-        AlertFiringsCompanion.insert(
-          limitId: key.limitId,
-          periodKey: key.periodKey,
-          level: key.level.name,
-          firedAt: at,
-        ),
-      );
+      await _db
+          .into(_db.alertFirings)
+          .insert(
+            AlertFiringsCompanion.insert(
+              limitId: key.limitId,
+              periodKey: key.periodKey,
+              level: key.level.name,
+              firedAt: at,
+            ),
+          );
       return true;
     } catch (_) {
       return false;
@@ -207,8 +211,9 @@ class DriftAlertLogRepository implements AlertLogRepository {
   }
 
   @override
-  Future<void> purgeBefore(DateTime cutoff) => (_db.delete(_db.alertFirings)
-    ..where((f) => f.firedAt.isSmallerThanValue(cutoff))).go();
+  Future<void> purgeBefore(DateTime cutoff) => (_db.delete(
+    _db.alertFirings,
+  )..where((f) => f.firedAt.isSmallerThanValue(cutoff))).go();
 }
 
 /// Settings are stored as key/value rows (design.md), so this repository
@@ -241,6 +246,8 @@ class DriftSettingsRepository implements SettingsRepository {
 
   static const _kOnboardingComplete = 'onboardingComplete';
 
+  static const _kHideAmounts = 'amountsHidden'; // issue #81
+
   @override
   Stream<AppSettings> watchSettings() {
     return _db.select(_db.settingsEntries).watch().map(_toSettings);
@@ -265,7 +272,10 @@ class DriftSettingsRepository implements SettingsRepository {
         key: _kAccent,
         value: s.accent.toARGB32().toString(),
       ),
-      SettingsEntriesCompanion.insert(key: _kThemeMode, value: s.themeMode.name),
+      SettingsEntriesCompanion.insert(
+        key: _kThemeMode,
+        value: s.themeMode.name,
+      ),
       SettingsEntriesCompanion.insert(
         key: _kHomeHeadline,
         value: s.homeHeadline.name,
@@ -291,25 +301,49 @@ class DriftSettingsRepository implements SettingsRepository {
         value: s.autoAcceptCaptures.toString(),
       ),
       SettingsEntriesCompanion.insert(
-          key: _kBannerEnabled, value: s.bannerEnabled.toString()),
+        key: _kBannerEnabled,
+        value: s.bannerEnabled.toString(),
+      ),
       SettingsEntriesCompanion.insert(
-          key: _kBannerHeadline, value: s.bannerHeadline.name),
+        key: _kBannerHeadline,
+        value: s.bannerHeadline.name,
+      ),
       SettingsEntriesCompanion.insert(
-          key: _kBannerUnitIds, value: s.bannerUnitIds.join(',')),
+        key: _kBannerUnitIds,
+        value: s.bannerUnitIds.join(','),
+      ),
       SettingsEntriesCompanion.insert(
-          key: _kBannerProgress, value: s.bannerShowProgress.toString()),
+        key: _kBannerProgress,
+        value: s.bannerShowProgress.toString(),
+      ),
       SettingsEntriesCompanion.insert(
-          key: _kBannerQuickAdd, value: s.bannerShowQuickAdd.toString()),
+        key: _kBannerQuickAdd,
+        value: s.bannerShowQuickAdd.toString(),
+      ),
       SettingsEntriesCompanion.insert(
-          key: _kAlertsEnabled, value: s.alertsEnabled.toString()),
+        key: _kAlertsEnabled,
+        value: s.alertsEnabled.toString(),
+      ),
       SettingsEntriesCompanion.insert(
-          key: _kQuietEnabled, value: s.quietHoursEnabled.toString()),
+        key: _kQuietEnabled,
+        value: s.quietHoursEnabled.toString(),
+      ),
       SettingsEntriesCompanion.insert(
-          key: _kQuietStart, value: s.quietStartMinute.toString()),
+        key: _kQuietStart,
+        value: s.quietStartMinute.toString(),
+      ),
       SettingsEntriesCompanion.insert(
-          key: _kQuietEnd, value: s.quietEndMinute.toString()),
+        key: _kQuietEnd,
+        value: s.quietEndMinute.toString(),
+      ),
       SettingsEntriesCompanion.insert(
-          key: _kOnboardingComplete, value: s.onboardingComplete.toString()),
+        key: _kOnboardingComplete,
+        value: s.onboardingComplete.toString(),
+      ),
+      SettingsEntriesCompanion.insert(
+        key: _kHideAmounts,
+        value: s.amountsHidden.toString(),
+      ),
     ];
   }
 
@@ -344,22 +378,27 @@ class DriftSettingsRepository implements SettingsRepository {
       accent: map[_kAccent] != null
           ? Color(int.parse(map[_kAccent]!))
           : defaults.accent,
-      themeMode: byName(map[_kThemeMode], AppThemeMode.values, defaults.themeMode),
+      themeMode: byName(
+        map[_kThemeMode],
+        AppThemeMode.values,
+        defaults.themeMode,
+      ),
       homeHeadline: byName(
         map[_kHomeHeadline],
         HomeHeadline.values,
         defaults.homeHeadline,
       ),
-      homeSections: map[_kHomeSections] != null && map[_kHomeSections]!.isNotEmpty
+      homeSections:
+          map[_kHomeSections] != null && map[_kHomeSections]!.isNotEmpty
           ? map[_kHomeSections]!
-          .split(',')
-          .map(
-            (n) => HomeSection.values.firstWhere(
-              (v) => v.name == n,
-          orElse: () => HomeSection.units,
-        ),
-      )
-          .toSet()
+                .split(',')
+                .map(
+                  (n) => HomeSection.values.firstWhere(
+                    (v) => v.name == n,
+                    orElse: () => HomeSection.units,
+                  ),
+                )
+                .toSet()
           : defaults.homeSections,
       detailLevel: byName(
         map[_kDetailLevel],
@@ -380,24 +419,34 @@ class DriftSettingsRepository implements SettingsRepository {
       ),
       bannerEnabled: boolOr(map[_kBannerEnabled], defaults.bannerEnabled),
       bannerHeadline: byName(
-          map[_kBannerHeadline], BannerHeadline.values, defaults.bannerHeadline),
+        map[_kBannerHeadline],
+        BannerHeadline.values,
+        defaults.bannerHeadline,
+      ),
       bannerUnitIds: (map[_kBannerUnitIds] ?? '').isEmpty
           ? <String>{}
           : map[_kBannerUnitIds]!.split(',').toSet(),
-      bannerShowProgress:
-      boolOr(map[_kBannerProgress], defaults.bannerShowProgress),
-      bannerShowQuickAdd:
-      boolOr(map[_kBannerQuickAdd], defaults.bannerShowQuickAdd),
+      bannerShowProgress: boolOr(
+        map[_kBannerProgress],
+        defaults.bannerShowProgress,
+      ),
+      bannerShowQuickAdd: boolOr(
+        map[_kBannerQuickAdd],
+        defaults.bannerShowQuickAdd,
+      ),
       alertsEnabled: boolOr(map[_kAlertsEnabled], defaults.alertsEnabled),
-      quietHoursEnabled:
-      boolOr(map[_kQuietEnabled], defaults.quietHoursEnabled),
-      quietStartMinute:
-      minuteOr(map[_kQuietStart], defaults.quietStartMinute),
+      quietHoursEnabled: boolOr(
+        map[_kQuietEnabled],
+        defaults.quietHoursEnabled,
+      ),
+      quietStartMinute: minuteOr(map[_kQuietStart], defaults.quietStartMinute),
       quietEndMinute: minuteOr(map[_kQuietEnd], defaults.quietEndMinute),
       // Rows exist but carry no onboarding key: this install predates #7
       // (or was restored from a backup), so the person has already been
       // through setup. Only a truly empty table (above) means "first run".
       onboardingComplete: boolOr(map[_kOnboardingComplete], true),
+      //#81 — default is "not hidden".
+      amountsHidden: boolOr(map[_kHideAmounts], defaults.amountsHidden),
     );
   }
 }
@@ -444,7 +493,7 @@ class DriftCaptureRepository implements CaptureRepository {
     final query = _db.select(_db.unparsedCaptures)
       ..orderBy([(u) => OrderingTerm.desc(u.receivedAt)]);
     return query.watch().map(
-          (rows) => rows.map(unparsedCaptureFromRow).toList(),
+      (rows) => rows.map(unparsedCaptureFromRow).toList(),
     );
   }
 
@@ -455,33 +504,36 @@ class DriftCaptureRepository implements CaptureRepository {
     required String rawText,
   }) {
     return _db.transaction(() async {
-      await _db.into(_db.unparsedCaptures).insert(
-        UnparsedCapturesCompanion.insert(
-          id: id,
-          receivedAt: DateTime.now().toUtc(),
-          sourcePackage: sourcePackage,
-          rawText: rawText,
-        ),
-      );
+      await _db
+          .into(_db.unparsedCaptures)
+          .insert(
+            UnparsedCapturesCompanion.insert(
+              id: id,
+              receivedAt: DateTime.now().toUtc(),
+              sourcePackage: sourcePackage,
+              rawText: rawText,
+            ),
+          );
       // Time-based purge (issue #74): 14 days, matching the copy on the
       // review inbox.
       final cutoff = DateTime.now().toUtc().subtract(unparsedCaptureRetention);
-      await (_db.delete(_db.unparsedCaptures)
-        ..where((u) => u.receivedAt.isSmallerThanValue(cutoff)))
-          .go();
+      await (_db.delete(
+        _db.unparsedCaptures,
+      )..where((u) => u.receivedAt.isSmallerThanValue(cutoff))).go();
 
       // Size cap: keep only the newest N by receivedAt. A busy phone with
       // an unfamiliar bank format could otherwise grow this without bound
       // until the time purge catches up.
-      final keepIds = await (_db.selectOnly(_db.unparsedCaptures)
-        ..addColumns([_db.unparsedCaptures.id])
-        ..orderBy([OrderingTerm.desc(_db.unparsedCaptures.receivedAt)])
-        ..limit(unparsedCaptureCap))
-          .map((row) => row.read(_db.unparsedCaptures.id)!)
-          .get();
-      await (_db.delete(_db.unparsedCaptures)
-        ..where((u) => u.id.isNotIn(keepIds)))
-          .go();
+      final keepIds =
+          await (_db.selectOnly(_db.unparsedCaptures)
+                ..addColumns([_db.unparsedCaptures.id])
+                ..orderBy([OrderingTerm.desc(_db.unparsedCaptures.receivedAt)])
+                ..limit(unparsedCaptureCap))
+              .map((row) => row.read(_db.unparsedCaptures.id)!)
+              .get();
+      await (_db.delete(
+        _db.unparsedCaptures,
+      )..where((u) => u.id.isNotIn(keepIds))).go();
     });
   }
 
@@ -492,6 +544,7 @@ class DriftCaptureRepository implements CaptureRepository {
     )..where((u) => u.id.equals(captureId))).go();
   }
 }
+
 /// The notification allow-list (#22). `insertOnConflictUpdate` is an
 /// `INSERT ... ON CONFLICT DO UPDATE`, not a delete-and-insert, so saving
 /// a source that a template already points at can't trip the foreign key.

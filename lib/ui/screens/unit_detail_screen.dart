@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:fuata/domain/logic/ledger.dart';
+import 'package:fuata/widgets/personalization/amount_visibility_toggle.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
@@ -10,6 +11,7 @@ import '../../domain/models/unit.dart';
 import '../../routing/routes.dart';
 import '../../widgets/activity/empty_activity.dart';
 import '../../widgets/activity/grouped_list.dart';
+import '../../widgets/amount_text.dart';
 import '../../widgets/limits/unit_limit_summary.dart';
 import '../../widgets/personalization/action_row.dart';
 import '../../widgets/sheets/edit_unit_limits_sheet.dart';
@@ -83,6 +85,7 @@ class UnitDetailScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final c = context.colors;
+    final hidden = ref.watch(currentSettingsProvider).amountsHidden;
     final unitsAsync = ref.watch(allUnitsProvider);
     final txAsync = ref.watch(transactionsProvider);
 
@@ -119,6 +122,7 @@ class UnitDetailScreen extends ConsumerWidget {
               appBar: AppBar(
                 title: Text(unit.name),
                 actions: [
+                  const AmountVisibilityToggle(),
                   if (!unit.archived)
                     IconButton(
                       tooltip: 'Edit',
@@ -229,8 +233,9 @@ class UnitDetailScreen extends ConsumerWidget {
                             ],
                           ),
                           const SizedBox(height: AppSpacing.sm),
-                          Text(
-                            Money(balance, unit.currencyCode).format(),
+                          AmountText(
+                            minor: balance,
+                            currencyCode: unit.currencyCode,
                             style: AppTypography.displayHeroMobile.copyWith(
                               color: c.onSurface,
                             ),
@@ -267,6 +272,7 @@ class UnitDetailScreen extends ConsumerWidget {
                       subtitle: unitLimitSummary(
                         ref.watch(limitsProvider).value ?? const <LimitRule>[],
                         unit,
+                        masked: hidden
                       ),
                       onTap: () => showEditUnitLimitsSheet(unit: unit),
                     ),

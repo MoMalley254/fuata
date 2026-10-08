@@ -13,12 +13,17 @@ Map<LimitPeriod, LimitRule> unitLimitsFor(
 
 /// "Daily KES 500 · Monthly KES 8,000", or "No limit set". Shared by the
 /// Limits screen's "More" list and the unit page's limit row.
-String unitLimitSummary(Iterable<LimitRule> limits, MoneyUnit unit) {
+String unitLimitSummary(
+    Iterable<LimitRule> limits,
+    MoneyUnit unit, {
+      bool masked = false,
+    }) {
   final byPeriod = unitLimitsFor(limits, unit.id);
   final parts = <String>[
     for (final p in LimitPeriod.values)
       if (byPeriod[p] case final r?)
-        '${_label(p)} ${Money(r.amountMinor, r.currencyCode).format()}'
+        '${_label(p)} '
+            '${masked ? kHiddenAmountMask : Money(r.amountMinor, r.currencyCode).format()}'
             '${r.enabled ? '' : ' (paused)'}',
   ];
   return parts.isEmpty ? 'No limit set' : parts.join(' · ');

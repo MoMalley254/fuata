@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../domain/logic/summary.dart';
+import '../../ui/providers/app_providers.dart';
 import '../../ui/theme/app_colors.dart';
 import '../../ui/theme/app_spacing.dart';
 import '../../ui/theme/app_typography.dart';
@@ -9,7 +11,7 @@ import 'summary_card.dart';
 /// "Spent vs Got" as a simple two-bar comparison (ui-design-brief.md
 /// 7.11). One idea: which is bigger. Each bar is labelled with its
 /// amount, so the meaning never rests on colour alone.
-class SpentGotCard extends StatelessWidget {
+class SpentGotCard extends ConsumerWidget {
   const SpentGotCard({
     super.key,
     required this.spentMinor,
@@ -22,10 +24,12 @@ class SpentGotCard extends StatelessWidget {
   final String currencyCode;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final c = context.colors;
     final biggest = spentMinor > gotMinor ? spentMinor : gotMinor;
     double share(int v) => biggest <= 0 ? 0 : v / biggest;
+
+    final hidden = ref.watch(currentSettingsProvider).amountsHidden;
 
     return SummaryCard(
       title: 'Spent and got',
@@ -33,14 +37,14 @@ class SpentGotCard extends StatelessWidget {
         children: [
           _BarRow(
             label: 'Spent',
-            amount: friendlyMoney(spentMinor, currencyCode),
+            amount: friendlyMoney(spentMinor, currencyCode, masked: hidden),
             fraction: share(spentMinor),
             color: c.primary,
           ),
           const SizedBox(height: AppSpacing.md),
           _BarRow(
             label: 'Got',
-            amount: friendlyMoney(gotMinor, currencyCode),
+            amount: friendlyMoney(gotMinor, currencyCode, masked: hidden),
             fraction: share(gotMinor),
             color: c.statusSafe,
           ),

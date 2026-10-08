@@ -182,7 +182,7 @@ class _AlertLevelsCardState extends ConsumerState<AlertLevelsCard> {
       selectedUnitIds: settings.bannerUnitIds,
       showProgress: settings.bannerShowProgress,
       showQuickAdd: settings.bannerShowQuickAdd,
-      redacted: false,
+      redacted: settings.amountsHidden,
     );
 
     final level = AlertEngine.levelFor(limit, spent);
@@ -204,7 +204,9 @@ class _AlertLevelsCardState extends ConsumerState<AlertLevelsCard> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          "Try it: if I've spent ${Money(spent, limit.currencyCode).format()} today",
+          "Try it: if I've spent "
+              '${settings.amountsHidden ? kHiddenAmountMask : Money(spent, limit.currencyCode).format()} '
+              'today',
           style: AppTypography.labelMd.copyWith(color: c.onSurfaceVariant),
         ),
         Slider(

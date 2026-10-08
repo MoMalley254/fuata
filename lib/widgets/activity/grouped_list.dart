@@ -8,6 +8,7 @@ import '../../domain/models/unit.dart';
 import '../../ui/theme/app_colors.dart';
 import '../../ui/theme/app_spacing.dart';
 import '../../ui/theme/app_typography.dart';
+import '../amount_text.dart';
 import '../sheets/transaction_detail_sheet.dart';
 import '../transaction_row.dart';
 
@@ -71,10 +72,14 @@ class GroupedList extends StatelessWidget {
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     Text(_dayHeader(day), style: AppTypography.labelMd.copyWith(color: context.colors.onSurfaceVariant)),
-                    Text(
-                      Money(netMinor, currency).format(showSign: true),
+                    AmountText(
+                      minor: netMinor,
+                      currencyCode: currency,
+                      showSign: true,
                       style: AppTypography.labelSm.copyWith(
-                        color: netMinor >= 0 ? context.colors.statusSafe : context.colors.onSurfaceVariant,
+                        color: netMinor >= 0
+                            ? context.colors.statusSafe
+                            : context.colors.onSurfaceVariant,
                       ),
                     ),
                   ],

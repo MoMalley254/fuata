@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:fuata/ui/providers/app_providers.dart';
 
 import '../../domain/logic/summary.dart';
 import '../../ui/theme/app_colors.dart';
@@ -8,7 +10,7 @@ import 'summary_card.dart';
 
 /// "Where it went" / "Where it came from": the top few, with "See all"
 /// for the rest (ui-design-brief.md 7.11).
-class RankedListCard extends StatefulWidget {
+class RankedListCard extends ConsumerStatefulWidget {
   const RankedListCard({
     super.key,
     required this.title,
@@ -25,10 +27,10 @@ class RankedListCard extends StatefulWidget {
   final int previewCount;
 
   @override
-  State<RankedListCard> createState() => _RankedListCardState();
+  ConsumerState<RankedListCard> createState() => _RankedListCardState();
 }
 
-class _RankedListCardState extends State<RankedListCard> {
+class _RankedListCardState extends ConsumerState<RankedListCard> {
   bool _showAll = false;
 
   @override
@@ -36,6 +38,7 @@ class _RankedListCardState extends State<RankedListCard> {
     final c = context.colors;
     final items = widget.items;
     final shown = _showAll ? items : items.take(widget.previewCount).toList();
+    final hidden = ref.watch(currentSettingsProvider).amountsHidden;
 
     return SummaryCard(
       title: widget.title,
@@ -74,7 +77,7 @@ class _RankedListCardState extends State<RankedListCard> {
                         ),
                         const SizedBox(width: AppSpacing.sm),
                         Text(
-                          friendlyMoney(item.minor, widget.currencyCode),
+                          friendlyMoney(item.minor, widget.currencyCode, masked: hidden),
                           style: AppTypography.labelLg.copyWith(
                             color: c.onSurface,
                           ),

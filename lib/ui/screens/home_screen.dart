@@ -8,7 +8,9 @@ import '../../domain/models/money.dart';
 import '../../domain/models/settings.dart';
 import '../../routing/routes.dart';
 import '../../widgets/activity/grouped_list.dart';
+import '../../widgets/amount_text.dart';
 import '../../widgets/home/week_peek.dart';
+import '../../widgets/personalization/amount_visibility_toggle.dart';
 import '../../widgets/sheets/add_transaction_sheet.dart';
 import '../../widgets/sheets/edit_unit_sheet.dart';
 import 'summary_screen.dart';
@@ -359,8 +361,9 @@ class HeroSection extends StatelessWidget {
               style: AppTypography.bodyMd.copyWith(color: c.onSurfaceVariant),
             ),
             const SizedBox(height: AppSpacing.xs),
-            Text(
-              Money(amountMinor, currency).format(),
+            AmountText(
+              minor: amountMinor,
+              currencyCode: currency,
               style: AppTypography.displayHeroMobile.copyWith(
                 color: c.onSurface,
               ),

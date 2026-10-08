@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:fuata/ui/providers/app_providers.dart';
+import 'package:fuata/widgets/personalization/amount_visibility_toggle.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../domain/models/money.dart';
 import '../../routing/routes.dart';
+import '../../widgets/amount_text.dart';
 import '../../widgets/sheets/edit_unit_sheet.dart';
 import '../../widgets/unit_list_tile.dart';
 import '../theme/app_colors.dart';
@@ -22,12 +24,12 @@ class MyMoneyScreen extends ConsumerStatefulWidget {
 }
 
 class _MyMoneyScreenState extends ConsumerState<MyMoneyScreen> {
-  bool _hidden = false;
 
   @override
   Widget build(BuildContext context) {
     final homeAsync = ref.watch(homeStateProvider);
     final archivedCount = ref.watch(archivedUnitsProvider).length;
+    final hidden = ref.watch(currentSettingsProvider).amountsHidden;
     final c = context.colors;
 
     return Scaffold(
@@ -38,6 +40,7 @@ class _MyMoneyScreenState extends ConsumerState<MyMoneyScreen> {
               onPressed: () => showEditUnitSheet(context),
               icon: Icon(Icons.add)
           ),
+          const AmountVisibilityToggle(),
           // Only shown when there is something to show. The count lives in the
           // menu item rather than on the app bar itself, so a person isn't
           // nagged by a badge for units they deliberately put away.
@@ -94,23 +97,16 @@ class _MyMoneyScreenState extends ConsumerState<MyMoneyScreen> {
                             color: c.onSurfaceVariant,
                           ),
                         ),
-                        Text(
-                          _hidden ? '•••••' : Money(total, currency).format(),
+                        AmountText(
+                          minor: total,
+                          currencyCode: currency,
                           style: AppTypography.displayHeroMobile.copyWith(
                             color: c.onSurface,
                           ),
                         ),
                       ],
                     ),
-                    IconButton(
-                      onPressed: () => setState(() => _hidden = !_hidden),
-                      icon: Icon(
-                        _hidden
-                            ? Icons.visibility_off_rounded
-                            : Icons.visibility_rounded,
-                        color: c.onSurfaceVariant,
-                      ),
-                    ),
+                    AmountVisibilityToggle(),
                   ],
                 ),
                 const SizedBox(height: AppSpacing.lg),
@@ -124,7 +120,7 @@ class _MyMoneyScreenState extends ConsumerState<MyMoneyScreen> {
                       unit.currencyCode,
                     ).format(),
                     lastVerifiedAt: unit.lastVerifiedAt,
-                    hideAmount: _hidden,
+                    hideAmount: hidden,
                     onTap: () => context.push(Routes.unitFor(unit.id)),
                   ),
                   const SizedBox(height: AppSpacing.sm),

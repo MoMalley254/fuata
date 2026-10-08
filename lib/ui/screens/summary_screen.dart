@@ -34,6 +34,7 @@ class _SummaryScreenState extends ConsumerState<SummaryScreen> {
     final summaryAsync = ref.watch(summaryProvider(_period));
     final units = ref.watch(unitsProvider).value ?? const <MoneyUnit>[];
     final unitById = {for (final u in units) u.id: u};
+    final hidden = ref.watch(currentSettingsProvider).amountsHidden;
 
     return Scaffold(
       appBar: AppBar(
@@ -70,7 +71,7 @@ class _SummaryScreenState extends ConsumerState<SummaryScreen> {
                 ),
               ],
               error: (e, st) => [Text('Something went wrong: $e')],
-              data: (data) => _cards(context, data, unitById),
+              data: (data) => _cards(context, data, unitById, hidden),
             ),
           ],
         ),
@@ -78,7 +79,7 @@ class _SummaryScreenState extends ConsumerState<SummaryScreen> {
     );
   }
 
-  List<Widget> _cards(BuildContext context, SummaryData data, Map<String, MoneyUnit> unitById) {
+  List<Widget> _cards(BuildContext context, SummaryData data, Map<String, MoneyUnit> unitById, bool hidden) {
     final c = context.colors;
     final s = data.summary;
     final cc = data.currencyCode;
@@ -96,7 +97,7 @@ class _SummaryScreenState extends ConsumerState<SummaryScreen> {
             const SizedBox(width: AppSpacing.md),
             Expanded(
               child: Text(
-                s.story(cc),
+                s.story(cc, masked: hidden),
                 style: AppTypography.bodyLg.copyWith(color: c.onSurface),
               ),
             ),
