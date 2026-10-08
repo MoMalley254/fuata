@@ -117,4 +117,16 @@ abstract class BackupRepository {
   /// write (see ImportPlan.recordsToWrite); this never decides to
   /// overwrite anything on its own.
   Future<void> apply(BackupSnapshot records, {AppSettings? settings});
+
+  /// Wipes everything Fuata has stored on this phone (US-16's "Erase
+  /// everything", issue #85): every record table, the alert log and the
+  /// settings, in one transaction.
+  ///
+  /// Saved backup *files* are deliberately not touched — they live wherever
+  /// the person put them, and Fuata has no list of where (ADR-011).
+  ///
+  /// This can only reach the database. The caller also has to cancel the
+  /// posted banner, clear the native allow-list mirror and clear the
+  /// home-widget snapshot — see [DriftBackupRepository.eraseAll]'s callers.
+  Future<void> eraseAll();
 }
