@@ -270,6 +270,18 @@ limit id + period key + level is the atomic claim described in §5.4).
 - **Stable identities:** limits and watched apps are identified by what they are (`LimitRule.idFor`, `CaptureSource.idFor`), so a file with different ids is tidied to match rather than creating a second limit for the same slot.
 - **Consequences:** import never deletes (see testing.md, known limitations). The file is unencrypted (ADR-010).
 
+- **Erase everything (#85, US-16):** `BackupRepository.eraseAll()` deletes
+  every table and the settings in one transaction. The empty settings table
+  is read as "fresh install" by `DriftSettingsRepository`, which is what
+  brings `onboardingComplete` back to false and sends the person through
+  onboarding — the same landing an install with no data would get.
+  Everything outside the database is the caller's job, because the
+  repository can't reach it: cancel the posted banner, clear the native
+  allow-list mirror so the listener discards from here on, and clear the
+  home-widget snapshot. **Saved backup files are never touched** — Fuata
+  only ever wrote them where the person picked, and has no list of where
+  those were.
+
 ## 5. Open items
 
 | Item | Status |
