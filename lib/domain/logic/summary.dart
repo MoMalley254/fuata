@@ -51,7 +51,12 @@ class UnitTotal {
 
 /// "KSh 8,420" — whole amounts drop the ".00" so a story reads like a
 /// sentence. Display only; nothing is computed from the string.
-String friendlyMoney(int minor, String currencyCode) {
+String friendlyMoney(
+    int minor,
+    String currencyCode, {
+      bool masked = false,
+    }) {
+  if (masked) return kHiddenAmountMask;
   var text = Money(minor, currencyCode).format();
   if (text.endsWith('.00')) text = text.substring(0, text.length - 3);
   return '${currencySymbol(currencyCode)}$text';
@@ -205,18 +210,19 @@ bool Function(MoneyTransaction)? include,}) {
   /// The story card's copy (ui-design-brief.md 7.11): plain sentences,
   /// never guilt. Example: "This week you spent KSh 8,420. Java House was
   /// your top spot. A bit more than last week."
-  String story(String currencyCode) {
+  String story(String currencyCode, {bool masked = false}) {
     final when = period.thisWord;
 
     if (!hasActivity) return 'Nothing recorded $when yet.';
 
     if (spentMinor == 0) {
       return "You haven't spent anything $when, and "
-          '${friendlyMoney(gotMinor, currencyCode)} came in.';
+          '${friendlyMoney(gotMinor, currencyCode, masked: masked)} came in.';
     }
 
     final sentences = <String>[
-      '${_capitalise(when)} you spent ${friendlyMoney(spentMinor, currencyCode)}.',
+      '${_capitalise(when)} you spent '
+          '${friendlyMoney(spentMinor, currencyCode, masked: masked)}.',
       if (spentTo.isNotEmpty) '${spentTo.first.label} was your top spot.',
       ?_comparison(),
     ];

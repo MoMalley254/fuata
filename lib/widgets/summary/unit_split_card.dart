@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../domain/logic/summary.dart';
 import '../../domain/models/unit.dart';
+import '../../ui/providers/app_providers.dart';
 import '../../ui/theme/app_colors.dart';
 import '../../ui/theme/app_spacing.dart';
 import '../../ui/theme/app_typography.dart';
@@ -10,7 +12,7 @@ import 'summary_card.dart';
 /// Where the spending came from, as one soft stacked bar plus a legend
 /// (ui-design-brief.md 7.11). The legend carries every figure, so the
 /// bar's colours are decoration, not the only signal.
-class UnitSplitCard extends StatelessWidget {
+class UnitSplitCard extends ConsumerWidget {
   const UnitSplitCard({
     super.key,
     required this.shares,
@@ -25,7 +27,8 @@ class UnitSplitCard extends StatelessWidget {
   final String currencyCode;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final hidden = ref.watch(currentSettingsProvider).amountsHidden;
     final c = context.colors;
 
     // An archived unit is not in the live list but its spending still
@@ -87,8 +90,8 @@ class UnitSplitCard extends StatelessWidget {
                   ),
                   const SizedBox(width: AppSpacing.sm),
                   Text(
-                    '${friendlyMoney(s.minor, currencyCode)} · '
-                    '${totalMinor <= 0 ? 0 : (s.minor * 100 / totalMinor).round()}%',
+                    '${friendlyMoney(s.minor, currencyCode, masked: hidden)} · '
+                        '${totalMinor <= 0 ? 0 : (s.minor * 100 / totalMinor).round()}%',
                     style: AppTypography.bodySm.copyWith(
                       color: c.onSurfaceVariant,
                     ),
