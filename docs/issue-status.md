@@ -1,4 +1,4 @@
-# Issue status (generated 2026-10-08T14:46Z)
+# Issue status (generated 2026-10-08T17:44Z)
 
 Source of truth: GitHub. Regenerate with `scripts/refresh-issue-status.sh`.
 
@@ -10,7 +10,7 @@ Source of truth: GitHub. Regenerate with `scripts/refresh-issue-status.sh`.
 | #84 | OPEN | v0.1 MVP | feat(privacy): FLAG_SECURE for Recents |
 | #83 | OPEN | v0.1 MVP | feat(categories): rename and add categories |
 | #82 | CLOSED | v0.1 MVP | feat(ui): Week Peek home widget |
-| #81 | OPEN | v0.1 MVP | feat(privacy): global hide amounts switch |
+| #81 | CLOSED | v0.1 MVP | feat(privacy): global hide amounts switch |
 | #80 | CLOSED | v0.1 MVP | feat(units): archived units screen and unarchive |
 | #79 | CLOSED | v0.1 MVP | refactor(ui): split Profile out of Me |
 | #78 | CLOSED | v0.1 MVP | feat(permissions): apps-to-watch explainer |
