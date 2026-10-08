@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:fuata/widgets/dialogs/show_erase_everything_dialog.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../domain/models/settings.dart';
@@ -39,6 +40,7 @@ class PrivacyDataScreen extends ConsumerWidget {
               settings: settings,
               onChanged: update,
               onOpenBackup: () => context.push(Routes.backupPath),
+              onErase: () => eraseAllData(ref),
             ),
           ],
         ),
