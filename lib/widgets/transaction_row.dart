@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:fuata/ui/providers/app_providers.dart';
 
+import '../domain/models/money.dart';
 import '../ui/theme/app_colors.dart';
 import '../ui/theme/app_spacing.dart';
 import '../ui/theme/app_typography.dart';
 
-class TransactionRow extends StatelessWidget {
+class TransactionRow extends ConsumerWidget {
   const TransactionRow({
     super.key,
     required this.title,
@@ -25,10 +28,11 @@ class TransactionRow extends StatelessWidget {
   bool get _isInflow => amount >= 0;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final c = context.colors;
     final a = accent ?? c.primary;
     final amountColor = _isInflow ? c.statusSafe : c.onSurface;
+    final hidden = ref.watch(currentSettingsProvider).amountsHidden;
 
     return Material(
       color: Colors.transparent,
@@ -76,7 +80,9 @@ class TransactionRow extends StatelessWidget {
               ),
               const SizedBox(width: AppSpacing.sm),
               Text(
-                '${_isInflow ? '+' : '-'}${_fmt(amount.abs())}',
+                hidden
+                    ? kHiddenAmountMask
+                    : '${_isInflow ? '+' : '-'}${_fmt(amount.abs())}',
                 style: AppTypography.labelLg.copyWith(
                   color: amountColor,
                   fontFeatures: AppTypography.numericKeypad.fontFeatures,

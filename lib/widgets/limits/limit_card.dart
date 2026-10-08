@@ -1,12 +1,14 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../domain/models/limit_rule.dart';
 import '../../domain/models/money.dart';
+import '../../ui/providers/app_providers.dart';
 import '../../ui/theme/app_colors.dart';
 import '../../ui/theme/app_spacing.dart';
 import '../../ui/theme/app_typography.dart';
 
-class LimitCard extends StatelessWidget {
+class LimitCard extends ConsumerWidget {
   final LimitPeriod period;
   final LimitRule? limit;
   final String currencyCode;
@@ -35,12 +37,14 @@ class LimitCard extends StatelessWidget {
   };
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final c = context.colors;
+    final hidden = ref.watch(currentSettingsProvider).amountsHidden;
+
     final l = limit;
     final subtitle = l == null
         ? 'Not set · $_blurb'
-        : '${Money(l.amountMinor, currencyCode).format()} · '
+        : '${hidden ? kHiddenAmountMask : Money(l.amountMinor, currencyCode).format()} · '
         '${l.enabled ? _blurb.toLowerCase() : 'Paused'}';
 
     return Material(

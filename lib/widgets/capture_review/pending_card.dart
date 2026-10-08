@@ -105,15 +105,24 @@ class PendingCard extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final hidden = ref.watch(currentSettingsProvider).amountsHidden;
     final c = context.colors;
     final unit = this.unit;
     final currency = unit?.currencyCode ?? 'KES';
+
+    final amountText = hidden
+        ? kHiddenAmountMask
+        : Money(t.amountMinor.abs(), currency).format();
+
     final isInflow = t.amountMinor >= 0;
     final childRows = _childRows(ref.watch(transactionsProvider).value ?? []);
     final feeMinor = childRows.fold<int>(
       0,
       (sum, x) => sum + x.amountMinor.abs(),
     );
+    final feeText = feeMinor > 0
+        ? ' + ${hidden ? kHiddenAmountMask : Money(feeMinor, currency).format()} fee'
+        : '';
 
     return Container(
       padding: const EdgeInsets.all(AppSpacing.md),
@@ -146,9 +155,7 @@ class PendingCard extends ConsumerWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      '${isInflow ? 'Got' : 'Spent'} '
-                      '${Money(t.amountMinor.abs(), currency).format()}'
-                      '${feeMinor > 0 ? ' + ${Money(feeMinor, currency).format()} fee' : ''}',
+                      '${isInflow ? 'Got' : 'Spent'} $amountText$feeText',
                       style: AppTypography.bodyLg.copyWith(color: c.onSurface),
                     ),
                     Text(

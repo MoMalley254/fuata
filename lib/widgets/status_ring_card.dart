@@ -1,6 +1,9 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:fuata/domain/models/limit_rule.dart';
+import '../domain/models/money.dart';
+import '../ui/providers/app_providers.dart';
 import '../ui/theme/app_colors.dart';
 import '../ui/theme/app_spacing.dart';
 import '../ui/theme/app_status.dart';
@@ -8,7 +11,7 @@ import '../ui/theme/app_typography.dart';
 import 'status_pill.dart';
 
 /// Hero status ring card — the daily "am I okay to spend?" answer.
-class StatusRingCard extends StatelessWidget {
+class StatusRingCard extends ConsumerWidget {
   const StatusRingCard({
     super.key,
     required this.remaining,
@@ -32,9 +35,10 @@ class StatusRingCard extends StatelessWidget {
       limit <= 0 ? 0 : (spent / limit).clamp(0.0, 1.0).toDouble();
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final c = context.colors;
     final accent = status.fg(c);
+    final hidden = ref.watch(currentSettingsProvider).amountsHidden;
 
     return Material(
       color: Colors.transparent,
@@ -72,7 +76,9 @@ class StatusRingCard extends StatelessWidget {
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
                           Text(
-                            '$currencySymbol${_fmt(remaining)}',
+                            hidden
+                                ? kHiddenAmountMask
+                                : '$currencySymbol${_fmt(remaining)}',
                             style: AppTypography.displayHeroMobile
                                 .copyWith(color: c.onSurface),
                           ),

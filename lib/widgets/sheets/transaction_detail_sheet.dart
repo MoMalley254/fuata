@@ -10,6 +10,7 @@ import '../../ui/providers/app_providers.dart';
 import '../../ui/theme/app_colors.dart';
 import '../../ui/theme/app_spacing.dart';
 import '../../ui/theme/app_typography.dart';
+import '../amount_text.dart';
 import '../app_chips.dart';
 
 // ---------------------------------------------------------------------------
@@ -47,6 +48,7 @@ class _TransactionDetailSheetState extends ConsumerState<TransactionDetailSheet>
     final currency = unit?.currencyCode ?? 'KES';
     final amount = Money(t.amountMinor.abs(), currency);
     final isInflow = t.amountMinor >=0;
+    final hidden = ref.watch(currentSettingsProvider).amountsHidden;
 
     return SafeArea(
       child: Container(
@@ -103,8 +105,10 @@ class _TransactionDetailSheetState extends ConsumerState<TransactionDetailSheet>
               ],
             ),
             const SizedBox(height: AppSpacing.md),
-            Text(
-              '${isInflow ? '+' : '-'}${amount.format()}',
+            AmountText(
+              minor: t.amountMinor,
+              currencyCode: currency,
+              showSign: true,
               style: AppTypography.headlineLg.copyWith(
                 color: isInflow ? c.statusSafe : c.onSurface,
               ),
@@ -127,17 +131,18 @@ class _TransactionDetailSheetState extends ConsumerState<TransactionDetailSheet>
               }).toList(),
             ),
             const SizedBox(height: AppSpacing.md),
-            ...detailRows(context),
+            ...detailRows(context, hidden),
           ],
         ),
       ),
     );
   }
 
-  List<Widget> detailRows(BuildContext context) {
+  List<Widget> detailRows(BuildContext context, bool hidden) {
     final t = widget.transaction;
     final unit = widget.unit;
     final rows = <MapEntry<String, String>>[];
+    final isInflow = t.type == TxType.got;
 
     // Simple: nothing extra — title/time/amount above is already the
     // whole story.
@@ -166,7 +171,9 @@ class _TransactionDetailSheetState extends ConsumerState<TransactionDetailSheet>
       if (t.balanceAfterMinor != null) {
         rows.add(MapEntry(
           'Balance after (reported)',
-          Money(t.balanceAfterMinor!, unit?.currencyCode ?? 'KES').format(),
+          hidden
+              ? kHiddenAmountMask
+              : Money(t.balanceAfterMinor!, unit?.currencyCode ?? 'KES').format(),
         ));
       }
     }
@@ -180,10 +187,13 @@ class _TransactionDetailSheetState extends ConsumerState<TransactionDetailSheet>
         children: [
           Text(e.key, style: AppTypography.bodySm.copyWith(color: c.onSurfaceVariant)),
           Flexible(
-            child: Text(
-              e.value,
-              textAlign: TextAlign.right,
-              style: AppTypography.bodySm.copyWith(color: c.onSurface),
+            child:             AmountText(
+              minor: t.amountMinor,
+              currencyCode: unit?.currencyCode ?? 'KES',
+              showSign: true,
+              style: AppTypography.headlineLg.copyWith(
+                color: isInflow ? c.statusSafe : c.onSurface,
+              ),
             ),
           ),
         ],
