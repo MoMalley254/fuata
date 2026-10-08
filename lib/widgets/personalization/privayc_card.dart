@@ -49,16 +49,28 @@ class PrivacyCard extends StatelessWidget {
         ),
         const SizedBox(height: AppSpacing.md),
         ToggleRow(
-          title: 'Hide amounts in Recents',
-          subtitle: 'Blurs amounts when the app switcher shows Fuata. Turns on the OS-level hook in a later issue.',
+          title: 'Hide amounts in the app',
+          subtitle:
+          'Replaces every amount with dots until you turn this off. The eye '
+              'on Today, My money and a unit page does the same thing.',
+          value: settings.amountsHidden,
+          onChanged: (v) => onChanged((s) => s.copyWith(amountsHidden: v)),
+        ),
+        const SizedBox(height: AppSpacing.sm),
+        ToggleRow(
+          title: 'Hide in app switcher',
+          subtitle:
+          'Blanks Fuata in the app switcher. Also blocks screenshots. Turns on '
+              'the OS-level hook in a later issue.',
           value: settings.amountsHiddenInRecents,
           onChanged: (v) =>
               onChanged((s) => s.copyWith(amountsHiddenInRecents: v)),
         ),
         const SizedBox(height: AppSpacing.sm),
         ToggleRow(
-          title: 'Redact banner on lock screen',
-          subtitle: 'Hides amounts in the notification banner until the phone is unlocked.',
+          title: 'Hide banner on lock screen',
+          subtitle:
+          'Hides amounts in the notification banner until the phone is unlocked.',
           value: settings.redactedLockScreenBanner,
           onChanged: (v) =>
               onChanged((s) => s.copyWith(redactedLockScreenBanner: v)),
