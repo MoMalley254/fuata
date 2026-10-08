@@ -227,6 +227,105 @@ void main() {
     });
   });
 
+  group('erase everything (#85, US-16)', () {
+    /// Fill every table a backup carries, then give the two tables
+    /// readAll() doesn't touch a row of their own — otherwise "every watch
+    /// stream is empty" would be a claim about a table that was never
+    /// written to.
+    Future<void> seedEverything() async {
+      await seed(db);
+      await DriftAlertLogRepository(db).claim(
+        const AlertKey('l_overall_day', '2026-09-30', AlertLevel.warning),
+        DateTime.utc(2026, 9, 30),
+      );
+      await db.into(db.unparsedCaptures).insert(
+        UnparsedCapturesCompanion.insert(
+          id: 'u_unread',
+          receivedAt: DateTime.utc(2026, 9, 30),
+          sourcePackage: 'shared',
+          rawText: 'a message nothing could read',
+        ),
+      );
+    }
+
+    test('leaves every table empty — the record tables readAll() covers', () async {
+      await seedEverything();
+      // Sanity: the seed actually filled things.
+      expect((await repo.readAll()).recordCount, fullSnapshot().recordCount);
+
+      await repo.eraseAll();
+
+      final after = await repo.readAll();
+      expect(after.units, isEmpty);
+      expect(after.categories, isEmpty);
+      expect(after.captureSources, isEmpty);
+      expect(after.templates, isEmpty);
+      expect(after.transactions, isEmpty);
+      expect(after.limits, isEmpty);
+    });
+
+    test('leaves nothing behind in the tables readAll() does not carry',
+            () async {
+          await seedEverything();
+
+          await repo.eraseAll();
+
+          expect(await db.select(db.unparsedCaptures).get(), isEmpty);
+          expect(await db.select(db.alertFirings).get(), isEmpty);
+          expect(await db.select(db.settingsEntries).get(), isEmpty);
+        });
+
+    test('settings read as a fresh install again', () async {
+      await seedEverything();
+      // Prove the flag was true before the erase, so a false after means
+      // the reset happened rather than the seed never setting it.
+      await DriftSettingsRepository(db).updateSettings(
+        AppSettings.defaults.copyWith(name: 'Wanjiru', onboardingComplete: true),
+      );
+
+      await repo.eraseAll();
+
+      final s = await DriftSettingsRepository(db).watchSettings().first;
+      expect(s.onboardingComplete, isFalse);
+      expect(s.name, AppSettings.defaults.name);
+      expect(s.bannerEnabled, AppSettings.defaults.bannerEnabled);
+      expect(s.accent, AppSettings.defaults.accent);
+    });
+
+    test('erasing an already-empty database is a no-op, not an error',
+            () async {
+          await repo.eraseAll();
+          final after = await repo.readAll();
+          expect(after.isEmpty, isTrue);
+          expect(after.settings, isNotNull); // still "the current defaults"
+        });
+
+    test('every stream a screen watches is empty afterwards', () async {
+      await seedEverything();
+
+      await repo.eraseAll();
+
+      // What Home, Activity, My money, Limits, the rule builder and the
+      // review inbox actually watch — the shape of the acceptance
+      // criterion in the issue.
+      expect(await DriftUnitRepository(db).watchUnits(includeArchived: true).first,
+          isEmpty);
+      expect(await DriftTransactionRepository(db).watchTransactions().first,
+          isEmpty);
+      expect(await DriftLimitRepository(db).watchLimits().first, isEmpty);
+      expect(await DriftTemplateRepository(db).watchTemplates().first, isEmpty);
+      expect(await DriftCaptureRepository(db).watchUnparsed().first, isEmpty);
+      expect(await DriftCaptureSourceRepository(db).watchSources().first,
+          isEmpty);
+      expect(await DriftAlertLogRepository(db).firedKeys(), isEmpty);
+      expect(
+        (await DriftSettingsRepository(db).watchSettings().first)
+            .onboardingComplete,
+        isFalse,
+      );
+    });
+  });
+
   test('a write that fails half-way leaves the database untouched', () async {
     // Bypasses the planner on purpose: this is the repository's own
     // guarantee. The unit is valid, the transaction after it points at a
