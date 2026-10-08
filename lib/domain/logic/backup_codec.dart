@@ -196,6 +196,7 @@ class BackupCodec {
     'quietHoursEnabled': s.quietHoursEnabled,
     'quietStartMinute': s.quietStartMinute,
     'quietEndMinute': s.quietEndMinute,
+    'amountsHidden': s.amountsHidden,
   };
 
   // ---------------------------------------------------------------- decode
@@ -551,6 +552,7 @@ class BackupCodec {
       // A backup only exists because the app was set up; restoring one
       // must never send the person back through onboarding (#7).
       onboardingComplete: true,
+      amountsHidden: flag('amountsHidden', d.amountsHidden),
     );
   }
 

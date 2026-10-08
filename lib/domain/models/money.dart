@@ -1,5 +1,11 @@
 import 'package:intl/intl.dart';
 
+/// Shown in place of any amount while "Hide amounts in the app" is on
+/// (issue #81, finding F7). A fixed run of bullets, not one per digit —
+/// a length-matched mask would leak the rough size of a balance, which is
+/// exactly what hiding is for.
+const kHiddenAmountMask = '••••';
+
 /// Number of decimal places for a currency's minor unit.
 /// Extend as needed; unknown codes default to 2 (matches ADR-003).
 int minorUnitExponent(String currencyCode) {
