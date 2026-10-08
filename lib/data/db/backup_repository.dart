@@ -130,4 +130,30 @@ class DriftBackupRepository implements BackupRepository {
       }
     });
   }
+
+  @override
+  Future<void> eraseAll() {
+    return _db.transaction(() async {
+      // Children before parents, so the foreign keys hold at every step:
+      // transactions reference units, categories and templates; templates
+      // reference units and capture sources; limits reference units. The
+      // alert log and unparsed captures have no foreign keys and could go
+      // any time, but keeping one ordered list here means there is one
+      // place to read what "everything" means.
+      await _db.delete(_db.transactions).go();
+      await _db.delete(_db.templates).go();
+      await _db.delete(_db.limitRules).go();
+      await _db.delete(_db.alertFirings).go();
+      await _db.delete(_db.units).go();
+      await _db.delete(_db.categories).go();
+      await _db.delete(_db.captureSources).go();
+      await _db.delete(_db.unparsedCaptures).go();
+      // Empty settings means "first install" to DriftSettingsRepository
+      // (see _toSettings' rows.isEmpty branch), which is what brings
+      // onboardingComplete back to false and sends the person through
+      // onboarding. Deleting the rows is the whole reset; there is no
+      // per-key write to forget.
+      await _db.delete(_db.settingsEntries).go();
+    });
+  }
 }

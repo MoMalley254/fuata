@@ -270,6 +270,11 @@ Run against real drift repositories on an in-memory database (`test/domain/captu
 - [ ] Tapping the avatar on Today opens Profile; Settings contains no inline pickers
 - [ ] Eye on Today, My money and a unit page all hide every amount (Home, Activity, Summary, sheets); the choice survives a restart
 - [ ] Settings → Privacy & data shows three separate hide switches, each labelled for where it hides
+- [ ] Settings > Privacy & data > Erase everything: first dialog offers Back up first and Continue; Continue opens a second dialog that requires typing ERASE
+- [ ] "Back up first" opens Back up & restore; backing out returns to Privacy & data with the erase unfinished
+- [ ] After erasing: onboarding appears, My money and Activity are empty, the banner is gone from the notification shade, the home widget shows "open Fuata", and a notification from any app produces nothing
+- [ ] A backup file saved before erasing still opens (nothing wrote to it)
+- [ ] Killing and reopening the app after an erase stays on onboarding, not the old empty Home
 
 ### Performance and robustness
 - [ ] With 5,000 seeded transactions: Home opens under 2 s; Activity scrolls smoothly
