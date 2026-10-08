@@ -268,6 +268,8 @@ Run against real drift repositories on an in-memory database (`test/domain/captu
 - [ ] Privacy screen states data stays on the phone
 - [ ] Amounts are hidden in the recents screen (if enabled)
 - [ ] Tapping the avatar on Today opens Profile; Settings contains no inline pickers
+- [ ] Eye on Today, My money and a unit page all hide every amount (Home, Activity, Summary, sheets); the choice survives a restart
+- [ ] Settings → Privacy & data shows three separate hide switches, each labelled for where it hides
 
 ### Performance and robustness
 - [ ] With 5,000 seeded transactions: Home opens under 2 s; Activity scrolls smoothly
