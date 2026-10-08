@@ -6,7 +6,6 @@ import '../../domain/models/settings.dart';
 import '../../ui/theme/app_colors.dart';
 import '../../ui/theme/app_spacing.dart';
 import '../../ui/theme/app_typography.dart';
-import '../coming_soon_row.dart';
 import 'action_row.dart';
 
 class PrivacyCard extends StatelessWidget {
@@ -16,11 +15,17 @@ class PrivacyCard extends StatelessWidget {
   /// Opens Back up & restore (#24). A callback rather than a route so this
   /// widget stays free of screen imports, like the rest of lib/widgets.
   final VoidCallback onOpenBackup;
+
+  /// Starts the two-step erase (issue #85). Also a callback: the confirm
+  /// dialogs and the erase call itself belong to the screen that knows
+  /// what to do afterwards.
+  final VoidCallback onErase;
   const PrivacyCard({
     super.key,
     required this.settings,
     required this.onChanged,
     required this.onOpenBackup,
+    required this.onErase,
   });
 
   @override
@@ -83,32 +88,18 @@ class PrivacyCard extends StatelessWidget {
           onTap: onOpenBackup,
         ),
         const SizedBox(height: AppSpacing.sm),
-        ComingSoonRow(
+        // Deliberately an ActionRow (something real happens) rather than a
+        // ComingSoonRow, now that #85 has wired it up. It keeps the same
+        // bordered-card shape and the trailing chevron as the row above it,
+        // so the two read as one group; the warning lives in the dialog,
+        // which is where a person should meet it.
+        ActionRow(
           icon: Icons.delete_outline_rounded,
           title: 'Erase everything',
-          subtitle: 'Wipe all data from this phone — coming soon. Save a backup first.',
-          onTap: () => _confirmEraseUnavailable(context),
+          subtitle: 'Wipe all data from this phone. Save a backup first.',
+          onTap: onErase,
         ),
       ],
-    );
-  }
-
-  void _confirmEraseUnavailable(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Not yet'),
-        content: const Text(
-          "Erasing everything isn't wired up yet. When it is, it will ask you to "
-          "save a backup first (Back up & restore) — you can do that any time.",
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(),
-            child: const Text('Got it'),
-          ),
-        ],
-      ),
     );
   }
 }
