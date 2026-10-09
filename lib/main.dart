@@ -6,6 +6,7 @@ import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
 
 import 'package:fuata/platform/banner.dart';
 import 'package:fuata/platform/notification_capture.dart';
+import 'package:fuata/platform/privacy.dart';
 import 'package:fuata/platform/share_intake.dart';
 import 'package:fuata/routing/app_router.dart';
 import 'package:fuata/routing/routes.dart';
@@ -13,6 +14,7 @@ import 'package:fuata/ui/providers/alert_providers.dart';
 import 'package:fuata/ui/providers/app_providers.dart';
 import 'package:fuata/ui/providers/banner_providers.dart';
 import 'package:fuata/ui/providers/capture_providers.dart';
+import 'package:fuata/ui/providers/privacy_providers.dart';
 import 'package:fuata/ui/providers/widget_providers.dart';
 import 'package:fuata/ui/theme/app_theme.dart';
 
@@ -20,6 +22,12 @@ import 'domain/models/settings.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Issue #84: default to secure *before* the first frame, so the app
+  // switcher's initial snapshot is blank even before settings have been
+  // read. privacySyncProvider flips this to the person's real choice as
+  // soon as the settings stream emits.
+  await applySecure(true);
 
   // Issue #22: register the background isolate entry point so Android can
   // start it cold from a notification.
@@ -107,6 +115,7 @@ class _FuataState extends ConsumerState<Fuata> with WidgetsBindingObserver {
     ref.watch(bannerSyncProvider);
     ref.watch(alertSyncProvider);
     ref.watch(widgetSyncProvider); //Issue #29
+    ref.watch(privacySyncProvider);   // issue #84
 
     final settings = ref.watch(currentSettingsProvider);
     final router = ref.watch(routerProvider);
