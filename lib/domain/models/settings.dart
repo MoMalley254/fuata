@@ -70,6 +70,12 @@ extension BannerHeadlineLabel on BannerHeadline {
   };
 }
 
+/// Which units appear in the banner's expanded body (issue #86, finding
+/// F2). Replaces the old "empty bannerUnitIds means all" trick with an
+/// explicit choice, so "all", "these two" and "none" are three distinct
+/// states instead of two states plus an implicit default.
+enum BannerUnitsMode { all, selected, none }
+
 /// Light / dark / follow system (design brief section 3). A dedicated
 /// enum, rather than reusing Flutter's ThemeMode directly, keeps the
 /// domain model independent of *which* widget toolkit reads it.
@@ -180,6 +186,12 @@ class AppSettings {
   /// different switches.
   final bool amountsHidden;
 
+  /// Whether the banner's expanded body lists every active unit, only
+  /// [bannerUnitIds], or none at all. The old "empty means all" reading
+  /// of [bannerUnitIds] is gone — an empty set in `selected` mode now
+  /// means an empty selection, which reads the same as `none`.
+  final BannerUnitsMode bannerUnitsMode;
+
   const AppSettings({
     required this.name,
     required this.accent,
@@ -201,6 +213,7 @@ class AppSettings {
     this.quietEndMinute = 7 * 60,
     this.onboardingComplete = false,
     this.amountsHidden = false,
+    this.bannerUnitsMode = BannerUnitsMode.all,
   });
 
   static final defaults = AppSettings(
@@ -216,6 +229,7 @@ class AppSettings {
     bannerEnabled: false, // turned on by onboarding (#7) or the Banner screen
     bannerHeadline: BannerHeadline.leftToday,
     bannerUnitIds: <String>{},
+    bannerUnitsMode: BannerUnitsMode.all,
     bannerShowProgress: true,
     bannerShowQuickAdd: true,
     alertsEnabled: true,
@@ -239,6 +253,7 @@ class AppSettings {
     bool? bannerEnabled,
     BannerHeadline? bannerHeadline,
     Set<String>? bannerUnitIds,
+    BannerUnitsMode? bannerUnitsMode,
     bool? bannerShowProgress,
     bool? bannerShowQuickAdd,
     bool? alertsEnabled,
@@ -263,6 +278,7 @@ class AppSettings {
       bannerEnabled: bannerEnabled ?? this.bannerEnabled,
       bannerHeadline: bannerHeadline ?? this.bannerHeadline,
       bannerUnitIds: bannerUnitIds ?? this.bannerUnitIds,
+      bannerUnitsMode: bannerUnitsMode ?? this.bannerUnitsMode,
       bannerShowProgress: bannerShowProgress ?? this.bannerShowProgress,
       bannerShowQuickAdd: bannerShowQuickAdd ?? this.bannerShowQuickAdd,
       alertsEnabled: alertsEnabled ?? this.alertsEnabled,

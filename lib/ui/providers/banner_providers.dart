@@ -38,6 +38,7 @@ final bannerSyncProvider = Provider<void>((ref) {
     units: home.units,
     balanceByUnit: home.balanceByUnit,
     headline: settings.bannerHeadline,
+    unitsMode: settings.bannerUnitsMode,
     selectedUnitIds: settings.bannerUnitIds,
     showProgress: settings.bannerShowProgress,
     showQuickAdd: settings.bannerShowQuickAdd,

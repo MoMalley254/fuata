@@ -218,6 +218,9 @@ Run against real drift repositories on an in-memory database (`test/domain/captu
 - [ ] "+ Add" from the banner opens quick add
 - [ ] Swipe the banner away; it returns after the next transaction
 - [ ] Disable banner in settings; it disappears
+- [ ] Banner setup > Units shown: picking None removes the split from the live preview, and after saving it is also gone from the real notification; the total on a "Total I have" headline is unchanged
+- [ ] Picking a unit chip from All or None starts a fresh selection; un-ticking the last chip flips the row to None
+- [ ] The choice survives a restart and a backup/restore round trip
 
 - [ ] Banner shows a status-coloured small icon (currently the launcher PNG, which MIUI hides — see design.md 5.3)
 ### Capture: share and paste (US-08, US-09, US-11)

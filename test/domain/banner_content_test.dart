@@ -35,6 +35,7 @@ void main() {
     int spent = 150000,
     LimitRule? dailyLimit,
     BannerHeadline headline = BannerHeadline.leftToday,
+    BannerUnitsMode mode = BannerUnitsMode.all,
     Set<String> selected = const {},
     bool progress = true,
     bool redacted = false,
@@ -48,6 +49,7 @@ void main() {
       units: units ?? [cash, mpesa],
       balanceByUnit: {'cash': 76000, 'mpesa': 345000},
       headline: headline,
+      unitsMode: mode,
       selectedUnitIds: selected,
       showProgress: progress,
       showQuickAdd: true,
@@ -77,7 +79,9 @@ void main() {
 
   test('picked units limit the split and the total', () {
     final b = build(
-        selected: {'cash'}, headline: BannerHeadline.totalIHave);
+        mode: BannerUnitsMode.selected,
+        selected: {'cash'},
+        headline: BannerHeadline.totalIHave);
     expect(b.unitLines, ['Cash 760.00']);
     expect(b.title, '🟢 760.00 in total');
   });
@@ -96,5 +100,47 @@ void main() {
     expect(b.title, "🟢 You're good");
     expect(b.unitLines, isEmpty);
     expect(b.spentLine, isNull);
+  });
+
+  group('BannerUnitsMode (#86)', () {
+    test('all lists every active unit and totals them', () {
+      final b = build(
+          mode: BannerUnitsMode.all, headline: BannerHeadline.totalIHave);
+      expect(b.unitLines, ['Cash 760.00', 'Mobile 3,450.00']);
+      expect(b.title, '🟢 4,210.00 in total');
+    });
+
+    test('none drops the unit lines but not the total', () {
+      final b = build(
+          mode: BannerUnitsMode.none, headline: BannerHeadline.totalIHave);
+      expect(b.unitLines, isEmpty);
+      // The person asked for no split, not for their total to read zero.
+      expect(b.title, '🟢 4,210.00 in total');
+    });
+
+    test('none leaves the spent-today line and the left-today headline intact',
+            () {
+          final b = build(mode: BannerUnitsMode.none);
+          expect(b.unitLines, isEmpty);
+          expect(b.spentLine, 'Spent today 1,500.00');
+          expect(b.title, '🟢 1,500.00 left today');
+        });
+
+    test('selected ignores an empty id set the way "all" used to', () {
+      // Regression guard: the old "empty means all" trick is gone.
+      final b = build(mode: BannerUnitsMode.selected, selected: const {});
+      expect(b.unitLines, isEmpty);
+    });
+
+    test('archived units are excluded in every mode', () {
+      final withOld = [cash, unit('old', 'Old', archived: true)];
+      for (final m in BannerUnitsMode.values) {
+        expect(
+          build(mode: m, units: withOld).unitLines,
+          isNot(contains('Old 0.00')),
+          reason: '$m',
+        );
+      }
+    });
   });
 }

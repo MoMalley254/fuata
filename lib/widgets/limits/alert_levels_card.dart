@@ -179,6 +179,7 @@ class _AlertLevelsCardState extends ConsumerState<AlertLevelsCard> {
       units: home?.units ?? const [],
       balanceByUnit: home?.balanceByUnit ?? const {},
       headline: settings.bannerHeadline,
+      unitsMode: settings.bannerUnitsMode,
       selectedUnitIds: settings.bannerUnitIds,
       showProgress: settings.bannerShowProgress,
       showQuickAdd: settings.bannerShowQuickAdd,
