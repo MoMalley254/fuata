@@ -359,6 +359,16 @@ referenced by bare name; Android then tints it via the existing
 without it, and it's a polish item rather than a correctness bug. See
 `docs/github-issues.md` Post-#20 follow-ups for the tracking issue.
 
+**Banner units mode (#86).** `AppSettings.bannerUnitsMode` replaced the
+old "empty `bannerUnitIds` means all" convention with three explicit
+states (`all`, `selected`, `none`). `BannerContent.build` reads the
+mode to decide what appears in `unitLines`; a `none` banner still sums
+every active unit for the "Total I have" headline, because the mode is
+about the split, not the total. The drift repository and the backup
+codec both infer the mode from `bannerUnitIds` when the key is absent,
+so an install or file from before this change keeps the two-state
+behaviour it had.
+
 ### 5.4 Limit alerts (issue #63)
 
 `AlertEngine.due` (pure) decides what is due; `claimDueAlerts` records it in `alert_firings` (primary key = limit + period key + level) *before* `BannerPlatform.showAlert` displays it. The claim, not a read-then-write check, is what keeps the UI isolate and the listener's background isolate from announcing the same crossing twice. Period keys: date (day), Monday's date (week), `yyyy-MM` (month). Rows older than 90 days are purged. `DriftLimitRepository.setLimit`/`deleteLimit` clear a limit's rows when its amount changes or it is removed.

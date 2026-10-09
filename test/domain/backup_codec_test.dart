@@ -54,6 +54,7 @@ void main() {
       expect(s.settings!.themeMode, AppThemeMode.dark);
       expect(s.settings!.homeSections, {HomeSection.units});
       expect(s.settings!.bannerUnitIds, {'u1'});
+      expect(s.settings!.bannerUnitsMode, BannerUnitsMode.all);
     });
 
     test('exportedAt is read back', () {
@@ -295,5 +296,49 @@ void main() {
     expect(decoded.errors, isEmpty);
     expect(decoded.snapshot!.units.single.archived, isTrue);
     expect(decoded.snapshot!.units.single.archivedAt, isNull);
+  });
+
+  test('the banner units mode round-trips (#86)', () {
+    for (final m in BannerUnitsMode.values) {
+      final snapshot = BackupSnapshot(
+        settings: customSettings().copyWith(bannerUnitsMode: m),
+      );
+      final decoded = BackupCodec.decode(
+        BackupCodec.encode(snapshot, exportedAt: exportedAt),
+      );
+      expect(decoded.errors, isEmpty);
+      expect(decoded.snapshot!.settings!.bannerUnitsMode, m);
+    }
+  });
+
+  test('an older file with ids but no mode reads as "selected" (#86)', () {
+    // Same shape a backup made before #86 would have produced.
+    final root = jsonDecode(
+      BackupCodec.encode(
+        BackupSnapshot(settings: customSettings()),
+        exportedAt: exportedAt,
+      ),
+    ) as Map<String, dynamic>;
+    ((root['data'] as Map)['settings'] as Map).remove('bannerUnitsMode');
+    // customSettings() has bannerUnitIds: {'u1'} — non-empty, so the
+    // inference must land on `selected`, not on the default.
+    final decoded = BackupCodec.decode(jsonEncode(root));
+    expect(decoded.errors, isEmpty);
+    expect(decoded.snapshot!.settings!.bannerUnitsMode,
+        BannerUnitsMode.selected);
+  });
+
+  test('an older file with no ids and no mode reads as "all" (#86)', () {
+    final snapshot = BackupSnapshot(
+      settings: customSettings().copyWith(bannerUnitIds: <String>{}),
+    );
+    final root = jsonDecode(
+      BackupCodec.encode(snapshot, exportedAt: exportedAt),
+    ) as Map<String, dynamic>;
+    ((root['data'] as Map)['settings'] as Map).remove('bannerUnitsMode');
+
+    final decoded = BackupCodec.decode(jsonEncode(root));
+    expect(decoded.errors, isEmpty);
+    expect(decoded.snapshot!.settings!.bannerUnitsMode, BannerUnitsMode.all);
   });
 }

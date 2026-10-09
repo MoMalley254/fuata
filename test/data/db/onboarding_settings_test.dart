@@ -57,4 +57,53 @@ void main() {
     );
     expect((await repo.watchSettings().first).name, '');
   });
+
+  test('a settings row set from before #86 infers the banner units mode',
+          () async {
+        // Ids present, mode key absent — the shape a pre-#86 install left.
+        await db.into(db.settingsEntries).insert(
+          SettingsEntriesCompanion.insert(
+              key: 'bannerUnitIds', value: 'u1,u2'),
+        );
+        await db.into(db.settingsEntries).insert(
+          SettingsEntriesCompanion.insert(
+              key: 'onboardingComplete', value: 'true'),
+        );
+
+        final s = await repo.watchSettings().first;
+        expect(s.bannerUnitsMode, BannerUnitsMode.selected);
+        expect(s.bannerUnitIds, {'u1', 'u2'});
+      });
+
+  test('an empty id set and no mode key reads as "all"', () async {
+    await db.into(db.settingsEntries).insert(
+      SettingsEntriesCompanion.insert(key: 'bannerUnitIds', value: ''),
+    );
+    await db.into(db.settingsEntries).insert(
+      SettingsEntriesCompanion.insert(
+          key: 'onboardingComplete', value: 'true'),
+    );
+
+    final s = await repo.watchSettings().first;
+    expect(s.bannerUnitsMode, BannerUnitsMode.all);
+    expect(s.bannerUnitIds, isEmpty);
+  });
+
+  test('the mode key wins when both are present', () async {
+    await db.into(db.settingsEntries).insert(
+      SettingsEntriesCompanion.insert(
+          key: 'bannerUnitIds', value: 'u1,u2'),
+    );
+    await db.into(db.settingsEntries).insert(
+      SettingsEntriesCompanion.insert(
+          key: 'bannerUnitsMode', value: 'none'),
+    );
+    await db.into(db.settingsEntries).insert(
+      SettingsEntriesCompanion.insert(
+          key: 'onboardingComplete', value: 'true'),
+    );
+
+    final s = await repo.watchSettings().first;
+    expect(s.bannerUnitsMode, BannerUnitsMode.none);
+  });
 }
