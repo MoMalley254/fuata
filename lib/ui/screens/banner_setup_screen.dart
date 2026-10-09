@@ -83,6 +83,7 @@ class _BannerSetupScreenState extends ConsumerState<BannerSetupScreen> {
       units: units,
       balanceByUnit: home.balanceByUnit,
       headline: s.bannerHeadline,
+      unitsMode: s.bannerUnitsMode,
       selectedUnitIds: s.bannerUnitIds,
       showProgress: s.bannerShowProgress,
       showQuickAdd: s.bannerShowQuickAdd,
@@ -228,27 +229,67 @@ class _BannerSetupScreenState extends ConsumerState<BannerSetupScreen> {
             SectionCard(
               title: 'Units shown',
               children: [
+                Text(
+                  'Which units appear in the expanded banner. Picking None '
+                      'keeps the banner to the headline and "Spent today" only.',
+                  style: AppTypography.bodySm.copyWith(
+                    color: c.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.md),
                 Wrap(
                   spacing: AppSpacing.sm,
                   runSpacing: AppSpacing.sm,
                   children: [
                     AppChoiceChip(
                       label: 'All',
-                      selected: allUnits,
-                      onTap: () =>
-                          _update((x) => x.copyWith(bannerUnitIds: <String>{})),
+                      selected: s.bannerUnitsMode == BannerUnitsMode.all,
+                      // Clearing the ids on the way in keeps the chips
+                      // predictable: leaving "all" and picking a unit
+                      // starts a fresh selection rather than resurrecting
+                      // whatever was left over from last time.
+                      onTap: () => _update((x) => x.copyWith(
+                        bannerUnitsMode: BannerUnitsMode.all,
+                        bannerUnitIds: <String>{},
+                      )),
+                    ),
+                    AppChoiceChip(
+                      label: 'None',
+                      selected: s.bannerUnitsMode == BannerUnitsMode.none,
+                      onTap: () => _update((x) => x.copyWith(
+                        bannerUnitsMode: BannerUnitsMode.none,
+                        bannerUnitIds: <String>{},
+                      )),
                     ),
                     for (final u in units)
                       AppChoiceChip(
                         label: '${u.iconEmoji} ${u.name}',
-                        selected: !allUnits && s.bannerUnitIds.contains(u.id),
+                        selected: s.bannerUnitsMode ==
+                            BannerUnitsMode.selected &&
+                            s.bannerUnitIds.contains(u.id),
                         onTap: () => _update((x) {
-                          final next = {...x.bannerUnitIds};
-                          if (!next.remove(u.id)) next.add(u.id);
-                          // Everything picked, or nothing left: same as "All".
-                          final everything = units.every((e) => next.contains(e.id));
+                          if (x.bannerUnitsMode == BannerUnitsMode.selected) {
+                            final next = {...x.bannerUnitIds};
+                            if (!next.remove(u.id)) next.add(u.id);
+                            // Tapping the last selected unit off is the
+                            // person saying "no units" — light up None
+                            // rather than leaving an empty "selected".
+                            if (next.isEmpty) {
+                              return x.copyWith(
+                                bannerUnitsMode: BannerUnitsMode.none,
+                                bannerUnitIds: <String>{},
+                              );
+                            }
+                            return x.copyWith(
+                              bannerUnitsMode: BannerUnitsMode.selected,
+                              bannerUnitIds: next,
+                            );
+                          }
+                          // Coming from all or none: start a fresh
+                          // selection with just this unit.
                           return x.copyWith(
-                            bannerUnitIds: everything ? <String>{} : next,
+                            bannerUnitsMode: BannerUnitsMode.selected,
+                            bannerUnitIds: {u.id},
                           );
                         }),
                       ),
