@@ -65,8 +65,8 @@ class PrivacyCard extends StatelessWidget {
         ToggleRow(
           title: 'Hide in app switcher',
           subtitle:
-          'Blanks Fuata in the app switcher. Also blocks screenshots. Turns on '
-              'the OS-level hook in a later issue.',
+          'Blanks Fuata in the app switcher. Also blocks screenshots and '
+              'screen recording.',
           value: settings.amountsHiddenInRecents,
           onChanged: (v) =>
               onChanged((s) => s.copyWith(amountsHiddenInRecents: v)),
