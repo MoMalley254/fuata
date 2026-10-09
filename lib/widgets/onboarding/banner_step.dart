@@ -80,6 +80,7 @@ class BannerStep extends StatelessWidget {
       units: units,
       balanceByUnit: {for (final u in units) u.id: u.openingBalanceMinor},
       headline: BannerHeadline.leftToday,
+      unitsMode: BannerUnitsMode.all,
       selectedUnitIds: const {},
       showProgress: true,
       showQuickAdd: true,

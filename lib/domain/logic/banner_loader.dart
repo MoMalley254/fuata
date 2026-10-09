@@ -54,6 +54,7 @@ Future<BannerContent?> loadBannerContent({
     units: unitList,
     balanceByUnit: balanceByUnit,
     headline: s.bannerHeadline,
+    unitsMode: s.bannerUnitsMode,
     selectedUnitIds: s.bannerUnitIds,
     showProgress: s.bannerShowProgress,
     showQuickAdd: s.bannerShowQuickAdd,

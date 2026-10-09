@@ -45,6 +45,7 @@ class BannerContent {
     required List<MoneyUnit> units,
     required Map<String, int> balanceByUnit,
     required BannerHeadline headline,
+    required BannerUnitsMode unitsMode,
     required Set<String> selectedUnitIds, // empty = every unit
     required bool showProgress,
     required bool showQuickAdd,
@@ -52,13 +53,22 @@ class BannerContent {
 
 }) {
     final active = units.where((u) => !u.archived).toList();
-    final shown = active
-        .where((u) => selectedUnitIds.isEmpty || selectedUnitIds.contains(u.id))
-        .toList();
+    // The units whose balance *lines* appear in the expanded body.
+    final linesFor = switch (unitsMode) {
+      BannerUnitsMode.all => active,
+      BannerUnitsMode.selected =>
+          active.where((u) => selectedUnitIds.contains(u.id)).toList(),
+      BannerUnitsMode.none => const <MoneyUnit>[],
+    };
 
-    final code =
-        dailyLimit?.currencyCode ??
-            (active.isEmpty ? 'KES' : active.first.currencyCode);
+    // The units whose balances roll up into the "total I have" headline.
+    // `none` is about the split lines, not about the total reading zero,
+    // so the headline still sums every active unit — the same number the
+    // person would see in My money.
+    final unitsForTotal = unitsMode == BannerUnitsMode.none ? active : linesFor;
+
+    final code = dailyLimit?.currencyCode ??
+        (active.isEmpty ? 'KES' : active.first.currencyCode);
     String fmt(int minor) => Money(minor, code).format();
 
     final emoji = status.emoji;
@@ -83,9 +93,7 @@ switch(headline) {
   case BannerHeadline.spentToday:
     title = '$emoji Spent ${fmt(spentToday)} today';
   case BannerHeadline.totalIHave:
-  // Only units in the banner's currency are summed: adding KES to
-  // USD would be a made-up number.
-    final total = shown
+    final total = unitsForTotal
         .where((u) => u.currencyCode == code)
         .fold<int>(0, (sum, u) => sum + (balanceByUnit[u.id] ?? 0));
     title = '$emoji ${fmt(total)} in total';
@@ -104,8 +112,9 @@ switch(headline) {
       unitLines: redacted
           ? const []
           : [
-        for (final u in shown)
-          '${u.name} ${Money(balanceByUnit[u.id] ?? 0, u.currencyCode).format()}',
+        for (final u in linesFor)
+          '${u.name} '
+              '${Money(balanceByUnit[u.id] ?? 0, u.currencyCode).format()}',
       ],
       spentLine: redacted ? null : 'Spent today ${fmt(spentToday)}',
       showQuickAdd: showQuickAdd,
