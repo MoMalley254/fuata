@@ -20,11 +20,20 @@ class MainActivity : FlutterActivity() {
 
     private var homeWidget: HomeWidgetChannel? = null
 
+    private var privacy: PrivacyChannel? = null   // issue #84
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
 
         captureChannel = CaptureChannel(
             applicationContext,
+            flutterEngine.dartExecutor.binaryMessenger,
+        )
+
+        // Issue #84: takes `this` — the window flag is on this Activity's
+        // window, not on the application context.
+        privacy = PrivacyChannel(
+            this,
             flutterEngine.dartExecutor.binaryMessenger,
         )
 
@@ -48,6 +57,8 @@ class MainActivity : FlutterActivity() {
     override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
         captureChannel?.dispose()
         captureChannel = null
+        privacy?.dispose()
+        privacy = null
         homeWidget?.dispose()
         homeWidget = null
         backupFiles?.dispose()

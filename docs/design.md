@@ -388,3 +388,30 @@ A tap launches `MainActivity` via the standard launcher `PendingIntent`.
 `updatePeriodMillis = 30 minutes` is a fallback for the case neither
 isolate fires a push — force-stop, reboot, or a fresh install before
 the app is opened once.
+
+### 5.6 Privacy flags (issue #84)
+
+`fuata/privacy` is a one-method channel: `setSecure(bool)` sets or clears
+`WindowManager.LayoutParams.FLAG_SECURE` on the Activity's window. That
+is what makes the "Hide in app switcher" setting real — while the flag
+is set, Android blanks Fuata in the app switcher and blocks screenshots
+and screen recording.
+
+Two design notes worth keeping:
+
+**The channel is handed the Activity, not the application context.**
+Every other channel in this app (`fuata/capture`, `fuata/home_widget`)
+takes an application context because the work it does doesn't belong to
+a window. FLAG_SECURE does — there is no way to reach a window from an
+application context, so `PrivacyChannel` takes `Activity` like
+`BackupFilesChannel` does.
+
+**`main()` sets it secure before the first frame.** Settings are read
+from drift, which is async; on a cold start the first frame can render
+before the person's real preference is known. Defaulting to secure means
+the initial Recents snapshot is blank regardless, and
+`privacySyncProvider` flips it to the real value the moment settings
+load. This is the one place in the app where "over-protect briefly" is
+the correct default — worst case the person sees a blank card for a few
+milliseconds on their own device; the alternative is a real screenshot
+of their money.

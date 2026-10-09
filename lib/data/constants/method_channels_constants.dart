@@ -17,3 +17,7 @@ const String backupFilesMethodName = 'fuata/backup_files';
 // RemoteViews. Nothing comes back over the channel — a tap on the widget
 // just launches the app.
 const String homeWidgetMethodName = 'fuata/home_widget';
+
+// Issue #84. Sets/clears Android's FLAG_SECURE on the window: blank card
+// in the app switcher, no screenshots. One method — setSecure(bool).
+const String privacyMethodName = 'fuata/privacy';
