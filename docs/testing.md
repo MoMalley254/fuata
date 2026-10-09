@@ -266,7 +266,8 @@ Run against real drift repositories on an in-memory database (`test/domain/captu
 - [ ] A truncated file, a photo renamed `.json` and a random text file are each refused with a message, and nothing changes
 - [ ] A backup opened from Downloads and from a cloud drive both import
 - [ ] Privacy screen states data stays on the phone
-- [ ] Amounts are hidden in the recents screen (if enabled)
+- [ ] "Hide in app switcher" on: Recents shows a blank Fuata card, and screenshots / screen recording are blocked. Still blank after a cold start
+- [ ] "Hide in app switcher" off: Recents shows the app normally, and screenshots work
 - [ ] Tapping the avatar on Today opens Profile; Settings contains no inline pickers
 - [ ] Eye on Today, My money and a unit page all hide every amount (Home, Activity, Summary, sheets); the choice survives a restart
 - [ ] Settings → Privacy & data shows three separate hide switches, each labelled for where it hides
