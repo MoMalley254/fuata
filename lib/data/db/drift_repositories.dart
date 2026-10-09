@@ -23,6 +23,8 @@ import '../constants/captures_constants.dart';
 import 'app_database.dart';
 import 'mappers.dart';
 
+const _kBannerUnitsMode = 'bannerUnitsMode';
+
 class DriftUnitRepository implements UnitRepository {
   DriftUnitRepository(this._db);
   final AppDatabase _db;
@@ -313,6 +315,8 @@ class DriftSettingsRepository implements SettingsRepository {
         value: s.bannerUnitIds.join(','),
       ),
       SettingsEntriesCompanion.insert(
+          key: _kBannerUnitsMode, value: s.bannerUnitsMode.name),
+      SettingsEntriesCompanion.insert(
         key: _kBannerProgress,
         value: s.bannerShowProgress.toString(),
       ),
@@ -426,6 +430,19 @@ class DriftSettingsRepository implements SettingsRepository {
       bannerUnitIds: (map[_kBannerUnitIds] ?? '').isEmpty
           ? <String>{}
           : map[_kBannerUnitIds]!.split(',').toSet(),
+      // Installs from before #86 have no mode key. Their intent is
+      // recoverable from bannerUnitIds alone: any ids meant "these",
+      // none meant "all" — the two readings the old code had. So an
+      // upgrade keeps doing what it did.
+      bannerUnitsMode: map[_kBannerUnitsMode] != null
+          ? byName(
+        map[_kBannerUnitsMode],
+        BannerUnitsMode.values,
+        defaults.bannerUnitsMode,
+      )
+          : (map[_kBannerUnitIds]?.isNotEmpty == true
+          ? BannerUnitsMode.selected
+          : defaults.bannerUnitsMode),
       bannerShowProgress: boolOr(
         map[_kBannerProgress],
         defaults.bannerShowProgress,

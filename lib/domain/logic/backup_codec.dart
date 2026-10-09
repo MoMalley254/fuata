@@ -190,6 +190,7 @@ class BackupCodec {
     'bannerEnabled': s.bannerEnabled,
     'bannerHeadline': s.bannerHeadline.name,
     'bannerUnitIds': (s.bannerUnitIds.toList()..sort()),
+    'bannerUnitsMode': s.bannerUnitsMode.name,
     'bannerShowProgress': s.bannerShowProgress,
     'bannerShowQuickAdd': s.bannerShowQuickAdd,
     'alertsEnabled': s.alertsEnabled,
@@ -543,6 +544,15 @@ class BackupCodec {
         d.bannerHeadline,
       ),
       bannerUnitIds: names('bannerUnitIds').toSet(),
+      bannerUnitsMode: m['bannerUnitsMode'] == null
+          ? (names('bannerUnitIds').isNotEmpty
+          ? BannerUnitsMode.selected
+          : d.bannerUnitsMode)
+          : pick(
+        'bannerUnitsMode',
+        BannerUnitsMode.values,
+        d.bannerUnitsMode,
+      ),
       bannerShowProgress: flag('bannerShowProgress', d.bannerShowProgress),
       bannerShowQuickAdd: flag('bannerShowQuickAdd', d.bannerShowQuickAdd),
       alertsEnabled: flag('alertsEnabled', d.alertsEnabled),
