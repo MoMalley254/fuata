@@ -16,6 +16,7 @@ import 'package:drift/native.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
+import '../../domain/models/category.dart';
 import 'tables.dart';
 
 part 'app_database.g.dart';
@@ -49,6 +50,7 @@ class AppDatabase extends _$AppDatabase {
   MigrationStrategy get migration => MigrationStrategy(
     onCreate: (m) async {
       await m.createAll();
+      await _seedDefaultCategories();
     },
     onUpgrade: (m, from, to) async {
       // (#63): the limit-alert log. Additive only — no existing table
@@ -64,6 +66,35 @@ class AppDatabase extends _$AppDatabase {
       await customStatement('PRAGMA foreign_keys = ON');
     },
   );
+
+  /// Inserts the default set if — and only if — the categories table is
+  /// empty. Called from onCreate safe to call again
+  /// anywhere.
+  ///
+  /// Deliberately NOT `batch(...)`: drift's batch is lazy, and inside
+  /// `onCreate` the queued inserts would flush *after* the migration
+  /// callback returned. A test that then cleared the table on the very
+  /// next query saw 9 stale rows appear underneath it, because the batch
+  /// landed between the clear and the fixture's insert. Individual
+  /// awaited inserts complete before `ensureOpen` lets any user query
+  /// through, which is the whole point of running this from `onCreate`.
+  Future<void> _seedDefaultCategories() async {
+    final existing = await (select(categories)..limit(1)).get();
+    if (existing.isNotEmpty) return;
+    for (final c in defaultCategories) {
+      await into(categories).insert(
+        CategoriesCompanion.insert(
+          id: c.id,
+          name: c.name,
+          emoji: c.emoji,
+          colorValue: c.color.toARGB32(),
+          sortOrder: Value(c.sortOrder),
+          archived: Value(c.archived),
+        ),
+      );
+    }
+  }
+
 }
 
 LazyDatabase _openConnection() {

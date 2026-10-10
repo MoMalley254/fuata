@@ -1,5 +1,6 @@
 import '../models/backup_snapshot.dart';
 import '../models/capture_source.dart';
+import '../models/category.dart';
 import '../models/limit_alert.dart';
 import '../models/limit_rule.dart';
 import '../models/settings.dart';
@@ -129,4 +130,23 @@ abstract class BackupRepository {
   /// posted banner, clear the native allow-list mirror and clear the
   /// home-widget snapshot — see [DriftBackupRepository.eraseAll]'s callers.
   Future<void> eraseAll();
+}
+
+/// Categories (issue #83, finding F19). Same shape as the other
+/// repositories: a stream for the picker and the settings screen, save
+/// by id, and an archive that flips a flag rather than deleting — a
+/// transaction that already points at a category keeps pointing at it.
+abstract class CategoryRepository {
+  /// Active categories, ordered by sortOrder then name. The default set
+  /// is seeded at install (see AppDatabase); a fresh install never sees
+  /// an empty list.
+  Stream<List<Category>> watchCategories();
+
+  /// Same list including archived ones — the settings screen uses this so
+  /// a category the person put away can be brought back.
+  Stream<List<Category>> watchCategoriesIncludingArchived();
+
+  Future<void> saveCategory(Category category);
+  Future<void> archiveCategory(String categoryId);
+  Future<void> unarchiveCategory(String categoryId);
 }
