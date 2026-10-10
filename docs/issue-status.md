@@ -1,14 +1,28 @@
-# Issue status (generated 2026-10-08T17:44Z)
+# Issue status (generated 2026-10-10T18:26Z)
 
 Source of truth: GitHub. Regenerate with `scripts/refresh-issue-status.sh`.
 
 | # | State | Milestone | Title |
 |---|---|---|---|
+| #118 | OPEN | v1.1 Backlog | feat(settings): custom accent colour picker |
+| #117 | OPEN | v1.1 Backlog | feat(units): reorder units on Home and My money |
+| #116 | OPEN | v1.1 Backlog | feat(ui): Empty Home needs a call to action |
+| #115 | OPEN | v1.1 Backlog | fix(ui): every provider error is a bare text message |
+| #114 | OPEN | v1.1 Backlog | feat(settings): a single, app-wide currency |
+| #113 | OPEN | v1.1 Backlog | feat(widget): surface and configure the home widget from Banner setup |
+| #112 | OPEN | v0.1 MVP | fix(ui): Home shows "See my summaries" twice |
+| #111 | OPEN | v0.1 MVP | fix(onboarding): "Show me how" doesn't open Auto-catch |
+| #110 | OPEN | v0.1 MVP | fix(ui): Home hero number overflows for large amounts |
+| #109 | OPEN | v0.1 MVP | fix(ledger): week-peek bars group by UTC day, not local day |
+| #108 | OPEN | v0.1 MVP | fix(ledger): day/week/month ranges seem to include the wrong days |
+| #107 | OPEN | v0.1 MVP | fix(ledger): day and limit numbers don't roll over at midnight |
+| #106 | CLOSED | v0.1 MVP | fix(ledger): day/week/month ranges seem to include the wrong days |
+| #105 | CLOSED | v0.1 MVP | fix(ledger): day and limit numbers don't roll over at midnight |
 | #87 | CLOSED | v0.1 MVP | fix(ui): educational empty state for reading rules |
-| #86 | OPEN | v0.1 MVP | feat(banner): "no units" option |
-| #85 | OPEN | v0.1 MVP | feat(data): erase everything |
-| #84 | OPEN | v0.1 MVP | feat(privacy): FLAG_SECURE for Recents |
-| #83 | OPEN | v0.1 MVP | feat(categories): rename and add categories |
+| #86 | CLOSED | v0.1 MVP | feat(banner): "no units" option |
+| #85 | CLOSED | v0.1 MVP | feat(data): erase everything |
+| #84 | CLOSED | v0.1 MVP | feat(privacy): FLAG_SECURE for Recents |
+| #83 | CLOSED | v0.1 MVP | feat(categories): rename and add categories |
 | #82 | CLOSED | v0.1 MVP | feat(ui): Week Peek home widget |
 | #81 | CLOSED | v0.1 MVP | feat(privacy): global hide amounts switch |
 | #80 | CLOSED | v0.1 MVP | feat(units): archived units screen and unarchive |
