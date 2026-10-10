@@ -138,7 +138,11 @@ void main() {
           transferGroupId: 'g1',
           occurredAt: DateTime(2026, 9, 30, 10, 0),
         ),
-        tx(amountMinor: -2000, occurredAt: DateTime(2026, 9, 30, 11, 0)),
+        tx(
+          amountMinor: -2000,
+          type: TxType.adjustment,
+          occurredAt: DateTime(2026, 9, 30, 11, 0),
+        ),
         tx(
           amountMinor: -1000,
           status: TxStatus.pending,

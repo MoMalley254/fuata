@@ -16,6 +16,7 @@ void main() {
     DateTime? at,
     TxStatus status = TxStatus.confirmed,
     String? parentId,
+        String? categoryId,
   }) => MoneyTransaction(
     id: id,
     unitId: unitId,
@@ -26,6 +27,7 @@ void main() {
     createdAt: now,
     status: status,
     parentId: parentId,
+    categoryId: categoryId
   );
 
   PeriodSummary day(List<MoneyTransaction> all) =>
@@ -219,6 +221,30 @@ void main() {
     test('S-19 friendlyMoney drops .00 but keeps real cents', () {
       expect(friendlyMoney(842000, 'KES'), 'KSh 8,420');
       expect(friendlyMoney(842050, 'KES'), 'KSh 8,420.50');
+    });
+  });
+
+  group('spentByCategory (#83)', () {
+    test('spending groups by category, biggest first', () {
+      final s = day([
+        tx('a', -30000, categoryId: 'cat_food'),
+        tx('b', -70000, categoryId: 'cat_transport'),
+        tx('c', -10000, categoryId: 'cat_food'),
+      ]);
+      expect(s.spentByCategory.map((c) => c.categoryId),
+          ['cat_transport', 'cat_food']);
+      expect(s.spentByCategory.map((c) => c.minor), [70000, 40000]);
+    });
+
+    test('uncategorised spending is not in the split', () {
+      final s = day([
+        tx('a', -30000, categoryId: 'cat_food'),
+        tx('b', -20000), // no category
+      ]);
+      expect(s.spentByCategory, hasLength(1));
+      expect(s.spentByCategory.first.minor, 30000);
+      // But the total is still the full 500.
+      expect(s.spentMinor, 50000);
     });
   });
 }

@@ -3,6 +3,7 @@
 //
 // Needs code generation first: dart run build_runner build
 
+import 'package:drift/drift.dart' show Value;
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fuata/data/db/app_database.dart';
@@ -31,11 +32,18 @@ void main() {
   tearDown(() => db.close());
 
   /// Fill a database the way the app would, through its own repositories.
-  /// Fill a database the way the app would, through its own repositories.
+  /// Wipes the seeded default categories first, so the fixture fully
+  /// controls what readAll() sees.
   Future<void> seed(AppDatabase target) async {
     final snap = fullSnapshot();
 
-    // Categories don't have a repository yet, so we insert them directly.
+    // A fresh AppDatabase seeds 9 default categories at create
+    // (issue #83, _seedDefaultCategories). The fixture carries its own
+    // set, so start from a clean table — otherwise every round-trip
+    // comparison sees 9 extra rows and "recordCount" no longer matches
+    // what "readAll()" returns.
+    await target.delete(target.categories).go();
+
     for (final c in snap.categories) {
       await target.into(target.categories).insert(
         CategoriesCompanion.insert(
@@ -43,6 +51,8 @@ void main() {
           name: c.name,
           emoji: c.emoji,
           colorValue: c.colorValue,
+          sortOrder: Value(c.sortOrder),
+          archived: Value(c.archived),
         ),
       );
     }
@@ -87,6 +97,11 @@ void main() {
 
     final other = AppDatabase(NativeDatabase.memory());
     addTearDown(other.close);
+    // A fresh AppDatabase seeds the 9 default categories at create
+    // (issue #83). This test models an *empty* phone receiving the file,
+    // so wipe them — otherwise the import lands alongside them and the
+    // re-export has 9 rows the source didn't.
+    await other.delete(other.categories).go();
     final otherService = BackupService(
       DriftBackupRepository(other),
       clock: () => exportedAt,

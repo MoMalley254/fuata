@@ -104,6 +104,8 @@ BackupSnapshot fullSnapshot({bool withSettings = true}) => BackupSnapshot(
       name: 'Food',
       emoji: '🍲',
       colorValue: 0xFFE07A5F,
+      sortOrder: 0,
+      archived: false,
     ),
   ],
   units: [unit('u1'), unit('u2', name: 'M-Pesa', sortOrder: 1)],
