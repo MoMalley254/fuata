@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../domain/models/capture_source.dart';
+import '../../domain/models/category.dart';
 import '../../domain/models/limit_alert.dart';
 import '../../domain/models/limit_rule.dart';
 import '../../domain/models/settings.dart';
@@ -375,4 +376,43 @@ class MockCaptureSourceRepository implements CaptureSourceRepository {
   @override
   Future<void> saveSource(CaptureSource source) async =>
       _store.upsert((s) => s.id == source.id, source);
+}
+
+class MockCategoryRepository implements CategoryRepository {
+  final _store = _Store<Category>([]);
+
+  @override
+  Stream<List<Category>> watchCategories() {
+    return _store.watch().map((list) {
+      return list.where((c) => !c.archived).toList()
+        ..sort((a, b) {
+          final byOrder = a.sortOrder.compareTo(b.sortOrder);
+          return byOrder != 0 ? byOrder : a.name.compareTo(b.name);
+        });
+    });
+  }
+
+  @override
+  Stream<List<Category>> watchCategoriesIncludingArchived() {
+    return _store.watch().map((list) {
+      return [...list]..sort((a, b) {
+        final byOrder = a.sortOrder.compareTo(b.sortOrder);
+        return byOrder != 0 ? byOrder : a.name.compareTo(b.name);
+      });
+    });
+  }
+
+  @override
+  Future<void> saveCategory(Category category) async =>
+      _store.upsert((c) => c.id == category.id, category);
+
+  @override
+  Future<void> archiveCategory(String categoryId) async {
+    _store.update((c) => c.id == categoryId, (c) => c.copyWith(archived: true));
+  }
+
+  @override
+  Future<void> unarchiveCategory(String categoryId) async {
+    _store.update((c) => c.id == categoryId, (c) => c.copyWith(archived: false));
+  }
 }
