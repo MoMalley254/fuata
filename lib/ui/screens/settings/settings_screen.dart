@@ -6,7 +6,6 @@ import '../../../domain/models/limit_rule.dart';
 import '../../../domain/models/money.dart';
 import '../../../domain/models/settings.dart';
 import '../../../routing/routes.dart';
-import '../../../widgets/coming_soon_row.dart';
 import '../../../widgets/personalization/action_row.dart';
 import '../../providers/app_providers.dart';
 import '../../providers/capture_providers.dart';
@@ -18,8 +17,7 @@ import '../../theme/app_spacing.dart';
 ///
 /// "Profile" is deliberately not a row here. It's reached from the avatar
 /// on Today, which is where a person looks for their own name and colour;
-/// Settings is about the app. Categories is a [ComingSoonRow] rather than
-/// an ActionRow because there is nowhere for it to open yet (#83).
+/// Settings is about the app.
 class SettingsScreen extends ConsumerWidget {
   const SettingsScreen({super.key});
 
@@ -121,10 +119,11 @@ class SettingsScreen extends ConsumerWidget {
             const SizedBox(height: AppSpacing.lg),
 
             // Data that isn't a setting yet, and where it lives.
-            const ComingSoonRow(
+            ActionRow(
               icon: Icons.sell_outlined,
               title: 'Categories',
-              subtitle: 'Rename or add category names and icons — coming soon',
+              subtitle: 'Rename, add or put away the categories you use',
+              onTap: () => context.push(Routes.settingsCategoriesPath),
             ),
             const SizedBox(height: AppSpacing.sm),
             ActionRow(

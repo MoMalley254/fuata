@@ -25,6 +25,7 @@ class Routes {
   static const settingsDetail = 'settingsDetail';
   static const settingsAppearance = 'settingsAppearance';
   static const settingsPrivacy = 'settingsPrivacy';
+  static const settingsCategories = 'settingsCategories';
 
   // ---- Paths ----
   static const splashPath = '/splash';
@@ -52,6 +53,7 @@ class Routes {
   static const settingsAppearancePath = '/settings/appearance';
   static const settingsPrivacyPath = '/settings/privacy';
   static const archivedUnitsPath = '/archived-units';
+  static const settingsCategoriesPath = '/settings/categories';
 
   // ---- Helpers ----
   static String unitFor(String id) => '/unit/$id';
