@@ -118,6 +118,8 @@ class BackupCodec {
     'name': c.name,
     'emoji': c.emoji,
     'color': c.colorValue,
+    'sortOrder': c.sortOrder,
+    'archived': c.archived,
   };
 
   static Map<String, dynamic> unitToJson(MoneyUnit u) => {
@@ -242,13 +244,17 @@ class BackupCodec {
       data,
       'categories',
       ctx,
-      (r) => BackupCategory(
+          (r) => BackupCategory(
         id: r.nonEmpty('id'),
         name: r.nonEmpty('name'),
         emoji: r.str('emoji'),
         colorValue: r.colorInt('color'),
+        // Files from before #83 have neither. Defaults match the columns'
+        // own defaults, so an old file imports without a warning.
+        sortOrder: r.integer('sortOrder', orElse: 0),
+        archived: r.boolean('archived', orElse: false),
       ),
-      (c) => c.id,
+          (c) => c.id,
     );
 
     final units = _table<MoneyUnit>(

@@ -25,9 +25,10 @@ class DriftBackupRepository implements BackupRepository {
   Future<BackupSnapshot> readAll() async {
     // Every table is read in a fixed order, so the same data always
     // exports to the same file (and two exports can be compared).
-    final categories = await (_db.select(
-      _db.categories,
-    )..orderBy([(c) => OrderingTerm(expression: c.id)])).get();
+    final categories = await (_db.select(_db.categories)..orderBy([
+          (c) => OrderingTerm(expression: c.sortOrder),
+          (c) => OrderingTerm(expression: c.id),
+    ])).get();
     final units =
         await (_db.select(_db.units)..orderBy([
               (u) => OrderingTerm(expression: u.sortOrder),
@@ -61,6 +62,8 @@ class DriftBackupRepository implements BackupRepository {
             name: c.name,
             emoji: c.emoji,
             colorValue: c.colorValue,
+            sortOrder: c.sortOrder,
+            archived: c.archived,
           ),
       ],
       units: units.map(unitFromRow).toList(),
@@ -87,6 +90,8 @@ class DriftBackupRepository implements BackupRepository {
                 name: c.name,
                 emoji: c.emoji,
                 colorValue: c.colorValue,
+                sortOrder: Value(c.sortOrder),
+                archived: Value(c.archived),
               ),
           ]);
         }

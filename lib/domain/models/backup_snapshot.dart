@@ -23,21 +23,24 @@ import 'package:fuata/domain/models/unit.dart';
 import 'capture_source.dart';
 import 'limit_rule.dart';
 
-/// A row of the `categories` table. The table exists (transactions can
-/// point at it) but no domain model or repository does yet — Me ->
-/// Categories is "coming soon" — so backups carry the raw shape. Nothing
-/// is lost, and a future categories screen picks the rows up as they are.
+/// A row of the `categories` table (issue #83). Was previously a raw
+/// shape with no domain model — now that categories are user-editable,
+/// the fields are the same ones the domain model carries.
 class BackupCategory {
   final String id;
   final String name;
   final String emoji;
   final int colorValue;
+  final int sortOrder;
+  final bool archived;
 
   const BackupCategory({
     required this.id,
     required this.name,
     required this.emoji,
     required this.colorValue,
+    this.sortOrder = 0,
+    this.archived = false,
   });
 }
 
