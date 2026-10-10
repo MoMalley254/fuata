@@ -11,6 +11,7 @@ import 'package:drift/drift.dart';
 import 'package:flutter/material.dart';
 
 import '../../domain/models/capture_source.dart';
+import '../../domain/models/category.dart';
 import '../../domain/models/limit_alert.dart';
 import '../../domain/models/limit_rule.dart';
 import '../../domain/models/settings.dart';
@@ -559,6 +560,54 @@ class DriftCaptureRepository implements CaptureRepository {
     return (_db.delete(
       _db.unparsedCaptures,
     )..where((u) => u.id.equals(captureId))).go();
+  }
+}
+
+class DriftCategoryRepository implements CategoryRepository {
+  DriftCategoryRepository(this._db);
+  final AppDatabase _db;
+
+  @override
+  Stream<List<Category>> watchCategories() {
+    return (_db.select(_db.categories)
+      ..where((c) => c.archived.equals(false))
+      ..orderBy([
+            (c) => OrderingTerm.asc(c.sortOrder),
+            (c) => OrderingTerm.asc(c.name),
+      ]))
+        .watch()
+        .map((rows) => rows.map(categoryFromRow).toList());
+  }
+
+  @override
+  Stream<List<Category>> watchCategoriesIncludingArchived() {
+    return (_db.select(_db.categories)..orderBy([
+          (c) => OrderingTerm.asc(c.sortOrder),
+          (c) => OrderingTerm.asc(c.name),
+    ]))
+        .watch()
+        .map((rows) => rows.map(categoryFromRow).toList());
+  }
+
+  @override
+  Future<void> saveCategory(Category category) {
+    return _db
+        .into(_db.categories)
+        .insertOnConflictUpdate(categoryToCompanion(category));
+  }
+
+  @override
+  Future<void> archiveCategory(String categoryId) {
+    return (_db.update(_db.categories)
+      ..where((c) => c.id.equals(categoryId)))
+        .write(const CategoriesCompanion(archived: Value(true)));
+  }
+
+  @override
+  Future<void> unarchiveCategory(String categoryId) {
+    return (_db.update(_db.categories)
+      ..where((c) => c.id.equals(categoryId)))
+        .write(const CategoriesCompanion(archived: Value(false)));
   }
 }
 

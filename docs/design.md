@@ -189,6 +189,27 @@ limit id + period key + level is the atomic claim described in §5.4).
 | `rawText` | Original message, **null by default** (privacy); only kept if the user opts in. |
 | `LIMIT_RULE.scope` | `overall` or `unit`. Overall limits cover units in the limit's currency only (v0.1 is effectively single-currency). |
 
+**Categories (#83).** `categories` grew a `sortOrder` and an `archived`
+flag, and the domain now has a `Category` model and a `CategoryRepository`.
+The default set is seeded once, from `AppDatabase._seedDefaultCategories`,
+on both fresh install (`onCreate`) and the 1 → 2 upgrade, so an existing
+dev install ends up with the same starting point a fresh one would.
+
+Archive flips a flag rather than deleting the row: a transaction that
+already points at a category keeps pointing at it, and the detail sheet
+renders it as "Food (archived)" the same way an archived unit reads. The
+picker watches `watchCategories()` (active only); the settings screen
+watches `watchCategoriesIncludingArchived()`.
+
+`PeriodSummary` gained a `spentByCategory` list alongside `spentByUnit`.
+Uncategorised spending is not in the list — a "no category" slice would
+be ambiguous next to the categories the person actually named — but it
+is still in `spentMinor`, so the total never lies.
+
+This is what unblocks **#32** (recipient → category rules): a template
+can now write a category on the transactions it creates, once that issue
+adds the matcher.
+
 ### Derived values (never stored)
 
 - **Balance of a unit** = `openingBalanceMinor + SUM(amountMinor)` over its confirmed transactions.

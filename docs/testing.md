@@ -280,6 +280,18 @@ Run against real drift repositories on an in-memory database (`test/domain/captu
 - [ ] A backup file saved before erasing still opens (nothing wrote to it)
 - [ ] Killing and reopening the app after an erase stays on onboarding, not the old empty Home
 
+### Categories (US-08, US-12) — issue #83
+- [ ] Fresh install ships with nine default categories; the add sheet shows them as chips
+- [ ] Add transaction sheet: picking a category is optional; tapping the picked one again clears it
+- [ ] Fix sheet: a captured transaction's category can be set the same way
+- [ ] Transaction detail at Balanced shows the category name and emoji
+- [ ] Settings > Categories: rename, recolour, and add a category; all three show up in the picker immediately
+- [ ] Archive a category: it leaves the picker but stays on the transactions that already used it, and the detail sheet still reads its name (archived)
+- [ ] Restore an archived category: it comes back to the picker, in its old position
+- [ ] Summary's "Paid on" card ranks categories by amount; uncategorised spending is not listed but the total is still correct
+- [ ] Backup/restore round trip keeps names, emojis, colours, sort order and the archive flag
+- [ ] A backup file made before #83 imports without warnings and shows the defaults in the picker
+
 ### Performance and robustness
 - [ ] With 5,000 seeded transactions: Home opens under 2 s; Activity scrolls smoothly
 - [ ] Rotating the device and changing font size do not break layouts

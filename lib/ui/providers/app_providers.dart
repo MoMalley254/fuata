@@ -5,6 +5,7 @@ import '../../data/db/backup_repository.dart';
 import '../../data/db/drift_repositories.dart';
 import '../../domain/logic/backup_service.dart';
 import '../../domain/logic/ledger.dart';
+import '../../domain/models/category.dart';
 import '../../domain/models/limit_rule.dart';
 import '../../domain/models/settings.dart';
 import '../../domain/models/template.dart';
@@ -216,6 +217,21 @@ final homeStateProvider = Provider<AsyncValue<HomeState>>((ref) {
       spentByDay: spentByDay
     ),
   );
+});
+
+final categoryRepositoryProvider = Provider<CategoryRepository>((ref) {
+  return DriftCategoryRepository(ref.watch(appDatabaseProvider));
+});
+
+/// Active categories, ordered. The picker in the add and fix sheets and
+/// the summary's per-category block both read this.
+final categoriesProvider = StreamProvider<List<Category>>((ref) {
+  return ref.watch(categoryRepositoryProvider).watchCategories();
+});
+
+/// Same, plus archived — the settings screen.
+final allCategoriesProvider = StreamProvider<List<Category>>((ref) {
+  return ref.watch(categoryRepositoryProvider).watchCategoriesIncludingArchived();
 });
 
 extension _FirstOrNull<T> on Iterable<T> {

@@ -60,6 +60,49 @@ void main() {
     test('exportedAt is read back', () {
       expect(BackupCodec.decode(encodeFull()).exportedAt, exportedAt);
     });
+
+    test('a category round-trips with its sort order and archive flag (#83)',
+            () {
+          final snapshot = BackupSnapshot(categories: [
+            const BackupCategory(
+              id: 'c1',
+              name: 'Food',
+              emoji: '🍲',
+              colorValue: 0xFFE07A5F,
+              sortOrder: 3,
+              archived: true,
+            ),
+          ]);
+          final decoded = BackupCodec.decode(
+            BackupCodec.encode(snapshot, exportedAt: exportedAt),
+          );
+          expect(decoded.errors, isEmpty);
+          final c = decoded.snapshot!.categories.single;
+          expect(c.sortOrder, 3);
+          expect(c.archived, isTrue);
+        });
+
+    test('a pre-#83 backup reads with sort order 0 and not archived', () {
+      final root = jsonDecode(
+        BackupCodec.encode(
+          BackupSnapshot(categories: const [
+            BackupCategory(
+              id: 'c1', name: 'Food', emoji: '🍲', colorValue: 0xFFE07A5F,
+            ),
+          ]),
+          exportedAt: exportedAt,
+        ),
+      ) as Map<String, dynamic>;
+      final cat = ((root['data'] as Map)['categories'] as List).first as Map;
+      cat.remove('sortOrder');
+      cat.remove('archived');
+
+      final decoded = BackupCodec.decode(jsonEncode(root));
+      expect(decoded.errors, isEmpty);
+      final c = decoded.snapshot!.categories.single;
+      expect(c.sortOrder, 0);
+      expect(c.archived, isFalse);
+    });
   });
 
   group('original message text (ADR-009)', () {

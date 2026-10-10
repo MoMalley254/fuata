@@ -10,6 +10,7 @@ import '../../ui/theme/app_colors.dart';
 import '../../ui/theme/app_spacing.dart';
 import '../../ui/theme/app_typography.dart';
 import '../app_chips.dart';
+import '../category_chip_row.dart';
 
 /// Fix a captured transaction in place (the review inbox's ✎,
 /// ui-design-brief.md 7.6): the fields the parser can realistically get
@@ -44,6 +45,7 @@ class _FixCapturedSheetState extends ConsumerState<FixCapturedSheet> {
   late String? _unitId;
   bool _saving = false;
   String? _error;
+  String? _categoryId;
 
   @override
   void initState() {
@@ -63,6 +65,7 @@ class _FixCapturedSheetState extends ConsumerState<FixCapturedSheet> {
     _type = t.type == TxType.got ? TxType.got : TxType.spent;
     _occurredAt = t.occurredAt;
     _unitId = t.unitId;
+    _categoryId = widget.transaction.categoryId;
   }
 
   @override
@@ -135,7 +138,7 @@ class _FixCapturedSheetState extends ConsumerState<FixCapturedSheet> {
               counterparty: _counterpartyController.text.trim().isEmpty
                   ? null
                   : _counterpartyController.text.trim(),
-              categoryId: t.categoryId,
+              categoryId: _categoryId,
               note: t.note,
               code: t.code,
               occurredAt: _occurredAt,
@@ -243,6 +246,12 @@ class _FixCapturedSheetState extends ConsumerState<FixCapturedSheet> {
                       hintText: 'Who or what for?',
                     ),
                     style: AppTypography.bodyLg.copyWith(color: c.onSurface),
+                  ),
+                  const SizedBox(height: AppSpacing.sm),
+                  CategoryChipRow(
+                    categories: ref.watch(categoriesProvider).value ?? const [],
+                    selectedId: _categoryId,
+                    onSelected: (id) => setState(() => _categoryId = id),
                   ),
                   const SizedBox(height: AppSpacing.md),
                   Text(

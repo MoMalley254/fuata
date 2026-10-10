@@ -50,15 +50,14 @@ class Units extends Table {
   Set<Column> get primaryKey => {id};
 }
 
-/// design.md CATEGORY. No domain model or repository yet (Me → Categories
-/// isn't built); the table exists so Transaction.categoryId has somewhere
-/// real to point once it is.
 @DataClassName('CategoryRow')
 class Categories extends Table {
   TextColumn get id => text()();
   TextColumn get name => text()();
   TextColumn get emoji => text()();
   IntColumn get colorValue => integer()();
+  IntColumn get sortOrder => integer().withDefault(const Constant(0))();
+  BoolColumn get archived => boolean().withDefault(const Constant(false))();
 
   @override
   Set<Column> get primaryKey => {id};

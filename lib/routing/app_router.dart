@@ -25,6 +25,7 @@ import '../ui/screens/rule_builder_screen.dart';
 import '../ui/screens/settings/appearance_screen.dart';
 import '../ui/screens/settings/detail_level_screen.dart';
 import '../ui/screens/settings/home_settings_screen.dart';
+import '../ui/screens/settings/manage_categories_screen.dart';
 import '../ui/screens/settings/privacy_data_screen.dart';
 import '../ui/screens/settings/settings_screen.dart';
 import '../ui/screens/summary_screen.dart';
@@ -274,6 +275,12 @@ final routerProvider = Provider<GoRouter>((ref) {
           name: Routes.archivedUnits,
           parentNavigatorKey: rootNavigatorKey,
           builder: (_, _) => const ArchivedUnitsScreen(),
+        ),
+        GoRoute(
+          path: Routes.settingsCategoriesPath,
+          name: Routes.settingsCategories,
+          parentNavigatorKey: rootNavigatorKey,
+          builder: (_, _) => const ManageCategoriesScreen(),
         ),
       ]
   );

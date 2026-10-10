@@ -17,6 +17,7 @@ import 'package:drift/drift.dart';
 import 'package:fuata/domain/models/template.dart';
 
 import '../../domain/models/capture_source.dart';
+import '../../domain/models/category.dart';
 import '../../domain/models/limit_rule.dart';
 import '../../domain/models/transaction.dart';
 import '../../domain/models/unit.dart';
@@ -230,5 +231,29 @@ CaptureSourcesCompanion captureSourceToCompanion(CaptureSource s) {
     packageName: s.packageName,
     displayName: s.displayName,
     enabled: Value(s.enabled),
+  );
+}
+
+// --- Category ------------------------------------------------------------
+
+Category categoryFromRow(CategoryRow row) {
+  return Category(
+    id: row.id,
+    name: row.name,
+    emoji: row.emoji,
+    color: Color(row.colorValue),
+    sortOrder: row.sortOrder,
+    archived: row.archived,
+  );
+}
+
+CategoriesCompanion categoryToCompanion(Category c) {
+  return CategoriesCompanion.insert(
+    id: c.id,
+    name: c.name,
+    emoji: c.emoji,
+    colorValue: c.color.toARGB32(),
+    sortOrder: Value(c.sortOrder),
+    archived: Value(c.archived),
   );
 }

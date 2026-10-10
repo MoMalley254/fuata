@@ -49,6 +49,13 @@ class UnitTotal {
   const UnitTotal({required this.unitId, required this.minor});
 }
 
+/// One slice of the per-category split (issue #83).
+class CategoryTotal {
+  final String categoryId;
+  final int minor;
+  const CategoryTotal({required this.categoryId, required this.minor});
+}
+
 /// "KSh 8,420" — whole amounts drop the ".00" so a story reads like a
 /// sentence. Display only; nothing is computed from the string.
 String friendlyMoney(
@@ -94,6 +101,8 @@ class PeriodSummary {
   /// Days from [from] up to today, counting today. Used for the average.
   final int daysSoFar;
 
+  final List<CategoryTotal> spentByCategory;
+
   const PeriodSummary({
     required this.period,
     required this.from,
@@ -108,6 +117,7 @@ class PeriodSummary {
     required this.spentByUnit,
     required this.transactionCount,
     required this.daysSoFar,
+    required this.spentByCategory,
   });
 
   bool get hasActivity => transactionCount > 0;
@@ -147,6 +157,7 @@ bool Function(MoneyTransaction)? include,}) {
     final spentTo = <String, _Acc>{};
     final gotFrom = <String, _Acc>{};
     final unitSpent = <String, int>{};
+    final categorySpent = <String, int>{};
     var spent = 0;
     var got = 0;
     var unnamed = 0;
@@ -170,6 +181,11 @@ bool Function(MoneyTransaction)? include,}) {
           spentTo
               .putIfAbsent(name.toLowerCase(), () => _Acc(name))
               .add(amount, isFee);
+        }
+
+        final cat = t.categoryId;
+        if (cat != null) {
+          categorySpent[cat] = (categorySpent[cat] ?? 0) + amount;
         }
       } else {
         got += t.amountMinor;
@@ -198,6 +214,15 @@ bool Function(MoneyTransaction)? include,}) {
       ]..sort((a, b) {
         final byAmount = b.minor.compareTo(a.minor);
         return byAmount != 0 ? byAmount : a.unitId.compareTo(b.unitId);
+      }),
+      spentByCategory: [
+        for (final e in categorySpent.entries)
+          CategoryTotal(categoryId: e.key, minor: e.value),
+      ]..sort((a, b) {
+        final byAmount = b.minor.compareTo(a.minor);
+        return byAmount != 0
+            ? byAmount
+            : a.categoryId.compareTo(b.categoryId);
       }),
       transactionCount: count,
       daysSoFar: DateTime(now.year, now.month, now.day)

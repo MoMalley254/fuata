@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../domain/logic/summary.dart';
 import '../../domain/models/unit.dart';
 import '../../widgets/app_chips.dart';
+import '../../widgets/summary/category_split_card.dart';
 import '../../widgets/summary/more_numbers.dart';
 import '../../widgets/summary/ranked_list_card.dart';
 import '../../widgets/summary/spent_got_card.dart';
@@ -131,6 +132,14 @@ class _SummaryScreenState extends ConsumerState<SummaryScreen> {
             shares: s.spentByUnit,
             unitById: unitById,
             totalMinor: s.spentMinor,
+            currencyCode: cc,
+          ),
+        ],
+        if (s.spentByCategory.isNotEmpty) ...[
+          gap,
+          CategorySplitCard(
+            shares: s.spentByCategory,
+            allCategories: ref.watch(allCategoriesProvider).value ?? const [],
             currencyCode: cc,
           ),
         ],
