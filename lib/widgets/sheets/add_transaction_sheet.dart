@@ -6,12 +6,14 @@ import 'package:fuata/ui/theme/app_colors.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
+import '../../domain/models/category.dart';
 import '../../domain/models/money.dart';
 import '../../domain/models/transaction.dart';
 import '../../routing/routes.dart';
 import '../../ui/theme/app_spacing.dart';
 import '../../ui/theme/app_typography.dart';
 import '../app_chips.dart';
+import '../category_chip_row.dart';
 
 /// Opens the add-transaction sheet. Wraps the real route so callers keep
 /// the one-line API: /add is a deep-linkable, back-button-aware route now
@@ -44,6 +46,7 @@ class _AddTransactionSheetState extends ConsumerState<AddTransactionSheet> {
   bool _moreExpanded = false;
   bool _saving = false;
   String? _error;
+  String? _categoryId;
 
   void _tapDigit(String d) {
     setState(() {
@@ -172,6 +175,12 @@ class _AddTransactionSheetState extends ConsumerState<AddTransactionSheet> {
               style: AppTypography.bodyLg.copyWith(color: c.onSurface),
             ),
             const SizedBox(height: AppSpacing.sm),
+            CategoryChipRow(
+              categories: ref.watch(categoriesProvider).value ?? const [],
+              selectedId: _categoryId,
+              onSelected: (id) => setState(() => _categoryId = id),
+            ),
+            const SizedBox(height: AppSpacing.sm),
             MoreSection(
               expanded: _moreExpanded,
               onToggle: () => setState(() => _moreExpanded = !_moreExpanded),
@@ -283,6 +292,7 @@ class _AddTransactionSheetState extends ConsumerState<AddTransactionSheet> {
             type: TxType.moved,
             amountMinor: -amount.minor,
             counterparty: counterparty ?? 'Moved',
+            categoryId: _categoryId,
             note: note,
             occurredAt: _occurredAt,
             createdAt: now,
@@ -296,6 +306,7 @@ class _AddTransactionSheetState extends ConsumerState<AddTransactionSheet> {
             type: TxType.moved,
             amountMinor: amount.minor,
             counterparty: counterparty ?? 'Moved',
+            categoryId: _categoryId,
             note: note,
             occurredAt: _occurredAt,
             createdAt: now,
@@ -311,6 +322,7 @@ class _AddTransactionSheetState extends ConsumerState<AddTransactionSheet> {
             type: _type,
             amountMinor: signed,
             counterparty: counterparty,
+            categoryId: _categoryId,
             note: note,
             occurredAt: _occurredAt,
             createdAt: now,
@@ -331,6 +343,7 @@ class _AddTransactionSheetState extends ConsumerState<AddTransactionSheet> {
                   type: TxType.spent,
                   amountMinor: -fee.minor.abs(),
                   counterparty: 'Fee',
+                  categoryId: _categoryId,
                   occurredAt: _occurredAt,
                   createdAt: now,
                   parentId: baseId,
@@ -638,3 +651,5 @@ class MoreSection extends StatelessWidget {
     );
   }
 }
+
+

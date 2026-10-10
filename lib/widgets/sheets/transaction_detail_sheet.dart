@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:fuata/domain/models/money.dart';
 import 'package:intl/intl.dart';
 
+import '../../domain/models/category.dart';
 import '../../domain/models/settings.dart';
 import '../../domain/models/transaction.dart';
 import '../../domain/models/unit.dart';
@@ -157,6 +158,17 @@ class _TransactionDetailSheetState extends ConsumerState<TransactionDetailSheet>
       TxType.adjustment => 'Balance update',
     }));
 
+    // Balanced: unit, type, and the category if there is one.
+    // (The category name comes from the categoriesProvider, which the
+    // widget already reads via the ConsumerState mixin.)
+    final categories = ref.watch(categoriesProvider).value ?? const <Category>[];
+    final cat = t.categoryId == null
+        ? null
+        : categories.where((c) => c.id == t.categoryId).firstOrNull;
+    if (cat != null) {
+      rows.add(MapEntry('Category', '${cat.emoji} ${cat.name}'));
+    }
+
     if (_level == DetailLevel.detailed) {
       rows.add(MapEntry('Exact time', DateFormat('d MMM yyyy, h:mm:ss a').format(t.occurredAt)));
       if (t.code != null) rows.add(MapEntry('Code', t.code!));
@@ -187,13 +199,10 @@ class _TransactionDetailSheetState extends ConsumerState<TransactionDetailSheet>
         children: [
           Text(e.key, style: AppTypography.bodySm.copyWith(color: c.onSurfaceVariant)),
           Flexible(
-            child:             AmountText(
-              minor: t.amountMinor,
-              currencyCode: unit?.currencyCode ?? 'KES',
-              showSign: true,
-              style: AppTypography.headlineLg.copyWith(
-                color: isInflow ? c.statusSafe : c.onSurface,
-              ),
+            child: Text(
+              e.value,
+              textAlign: TextAlign.right,
+              style: AppTypography.bodySm.copyWith(color: c.onSurface),
             ),
           ),
         ],
