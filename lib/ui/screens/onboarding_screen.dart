@@ -6,6 +6,8 @@ import '../../domain/logic/onboarding.dart';
 import '../../domain/models/limit_rule.dart';
 import '../../domain/models/unit.dart';
 import '../../platform/banner.dart';
+import '../../routing/app_router.dart';
+import '../../routing/routes.dart';
 import '../../widgets/onboarding/auto_catch_step.dart';
 import '../../widgets/onboarding/banner_step.dart';
 import '../../widgets/onboarding/limit_step.dart';
@@ -13,7 +15,6 @@ import '../../widgets/onboarding/money_step.dart';
 import '../../widgets/onboarding/step_frame.dart';
 import '../../widgets/onboarding/welcome_step.dart';
 import '../providers/app_providers.dart';
-import 'auto_catch_screen.dart';
 
 /// First-run onboarding (issue #7, US-14, ui-design-brief.md 7.1):
 /// welcome → add your money → daily limit → banner → auto-catch.
@@ -118,14 +119,26 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
   }
 
   /// Saves everything collected, then marks onboarding done. With
-  /// [openAutoCatch], the Auto-Catch screen is opened on top of the app
-  /// once it appears, so access and the apps to watch can be chosen.
+  /// [openAutoCatch], Auto-catch is opened on top of the app once the
+  /// redirect has moved us off /onboarding.
+  ///
+  /// #111: the settings write is what flips `onboardingComplete`, which is
+  /// what makes the router's redirect move us off /onboarding. A
+  /// `Navigator.push` issued from here raced that redirect and lost — on
+  /// device the pushed route was dropped or landed behind the shell.
+  /// Instead, push through go_router *after* the redirect has settled:
+  /// one frame later, on top of whatever the redirect landed on (Home).
   Future<void> _finish({bool openAutoCatch = false}) async {
     if (_finishing) return;
     setState(() => _finishing = true);
 
-    // Captured now: this widget is replaced as soon as the settings save.
-    final navigator = Navigator.of(context);
+    // Captured before the await: the router outlives this screen (it's
+    // created once by routerProvider for the app's lifetime), so this
+    // reference stays valid even after the redirect unmounts us.
+    // Deliberately *not* Navigator.of(context): pushing on the raw
+    // Navigator is what bypassed go_router and lost the race in the first
+    // place.
+    final router = ref.read(routerProvider);
     final messenger = ScaffoldMessenger.of(context);
     final draft = _draft.copyWith(name: _name.text);
 
@@ -156,11 +169,15 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
       return;
     }
 
+    // The settings write has committed, so onboarded is now true and the
+    // redirect will allow any destination. Wait one frame for the
+    // redirect's own navigation to settle, then push Auto-catch on top of
+    // it. `router.push` is context-free, so no `context.mounted` check is
+    // needed — and none would help, since the redirect will have unmounted
+    // this screen by then.
     if (openAutoCatch) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        navigator.push(
-          MaterialPageRoute<void>(builder: (_) => const AutoCatchScreen()),
-        );
+        router.push(Routes.autoCatchPath);
       });
     }
   }
