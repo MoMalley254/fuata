@@ -40,6 +40,12 @@ class StatusRingCard extends ConsumerWidget {
     final accent = status.fg(c);
     final hidden = ref.watch(currentSettingsProvider).amountsHidden;
 
+    // Issue #110: build the displayed string once, so the length check
+    // that picks the style and the Text that renders it can't disagree.
+    final displayText = hidden
+        ? kHiddenAmountMask
+        : '$currencySymbol${_fmt(remaining)}';
+
     return Material(
       color: Colors.transparent,
       child: InkWell(
@@ -72,25 +78,49 @@ class StatusRingCard extends ConsumerWidget {
                       accent: accent,
                     ),
                     child: Center(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Text(
-                            hidden
-                                ? kHiddenAmountMask
-                                : '$currencySymbol${_fmt(remaining)}',
-                            style: AppTypography.displayHeroMobile
-                                .copyWith(color: c.onSurface),
-                          ),
-                          const SizedBox(height: 8),
-                          StatusPill(status: status),
-                          const SizedBox(height: 6),
-                          Text(
-                            caption,
-                            style: AppTypography.bodySm
-                                .copyWith(color: c.onSurfaceVariant),
-                          ),
-                        ],
+                      child: Padding(
+                        // Issue #110: keep the content off the ring without squeezing the
+                        // status pill. AppSpacing.sm each side leaves 184 dp inside the
+                        // 200 dp box; the ring's inner edge sits at ~176 dp.
+                        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            // Issue #110: the number, so a very large amount can never
+                            // clip the ring or push the pill off the card.
+                            FittedBox(
+                              fit: BoxFit.scaleDown,
+                              child: Text(
+                                displayText,
+                                maxLines: 1,
+                                softWrap: false,
+                                style: _heroNumberStyle(
+                                  displayText: displayText,
+                                  color: c.onSurface,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            // Also FittedBoxed: "Almost at your limit" at labelSm is wider
+                            // than the ring's inner width, and a large amount leaves no
+                            // room to spare. Previously this line only survived because
+                            // the number above it was short.
+                            FittedBox(
+                              fit: BoxFit.scaleDown,
+                              child: StatusPill(status: status),
+                            ),
+                            const SizedBox(height: 6),
+                            // The caption is allowed to wrap, so it doesn't need a
+                            // FittedBox — just enough width to break on its spaces.
+                            Text(
+                              caption,
+                              textAlign: TextAlign.center,
+                              style: AppTypography.bodySm
+                                  .copyWith(color: c.onSurfaceVariant),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                   ),
@@ -111,6 +141,20 @@ class StatusRingCard extends ConsumerWidget {
       buf.write(s[i]);
     }
     return v < 0 ? '-${buf.toString()}' : buf.toString();
+  }
+
+  /// Issue #110: start a long hero number one size down so FittedBox
+  /// has less shrinking to do. Ten characters is about where
+  /// displayHeroMobile (36 px) stops fitting the ring's inner width
+  /// once the currency prefix and the horizontal padding are counted.
+  static TextStyle _heroNumberStyle({
+    required String displayText,
+    required Color color,
+  }) {
+    final base = displayText.length <= 10
+        ? AppTypography.displayHeroMobile
+        : AppTypography.headlineLg;
+    return base.copyWith(color: color);
   }
 }
 
