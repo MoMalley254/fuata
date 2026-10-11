@@ -300,7 +300,7 @@ class Greeting extends StatelessWidget {
 /// "Am I okay today?" (ui-design-brief.md section 7.2).
 /// Uses the real StatusRingCard when a daily limit is set; falls back to
 /// a plain total when it isn't (StatusRingCard assumes a limit exists).
-class HeroSection extends StatelessWidget {
+class HeroSection extends ConsumerWidget {
   final HomeState state;
   final HomeHeadline headline;
   const HeroSection({
@@ -310,7 +310,7 @@ class HeroSection extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final limit = state.dailyLimit;
     final currency = state.units.isNotEmpty
         ? state.units.first.currencyCode
@@ -326,6 +326,7 @@ class HeroSection extends StatelessWidget {
     // future polish, flagged rather than done partially here.
     if (limit == null || headline != HomeHeadline.leftToday) {
       final c = context.colors;
+      final hidden = ref.watch(currentSettingsProvider).amountsHidden;
       final (label, amountMinor, caption) = switch (headline) {
         HomeHeadline.leftToday => (
           'Altogether you have',
@@ -345,6 +346,16 @@ class HeroSection extends StatelessWidget {
               : 'of ${Money(limit.amountMinor, currency).format()} · resets at midnight',
         ),
       };
+
+      // Issue #110: pick the starting size from the text that will
+      // actually be shown (the same one AmountText formats), so a
+      // 9-figure balance starts smaller instead of relying on
+      // FittedBox to shrink it out of legibility.
+      final displayText = hidden
+          ? kHiddenAmountMask
+          : Money(amountMinor, currency).format();
+      final numberStyle = _heroStyleFor(displayText, c.onSurface);
+
       return Container(
         width: double.infinity,
         padding: const EdgeInsets.all(AppSpacing.lg),
@@ -361,11 +372,16 @@ class HeroSection extends StatelessWidget {
               style: AppTypography.bodyMd.copyWith(color: c.onSurfaceVariant),
             ),
             const SizedBox(height: AppSpacing.xs),
-            AmountText(
-              minor: amountMinor,
-              currencyCode: currency,
-              style: AppTypography.displayHeroMobile.copyWith(
-                color: c.onSurface,
+            // Issue #110: the card's content width is about 272 dp on
+            // a 360 dp phone, where displayHeroMobile fits roughly
+            // thirteen characters. FittedBox covers the rest.
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerLeft,
+              child: AmountText(
+                minor: amountMinor,
+                currencyCode: currency,
+                style: numberStyle,
               ),
             ),
             const SizedBox(height: AppSpacing.xs),
@@ -385,6 +401,16 @@ class HeroSection extends StatelessWidget {
       status: state.status,
       currencySymbol: symbol,
     );
+  }
+
+  /// Issue #110: same thresholding as
+  /// [StatusRingCard._heroNumberStyle], tuned to the wider plain card
+  /// (no ring, so more room before the number has to shrink).
+  static TextStyle _heroStyleFor(String displayText, Color color) {
+    final base = displayText.length <= 13
+        ? AppTypography.displayHeroMobile
+        : AppTypography.headlineLg;
+    return base.copyWith(color: color);
   }
 }
 
