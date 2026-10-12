@@ -17,6 +17,7 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
 import '../../domain/models/category.dart';
+import 'db_key.dart';
 import 'tables.dart';
 
 part 'app_database.g.dart';
@@ -99,18 +100,26 @@ class AppDatabase extends _$AppDatabase {
 
 LazyDatabase _openConnection() {
   return LazyDatabase(() async {
-    // Android is the only target in v0.1 (requirements.md, non-goals).
-    // Required so drift can find a working sqlite3 native library
-    // instead of relying on the OS's own (often older) copy.
-    // if (Platform.isAndroid) {
-    //   await applyWorkaroundToOpenSqlite3OnOldAndroidVersions();
-    // }
-
     // Unencrypted SQLite in v0.1 (ADR-010, time-boxed decision).
     // SQLCipher + Android Keystore is planned for v1.1, at which point
     // this is where the cipher key gets wired in.
     final dir = await getApplicationDocumentsDirectory();
     final file = File(p.join(dir.path, 'fuata.sqlite'));
-    return NativeDatabase.createInBackground(file);
+
+    // #28: the key is read from Android Keystore on every open. It is not
+    // cached in memory beyond the process lifetime, and never written
+    // anywhere else.
+    final key = await DbKey.getOrCreate();
+
+    return NativeDatabase.createInBackground(
+        file,
+      setup: (rawDb) {
+        // `x'...'` tells SQLCipher this is a raw hex key, not a passphrase
+        // to run through PBKDF2. Raw keys are faster and unambiguous.
+        rawDb.execute("PRAGMA key = \"x'$key'\";");
+        // Verify the key is correct now, rather than on the first query.
+        rawDb.execute('SELECT count(*) FROM sqlite_master;');
+      }
+    );
   });
 }

@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_riverpod/legacy.dart';
 import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
 import 'package:fuata/platform/banner.dart';
 import 'package:fuata/routing/routes.dart';
 import 'package:fuata/ui/providers/app_providers.dart';
+import 'package:fuata/ui/screens/lock_screen.dart';
 import 'package:go_router/go_router.dart';
 
 import '../domain/logic/summary.dart';
@@ -40,12 +42,28 @@ import 'app_keys.dart';
 final initialBannerActionProvider = Provider<BannerAction?>((ref) => null);
 final _shellNavigatorKey = GlobalKey<NavigatorState>(debugLabel: 'shell');
 
+/// True only once the person has unlocked *this session*. A cold start
+/// is false; backgrounding the app flips it back to false (see Fuata's
+/// lifecycle observer in main.dart).
+final unlockedThisSessionProvider = StateProvider<bool>((ref) => false);
+
+/// Whether the lock screen should be showing right now: the person asked
+/// for it, and they haven't unlocked yet. Derived, so nothing has to keep
+/// two booleans in sync by hand.
+final lockedProvider = Provider<bool>((ref) {
+  final appLock = ref.watch(currentSettingsProvider).appLockEnabled;
+  return appLock && !ref.watch(unlockedThisSessionProvider);
+});
+
 final routerProvider = Provider<GoRouter>((ref) {
   // go_router wants a Listenable for the redirect. The settings stream is
   // the only thing that changes whether onboarding is done, so a small
   // counter bumped on every settings emission is enough.
   final refresh = ValueNotifier<int>(0);
   ref.listen(settingsProvider, (_, _) => refresh.value++);
+  // Without this, unlocking never re-runs the redirect and the person
+  // stares at the lock screen until they force-quit.
+  ref.listen(lockedProvider, (_, _) => refresh.value++);
   ref.onDispose(refresh.dispose);
 
   final initialAction = ref.read(initialBannerActionProvider);
@@ -72,16 +90,22 @@ final routerProvider = Provider<GoRouter>((ref) {
         // own money. Fall through and let whatever screen handle it.
         if (settings.hasError) return null;
 
-        final onboarded = settings.value?.onboardingComplete ?? false;
+        final s = settings.value!;
 
-        // 3. Not onboarded yet: /onboarding, and only /onboarding. This is
-        // what stops a cold-start banner tap from opening the add sheet
-        // over the onboarding flow.
-        if (!onboarded) {
+        // 3. Not onboarded -> onboarding, and only onboarding. Comes before the
+        //    lock check so a fresh install (where appLockEnabled is false
+        //    anyway, but still) can never be gated by a lock it never set.
+        if (!s.onboardingComplete) {
           return loc == Routes.onboardingPath ? null : Routes.onboardingPath;
         }
 
-        // 4. Onboarded: bounce off /splash and /onboarding.
+        // 4. Locked -> lock, and only lock.
+        if (ref.read(lockedProvider)) {
+          return loc == Routes.lockPath ? null : Routes.lockPath;
+        }
+
+        // 5. Unlocked: bounce off the transient routes.
+        if (loc == Routes.lockPath) return Routes.homePath;
         if (loc == Routes.splashPath) return intendedLocation;
         if (loc == Routes.onboardingPath) return Routes.homePath;
 
@@ -97,6 +121,14 @@ final routerProvider = Provider<GoRouter>((ref) {
           path: Routes.onboardingPath,
           name: Routes.onboarding,
           builder: (_, _) => const OnboardingScreen(),
+        ),
+        GoRoute(
+          path: Routes.lockPath,
+          name: Routes.lock,
+          builder: (_, _) => LockScreen(
+            onUnlocked: () =>
+            ref.read(unlockedThisSessionProvider.notifier).state = true,
+          )
         ),
 
         // The four tabs. StatefulShellRoute keeps each branch's state, like
