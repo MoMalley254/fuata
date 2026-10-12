@@ -108,6 +108,14 @@ class _FuataState extends ConsumerState<Fuata> with WidgetsBindingObserver {
       final db = ref.read(appDatabaseProvider);
       db.markTablesUpdated([db.transactions, db.unparsedCaptures]);
     }
+
+    if (state == AppLifecycleState.paused) {
+      // The DB stays open — the listener's background isolate has no lock
+      // prompt and must keep capturing. This is a UI gate only.
+      if (ref.read(currentSettingsProvider).appLockEnabled) {
+        ref.read(unlockedThisSessionProvider.notifier).state = false;
+      }
+    }
   }
 
   @override

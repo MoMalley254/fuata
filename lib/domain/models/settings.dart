@@ -192,6 +192,9 @@ class AppSettings {
   /// means an empty selection, which reads the same as `none`.
   final BannerUnitsMode bannerUnitsMode;
 
+  final bool appLockEnabled;
+  final bool appLockBiometric;  // false = device credential only
+
   const AppSettings({
     required this.name,
     required this.accent,
@@ -214,6 +217,8 @@ class AppSettings {
     this.onboardingComplete = false,
     this.amountsHidden = false,
     this.bannerUnitsMode = BannerUnitsMode.all,
+    this.appLockBiometric = false,
+    this.appLockEnabled = false,
   });
 
   static final defaults = AppSettings(
@@ -238,6 +243,8 @@ class AppSettings {
     quietEndMinute: 7 * 60,
     onboardingComplete: false,
     amountsHidden: false,
+    appLockEnabled: false,
+    appLockBiometric: false,
   );
 
   AppSettings copyWith({
@@ -262,6 +269,8 @@ class AppSettings {
     int? quietEndMinute,
     bool? onboardingComplete,
     bool? amountsHidden,
+    bool? appLockBiometric,
+    bool? appLockEnabled,
   }) {
     return AppSettings(
       name: name ?? this.name,
@@ -287,6 +296,8 @@ class AppSettings {
       quietEndMinute: quietEndMinute ?? this.quietEndMinute,
       onboardingComplete: onboardingComplete ?? this.onboardingComplete,
       amountsHidden: amountsHidden ?? this.amountsHidden,
+      appLockEnabled: appLockEnabled ?? this.appLockEnabled,
+      appLockBiometric: appLockBiometric ?? this.appLockBiometric,
     );
   }
 }
