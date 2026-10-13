@@ -29,6 +29,7 @@ import '../ui/screens/settings/detail_level_screen.dart';
 import '../ui/screens/settings/home_settings_screen.dart';
 import '../ui/screens/settings/manage_categories_screen.dart';
 import '../ui/screens/settings/privacy_data_screen.dart';
+import '../ui/screens/settings/security_screen.dart';
 import '../ui/screens/settings/settings_screen.dart';
 import '../ui/screens/summary_screen.dart';
 import '../ui/screens/unit_detail_screen.dart';
@@ -313,6 +314,12 @@ final routerProvider = Provider<GoRouter>((ref) {
           name: Routes.settingsCategories,
           parentNavigatorKey: rootNavigatorKey,
           builder: (_, _) => const ManageCategoriesScreen(),
+        ),
+        GoRoute(
+          path: Routes.settingsSecurityPath,
+          name: Routes.settingsSecurity,
+          parentNavigatorKey: rootNavigatorKey,
+          builder: (_, _) => const SecurityScreen(),
         ),
       ]
   );

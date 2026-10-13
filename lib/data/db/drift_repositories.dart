@@ -251,6 +251,11 @@ class DriftSettingsRepository implements SettingsRepository {
 
   static const _kHideAmounts = 'amountsHidden'; // issue #81
 
+  // Issue #28: the app-lock preference. Deliberately not in the backup
+  // codec — a lock is a choice about *this* phone, not about the data.
+  static const _kAppLockEnabled = 'appLockEnabled';
+  static const _kAppLockBiometric = 'appLockBiometric';
+
   @override
   Stream<AppSettings> watchSettings() {
     return _db.select(_db.settingsEntries).watch().map(_toSettings);
@@ -348,6 +353,14 @@ class DriftSettingsRepository implements SettingsRepository {
       SettingsEntriesCompanion.insert(
         key: _kHideAmounts,
         value: s.amountsHidden.toString(),
+      ),
+      SettingsEntriesCompanion.insert(
+        key: _kAppLockEnabled,
+        value: s.appLockEnabled.toString(),
+      ),
+      SettingsEntriesCompanion.insert(
+        key: _kAppLockBiometric,
+        value: s.appLockBiometric.toString(),
       ),
     ];
   }
@@ -465,6 +478,14 @@ class DriftSettingsRepository implements SettingsRepository {
       onboardingComplete: boolOr(map[_kOnboardingComplete], true),
       //#81 — default is "not hidden".
       amountsHidden: boolOr(map[_kHideAmounts], defaults.amountsHidden),
+      // #28. Rows written before this change have no key: the
+      // default is off, which is also what an upgrade should do —
+      // nobody gets locked out of an app they never asked to lock.
+      appLockEnabled: boolOr(map[_kAppLockEnabled], defaults.appLockEnabled),
+      appLockBiometric: boolOr(
+        map[_kAppLockBiometric],
+        defaults.appLockBiometric,
+      ),
     );
   }
 }
