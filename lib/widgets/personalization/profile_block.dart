@@ -5,6 +5,8 @@ import '../../domain/models/settings.dart';
 import '../../ui/theme/app_colors.dart';
 import '../../ui/theme/app_spacing.dart';
 import '../../ui/theme/app_typography.dart';
+import '../sheets/accent_colour_picker_sheet.dart';
+import 'custom_accent_swatch.dart';
 import 'label.dart';
 
 class ProfileBlock extends StatefulWidget {
@@ -31,9 +33,19 @@ class _ProfileBlockState extends State<ProfileBlock> {
     widget.onChanged((s) => s.copyWith(name: trimmed));
   }
 
+  Future<void> _pickCustom() async {
+    final picked = await showAccentColorPicker(
+      initial: widget.settings.accent,
+    );
+    if (picked == null) return;
+    widget.onChanged((s) => s.copyWith(accent: picked));
+  }
+
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
+    final isCustom = !AppAccents.isPreset(widget.settings.accent);
+
     return SectionCard(
       children: [
         Row(
@@ -67,38 +79,61 @@ class _ProfileBlockState extends State<ProfileBlock> {
         Wrap(
           spacing: AppSpacing.sm,
           runSpacing: AppSpacing.sm,
-          children: AppAccents.swatches.map((swatch) {
-            final selected = widget.settings.accent.toARGB32() == swatch.toARGB32();
-            return InkWell(
-              onTap: () => widget.onChanged((s) => s.copyWith(accent: swatch)),
-              borderRadius: BorderRadius.circular(AppSpacing.pill),
-              child: Container(
-                width: 36,
-                height: 36,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: swatch,
-                  border: Border.all(
-                    color: selected ? c.onSurface : Colors.transparent,
-                    width: 2,
-                  ),
-                ),
-                alignment: Alignment.center,
-                child: selected ? const Icon(Icons.check_rounded, color: Colors.white, size: 18) : null,
+          children: [
+            for (final swatch in AppAccents.swatches)
+              _Swatch(
+                color: swatch,
+                selected: widget.settings.accent.toARGB32() ==
+                    swatch.toARGB32(),
+                onTap: () =>
+                    widget.onChanged((s) => s.copyWith(accent: swatch)),
               ),
-            );
-          }).toList(),
+            CustomAccentSwatch(
+              selected: isCustom,
+              size: 36,
+              onTap: () => _pickCustom(),
+            ),
+          ],
         ),
         const SizedBox(height: AppSpacing.xs),
-        Text(
-          // A free-pick custom colour needs a colour-picker widget this
-          // project doesn't have yet — flagged rather than silently
-          // dropped, same pattern as the currency picker in
-          // edit_unit_sheet.dart.
-          'A custom colour picker is coming later — pick the closest one for now.',
-          style: AppTypography.bodySm.copyWith(color: c.onSurfaceVariant),
-        ),
       ],
+    );
+  }
+}
+
+class _Swatch extends StatelessWidget {
+  const _Swatch({
+    required this.color,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final Color color;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(AppSpacing.pill),
+      child: Container(
+        width: 36,
+        height: 36,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: color,
+          border: Border.all(
+            color: selected ? c.onSurface : Colors.transparent,
+            width: 2,
+          ),
+        ),
+        alignment: Alignment.center,
+        child: selected
+            ? const Icon(Icons.check_rounded, color: Colors.white, size: 18)
+            : null,
+      ),
     );
   }
 }

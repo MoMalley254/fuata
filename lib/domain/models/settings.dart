@@ -126,6 +126,17 @@ class AppAccents {
     berry,
     slate,
   ];
+
+  /// True when [c] is one of the presets. Used by the profile and
+  /// welcome screens to decide whether the custom swatch should show
+  /// itself as the current selection (issue #118).
+  ///
+  /// Compares ARGB ints rather than `Color` instances, matching how
+  /// every other colour comparison in the app is done — `Color` has an
+  /// extended-gamut representation that `==` is sensitive to, and these
+  /// are all plain sRGB so the integer is the reliable form.
+  static bool isPreset(Color c) =>
+      swatches.any((s) => s.toARGB32() == c.toARGB32());
 }
 
 /// Everything the person controls about how the app looks and behaves,
