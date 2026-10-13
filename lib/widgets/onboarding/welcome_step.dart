@@ -4,7 +4,9 @@ import '../../domain/models/settings.dart';
 import '../../ui/theme/app_colors.dart';
 import '../../ui/theme/app_spacing.dart';
 import '../../ui/theme/app_typography.dart';
+import '../personalization/custom_accent_swatch.dart';
 import '../personalization/label.dart';
+import '../sheets/accent_colour_picker_sheet.dart';
 import 'step_frame.dart';
 
 /// Step 1 — welcome, name and accent colour (ui-design-brief.md 7.1).
@@ -62,6 +64,16 @@ class WelcomeStep extends StatelessWidget {
                   selected: accent.toARGB32() == swatch.toARGB32(),
                   onTap: () => onAccent(swatch),
                 ),
+              CustomAccentSwatch(
+                selected: !AppAccents.isPreset(accent),
+                size: 44,
+                onTap: () async {
+                  final picked = await showAccentColorPicker(
+                    initial: accent,
+                  );
+                  if (picked != null) onAccent(picked);
+                },
+              ),
             ],
           ),
         ],
