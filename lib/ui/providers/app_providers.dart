@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/db/app_database.dart';
@@ -130,6 +132,53 @@ final currentSettingsProvider = Provider<AppSettings>((ref) {
   return ref.watch(settingsProvider).value ?? AppSettings.defaults;
 });
 
+/// Fires once at each local midnight so everything derived from "which
+/// day is it" — Home, the banner, the alerts, the widget, Summary — rolls
+/// over without the person doing anything (issue #107).
+///
+/// A Notifier rather than a StreamProvider<void>: a stream yielding `null`
+/// emits an equal `AsyncData<void>` every time, and Riverpod's default
+/// `==` comparison means only the first tick would notify watchers. An
+/// incrementing int is always a new value.
+class MidnightTicker extends Notifier<int> {
+  Timer? _timer;
+
+  @override
+  int build() {
+    _schedule();
+    ref.onDispose(() => _timer?.cancel());
+    return 0;
+  }
+
+  /// Recompute now, then re-arm for the next boundary. Called on app
+  /// resume: a phone asleep across midnight never fired the timer, and
+  /// resume is the moment the person will actually look at the screen.
+  void refresh() {
+    state = state + 1;
+    _schedule();
+  }
+
+  void _schedule() {
+    final now = DateTime.now();
+    // DateTime normalises day overflow, so a month end and a year end are
+    // handled without special cases.
+    final nextMidnight = DateTime(now.year, now.month, now.day + 1);
+    var delay = nextMidnight.difference(now);
+    // A clock that hasn't moved (or was moved backwards) would give a
+    // non-positive delay, and Timer(<=0) spins the isolate. A one-second
+    // floor keeps the loop alive without hammering it.
+    if (delay <= Duration.zero) delay = const Duration(seconds: 1);
+    _timer?.cancel();
+    _timer = Timer(delay, () {
+      state = state + 1;
+      _schedule();
+    });
+  }
+}
+
+final midnightTickProvider =
+NotifierProvider<MidnightTicker, int>(MidnightTicker.new);
+
 /// Everything Home needs, recomputed whenever units/transactions/limits
 /// change. Kept as one bundle per the storage/perf note in the build
 /// notes: fewer moving parts for the UI to juggle.
@@ -169,6 +218,10 @@ class HomeState {
 }
 
 final homeStateProvider = Provider<AsyncValue<HomeState>>((ref) {
+  // Re-run on each midnight tick: without this a Home screen left open
+  // across the boundary keeps showing yesterday's total and status until
+  // something else changes (issue #107).
+  ref.watch(midnightTickProvider);
   final unitsAsync = ref.watch(unitsProvider);
   final txAsync = ref.watch(transactionsProvider);
   final limitsAsync = ref.watch(limitsProvider);
