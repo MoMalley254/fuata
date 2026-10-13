@@ -20,6 +20,8 @@ final _alertQueue = SerialQueue();
 
 /// Start once, from Fuata's build (watched, like bannerSyncProvider).
 final alertSyncProvider = Provider<void>((ref) {
+  // A new day/week/month is a new period, so re-evaluate on the tick.
+  ref.watch(midnightTickProvider);
   final units = ref.watch(unitsProvider);
   final transactions = ref.watch(transactionsProvider);
   final limits = ref.watch(limitsProvider);

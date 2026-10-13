@@ -107,6 +107,10 @@ class _FuataState extends ConsumerState<Fuata> with WidgetsBindingObserver {
     if (state == AppLifecycleState.resumed) {
       final db = ref.read(appDatabaseProvider);
       db.markTablesUpdated([db.transactions, db.unparsedCaptures]);
+      // Issue #107: a phone that slept through midnight missed the timer
+      // entirely, and resume is the moment the person actually looks at
+      // the screen — so recompute now and re-arm for the next boundary.
+      ref.read(midnightTickProvider.notifier).refresh();
     }
 
     if (state == AppLifecycleState.paused) {

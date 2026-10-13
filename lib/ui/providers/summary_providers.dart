@@ -18,6 +18,9 @@ class SummaryData {
 
 final summaryProvider =
 Provider.family<AsyncValue<SummaryData>, SummaryPeriod>((ref, period) {
+  // "Today" and "this week" change at midnight even when no transaction
+  // does (issue #107).
+  ref.watch(midnightTickProvider);
   final unitsAsync = ref.watch(unitsProvider);
   final txAsync = ref.watch(transactionsProvider);
 
