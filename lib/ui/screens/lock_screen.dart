@@ -1,5 +1,6 @@
 // lib/ui/screens/lock_screen.dart
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:local_auth/local_auth.dart';
 
@@ -33,24 +34,58 @@ class _LockScreenState extends ConsumerState<LockScreen> {
       _busy = true;
       _error = null;
     });
+
     try {
       final s = ref.read(currentSettingsProvider);
+
+      // Ask for biometric-only only if a sensor is actually enrolled
+      // right now. The preference was written when the person set this
+      // up; fingerprints can have been removed since. Passing
+      // biometricOnly: true on a phone with none throws, and an error
+      // string on a lock screen is a person who can't get in.
+      var biometricOnly = s.appLockBiometric;
+      if (biometricOnly) {
+        final enrolled = await _auth.getAvailableBiometrics();
+        if (enrolled.isEmpty) biometricOnly = false;
+      }
+
       final ok = await _auth.authenticate(
-        localizedReason: 'Unlock Fuata',
+        localizedReason: 'Unlock Fuata to see your money',
         authMessages: const [],
-        biometricOnly: s.appLockBiometric,
+        biometricOnly: biometricOnly,
       );
+
+      if (!mounted) return;
       if (ok) {
         widget.onUnlocked();
       } else {
         setState(() => _error = 'Not unlocked.');
       }
+    } on PlatformException catch (e) {
+      if (!mounted) return;
+      setState(() => _error = _explain(e));
     } catch (e) {
+      if (!mounted) return;
       setState(() => _error = 'Could not unlock: $e');
     } finally {
       if (mounted) setState(() => _busy = false);
     }
   }
+
+  /// Turn local_auth's platform error codes into something a person can
+  /// act on. The commonest by far is "no screen lock configured": they
+  /// had one, then removed it in Android settings — Fuata can't verify
+  /// them any more, and the fix is on their side.
+  String _explain(PlatformException e) => switch (e.code) {
+    'NotAvailable' || 'NotEnrolled' =>
+    'This phone has no screen lock set up. Set a PIN, pattern or '
+        'fingerprint in Android’s settings, then try again.',
+    'LockedOut' =>
+    'Too many tries. Unlock your phone with its PIN, then try again.',
+    'PermanentlyLockedOut' =>
+    'Unlock your phone with its PIN, then try again.',
+    _ => 'Could not unlock: ${e.message ?? e.code}',
+  };
 
   @override
   Widget build(BuildContext context) {

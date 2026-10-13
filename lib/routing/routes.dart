@@ -27,6 +27,7 @@ class Routes {
   static const settingsPrivacy = 'settingsPrivacy';
   static const settingsCategories = 'settingsCategories';
   static const lock = 'lock';
+  static const settingsSecurity = 'settingsSecurity';
 
   // ---- Paths ----
   static const splashPath = '/splash';
@@ -56,6 +57,7 @@ class Routes {
   static const archivedUnitsPath = '/archived-units';
   static const settingsCategoriesPath = '/settings/categories';
   static const lockPath = '/lock';
+  static const settingsSecurityPath = '/settings/security';
 
   // ---- Helpers ----
   static String unitFor(String id) => '/unit/$id';

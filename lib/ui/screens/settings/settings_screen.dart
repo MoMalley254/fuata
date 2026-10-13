@@ -127,6 +127,15 @@ class SettingsScreen extends ConsumerWidget {
             ),
             const SizedBox(height: AppSpacing.sm),
             ActionRow(
+              icon: Icons.fingerprint_rounded,
+              title: 'Security',
+              subtitle: settings.appLockEnabled
+                  ? 'App lock is on'
+                  : 'App lock is off — anyone with the phone can open Fuata',
+              onTap: () => context.push(Routes.settingsSecurityPath),
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            ActionRow(
               icon: Icons.lock_outline_rounded,
               title: 'Privacy & data',
               subtitle: 'Lock-screen redaction, back up & restore',

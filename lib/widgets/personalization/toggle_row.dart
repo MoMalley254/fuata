@@ -11,7 +11,11 @@ class ToggleRow extends StatelessWidget {
   final String title;
   final String subtitle;
   final bool value;
-  final ValueChanged<bool> onChanged;
+
+  /// Null renders the row with the switch disabled — used for a toggle
+  /// that is only meaningful once another one is on (e.g. biometric
+  /// unlock before app lock itself is enabled).
+  final ValueChanged<bool>? onChanged;
   const ToggleRow({super.key,
     required this.title,
     required this.subtitle,

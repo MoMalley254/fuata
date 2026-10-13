@@ -232,6 +232,33 @@ void main() {
     expect(saved.autoAcceptCaptures, isTrue);
   });
 
+  test('app lock settings persist (#28)', () async {
+    final repo = DriftSettingsRepository(db);
+
+    // An install that predates #28 has no key: the default is off.
+    expect((await repo.watchSettings().first).appLockEnabled, isFalse);
+    expect((await repo.watchSettings().first).appLockBiometric, isFalse);
+
+    await repo.updateSettings(
+      AppSettings.defaults.copyWith(
+        appLockEnabled: true,
+        appLockBiometric: true,
+      ),
+    );
+
+    final saved = await repo.watchSettings().first;
+    expect(saved.appLockEnabled, isTrue);
+    expect(saved.appLockBiometric, isTrue);
+
+    // Turning the lock off leaves the biometric preference intact, so
+    // turning it back on keeps the person's choice instead of silently
+    // resetting it.
+    await repo.updateSettings(saved.copyWith(appLockEnabled: false));
+    final off = await repo.watchSettings().first;
+    expect(off.appLockEnabled, isFalse);
+    expect(off.appLockBiometric, isTrue);
+  });
+
   group('limit alerts (#63)', () {
     const key = AlertKey('l_overall_day', '2026-09-30', AlertLevel.warning);
     final at = DateTime(2026, 9, 30, 12);

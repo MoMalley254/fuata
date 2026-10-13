@@ -1,4 +1,4 @@
-# Issue status (generated 2026-10-10T18:26Z)
+# Issue status (generated 2026-10-12T15:54Z)
 
 Source of truth: GitHub. Regenerate with `scripts/refresh-issue-status.sh`.
 
@@ -11,8 +11,8 @@ Source of truth: GitHub. Regenerate with `scripts/refresh-issue-status.sh`.
 | #114 | OPEN | v1.1 Backlog | feat(settings): a single, app-wide currency |
 | #113 | OPEN | v1.1 Backlog | feat(widget): surface and configure the home widget from Banner setup |
 | #112 | OPEN | v0.1 MVP | fix(ui): Home shows "See my summaries" twice |
-| #111 | OPEN | v0.1 MVP | fix(onboarding): "Show me how" doesn't open Auto-catch |
-| #110 | OPEN | v0.1 MVP | fix(ui): Home hero number overflows for large amounts |
+| #111 | CLOSED | v0.1 MVP | fix(onboarding): "Show me how" doesn't open Auto-catch |
+| #110 | CLOSED | v0.1 MVP | fix(ui): Home hero number overflows for large amounts |
 | #109 | OPEN | v0.1 MVP | fix(ledger): week-peek bars group by UTC day, not local day |
 | #108 | OPEN | v0.1 MVP | fix(ledger): day/week/month ranges seem to include the wrong days |
 | #107 | OPEN | v0.1 MVP | fix(ledger): day and limit numbers don't roll over at midnight |

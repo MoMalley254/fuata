@@ -1,7 +1,13 @@
 package com.kinyuanexus.fuata.fuata
 
 import android.content.Intent
-import io.flutter.embedding.android.FlutterActivity
+// Issue #28: FlutterFragmentActivity, not FlutterActivity — local_auth
+// drives AndroidX BiometricPrompt, which requires its host to be a
+// FragmentActivity. On a plain Activity it fails with
+// uiUnavailable/"the current activity must be a FragmentActivity".
+// FlutterFragmentActivity is the same Flutter delegate in a Fragment
+// host, so every channel below is unaffected.
+import io.flutter.embedding.android.FlutterFragmentActivity
 import io.flutter.embedding.engine.FlutterEngine
 
 /**
@@ -13,7 +19,7 @@ import io.flutter.embedding.engine.FlutterEngine
  *  - `fuata/backup_files` (issue #24): save / open a JSON backup through
  *    the system file picker.
  */
-class MainActivity : FlutterActivity() {
+class MainActivity : FlutterFragmentActivity() {
     private var shareIntake: ShareIntakeChannel? = null
     private var captureChannel: CaptureChannel? = null
     private var backupFiles: BackupFilesChannel? = null

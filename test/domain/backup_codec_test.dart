@@ -384,4 +384,24 @@ void main() {
     expect(decoded.errors, isEmpty);
     expect(decoded.snapshot!.settings!.bannerUnitsMode, BannerUnitsMode.all);
   });
+
+  test('app lock is deliberately not carried by a backup (#28)', () {
+    // A lock is a property of the *device*, not of the money. Restoring
+    // a file onto a new phone must not lock the person out of an app
+    // they just installed and have not set a lock on.
+    final snapshot = BackupSnapshot(
+      settings: customSettings().copyWith(
+        appLockEnabled: true,
+        appLockBiometric: true,
+      ),
+    );
+    final json = BackupCodec.encode(snapshot, exportedAt: exportedAt);
+
+    expect(json, isNot(contains('appLock')));
+
+    final decoded = BackupCodec.decode(json);
+    expect(decoded.errors, isEmpty);
+    expect(decoded.snapshot!.settings!.appLockEnabled, isFalse);
+    expect(decoded.snapshot!.settings!.appLockBiometric, isFalse);
+  });
 }
