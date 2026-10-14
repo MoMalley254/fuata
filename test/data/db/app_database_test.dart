@@ -84,6 +84,42 @@ void main() {
     expect(restored.sortOrder, 7);
   });
 
+  test('reorderUnits saves the new order and keeps archived units put (#117)',
+          () async {
+        final repo = DriftUnitRepository(db);
+        MoneyUnit unit(String id, int sortOrder) => MoneyUnit(
+          id: id,
+          name: id,
+          kind: UnitKind.cash,
+          currencyCode: 'KES',
+          iconEmoji: '💵',
+          color: const Color(0xFF2E9E6B),
+          openingBalanceMinor: 0,
+          sortOrder: sortOrder,
+          createdAt: DateTime(2026, 9, 21),
+        );
+        await repo.addUnit(unit('a', 100));
+        await repo.addUnit(unit('x', 150));
+        await repo.addUnit(unit('b', 200));
+        await repo.addUnit(unit('c', 300));
+        await repo.archiveUnit('x');
+
+        await repo.reorderUnits(['c', 'a', 'b']);
+
+        final active = await repo.watchUnits().first;
+        expect(active.map((u) => u.id), ['c', 'a', 'b']);
+
+        // The archived unit was not part of the reorder: same sortOrder, so
+        // restoring it still puts it back where it left from.
+        final all = await repo.watchUnits(includeArchived: true).first;
+        expect(all.firstWhere((u) => u.id == 'x').sortOrder, 150);
+
+        // An empty list, or ids that match nothing, change nothing.
+        await repo.reorderUnits([]);
+        await repo.reorderUnits(['nope']);
+        expect((await repo.watchUnits().first).map((u) => u.id), ['c', 'a', 'b']);
+      });
+
   test('transaction round-trips, including a moved pair', () async {
     final units = DriftUnitRepository(db);
     final txs = DriftTransactionRepository(db);

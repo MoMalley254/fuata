@@ -11,6 +11,7 @@ import 'package:drift/drift.dart';
 import 'package:flutter/material.dart';
 
 import '../../domain/models/capture_source.dart';
+import '../../domain/logic/unit_order.dart';
 import '../../domain/models/category.dart';
 import '../../domain/models/limit_alert.dart';
 import '../../domain/models/limit_rule.dart';
@@ -72,6 +73,22 @@ class DriftUnitRepository implements UnitRepository {
       ),
     );
   }
+
+  @override
+  Future<void> reorderUnits(List<String> orderedIds) {
+    if (orderedIds.isEmpty) return Future.value();
+    // One transaction: the stream must never emit a half-reordered list.
+    return _db.transaction(() async {
+      final rows = await (_db.select(
+        _db.units,
+      )..where((u) => u.id.isIn(orderedIds))).get();
+      final next = unitSortOrdersFor(rows.map(unitFromRow), orderedIds);
+      for (final entry in next.entries) {
+        await (_db.update(_db.units)..where((u) => u.id.equals(entry.key)))
+            .write(UnitsCompanion(sortOrder: Value(entry.value)));
+      }
+    });
+  }
 }
 
 class DriftTransactionRepository implements TransactionRepository {
@@ -110,7 +127,7 @@ class DriftTransactionRepository implements TransactionRepository {
   @override
   Future<void> confirmTransaction(String transactionId) {
     return (_db.update(_db.transactions)
-          ..where((t) => t.id.equals(transactionId)))
+      ..where((t) => t.id.equals(transactionId)))
         .write(TransactionsCompanion(status: Value(TxStatus.confirmed.name)));
   }
 
@@ -182,7 +199,7 @@ class DriftAlertLogRepository implements AlertLogRepository {
           r.limitId,
           r.periodKey,
           AlertLevel.values.firstWhere(
-            (l) => l.name == r.level,
+                (l) => l.name == r.level,
             orElse: () => AlertLevel.warning,
           ),
         ),
@@ -200,13 +217,13 @@ class DriftAlertLogRepository implements AlertLogRepository {
       await _db
           .into(_db.alertFirings)
           .insert(
-            AlertFiringsCompanion.insert(
-              limitId: key.limitId,
-              periodKey: key.periodKey,
-              level: key.level.name,
-              firedAt: at,
-            ),
-          );
+        AlertFiringsCompanion.insert(
+          limitId: key.limitId,
+          periodKey: key.periodKey,
+          level: key.level.name,
+          firedAt: at,
+        ),
+      );
       return true;
     } catch (_) {
       return false;
@@ -441,16 +458,16 @@ class DriftSettingsRepository implements SettingsRepository {
         defaults.homeHeadline,
       ),
       homeSections:
-          map[_kHomeSections] != null && map[_kHomeSections]!.isNotEmpty
+      map[_kHomeSections] != null && map[_kHomeSections]!.isNotEmpty
           ? map[_kHomeSections]!
-                .split(',')
-                .map(
-                  (n) => HomeSection.values.firstWhere(
-                    (v) => v.name == n,
-                    orElse: () => HomeSection.units,
-                  ),
-                )
-                .toSet()
+          .split(',')
+          .map(
+            (n) => HomeSection.values.firstWhere(
+              (v) => v.name == n,
+          orElse: () => HomeSection.units,
+        ),
+      )
+          .toSet()
           : defaults.homeSections,
       detailLevel: byName(
         map[_kDetailLevel],
@@ -592,7 +609,7 @@ class DriftCaptureRepository implements CaptureRepository {
     final query = _db.select(_db.unparsedCaptures)
       ..orderBy([(u) => OrderingTerm.desc(u.receivedAt)]);
     return query.watch().map(
-      (rows) => rows.map(unparsedCaptureFromRow).toList(),
+          (rows) => rows.map(unparsedCaptureFromRow).toList(),
     );
   }
 
@@ -606,13 +623,13 @@ class DriftCaptureRepository implements CaptureRepository {
       await _db
           .into(_db.unparsedCaptures)
           .insert(
-            UnparsedCapturesCompanion.insert(
-              id: id,
-              receivedAt: DateTime.now().toUtc(),
-              sourcePackage: sourcePackage,
-              rawText: rawText,
-            ),
-          );
+        UnparsedCapturesCompanion.insert(
+          id: id,
+          receivedAt: DateTime.now().toUtc(),
+          sourcePackage: sourcePackage,
+          rawText: rawText,
+        ),
+      );
       // Time-based purge (issue #74): 14 days, matching the copy on the
       // review inbox.
       final cutoff = DateTime.now().toUtc().subtract(unparsedCaptureRetention);
@@ -624,12 +641,12 @@ class DriftCaptureRepository implements CaptureRepository {
       // an unfamiliar bank format could otherwise grow this without bound
       // until the time purge catches up.
       final keepIds =
-          await (_db.selectOnly(_db.unparsedCaptures)
-                ..addColumns([_db.unparsedCaptures.id])
-                ..orderBy([OrderingTerm.desc(_db.unparsedCaptures.receivedAt)])
-                ..limit(unparsedCaptureCap))
-              .map((row) => row.read(_db.unparsedCaptures.id)!)
-              .get();
+      await (_db.selectOnly(_db.unparsedCaptures)
+        ..addColumns([_db.unparsedCaptures.id])
+        ..orderBy([OrderingTerm.desc(_db.unparsedCaptures.receivedAt)])
+        ..limit(unparsedCaptureCap))
+          .map((row) => row.read(_db.unparsedCaptures.id)!)
+          .get();
       await (_db.delete(
         _db.unparsedCaptures,
       )..where((u) => u.id.isNotIn(keepIds))).go();

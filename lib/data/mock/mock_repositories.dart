@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../../domain/logic/unit_order.dart';
 import '../../domain/models/capture_source.dart';
 import '../../domain/models/category.dart';
 import '../../domain/models/limit_alert.dart';
@@ -224,6 +225,17 @@ class MockUnitRepository implements UnitRepository {
           (u) => u.id == unitId,
           (u) => u.copyWith(archived: false, archivedAt: null),
     );
+  }
+
+  @override
+  Future<void> reorderUnits(List<String> orderedIds) async {
+    final next = unitSortOrdersFor(_store.items, orderedIds);
+    for (final entry in next.entries) {
+      _store.update(
+            (u) => u.id == entry.key,
+            (u) => u.copyWith(sortOrder: entry.value),
+      );
+    }
   }
 }
 
