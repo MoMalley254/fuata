@@ -176,16 +176,22 @@ class HomeContent extends StatelessWidget {
             ),
           ),
         ],
-        const SizedBox(height: AppSpacing.md,),
-        Align(
-          alignment: Alignment.centerLeft,
-          child: TextButton.icon(
-            onPressed: () => Navigator.of(context)
-                .push(MaterialPageRoute(builder: (_) => const SummaryScreen())),
-            icon: const Icon(Icons.insights_rounded),
-            label: const Text('See my summaries'),
+        // Issue #112: one "See my summaries" on Home, never two. With Lately
+        // on it lives in that section's header; this one is only the way in
+        // when Lately is off.
+        if (!showLately) ...[
+          const SizedBox(height: AppSpacing.md),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const SummaryScreen()),
+              ),
+              icon: const Icon(Icons.insights_rounded),
+              label: const Text('See my summaries'),
+            ),
           ),
-        ),
+        ],
       ],
     );
   }
