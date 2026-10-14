@@ -256,6 +256,16 @@ class DriftSettingsRepository implements SettingsRepository {
   static const _kAppLockEnabled = 'appLockEnabled';
   static const _kAppLockBiometric = 'appLockBiometric';
 
+  // Issue #113: the home-screen widget's own options. Same vocabulary
+  // as the banner's, deliberately separate values — the two have
+  // independent lives.
+  static const _kWidgetUnitsMode = 'widgetUnitsMode';
+  static const _kWidgetUnitIds = 'widgetUnitIds';
+  static const _kWidgetHeadline = 'widgetHeadline';
+  static const _kWidgetProgress = 'widgetShowProgress';
+  static const _kWidgetSplit = 'widgetShowSplit';
+  static const _kWidgetVariant = 'widgetVariant';
+
   @override
   Stream<AppSettings> watchSettings() {
     return _db.select(_db.settingsEntries).watch().map(_toSettings);
@@ -361,6 +371,30 @@ class DriftSettingsRepository implements SettingsRepository {
       SettingsEntriesCompanion.insert(
         key: _kAppLockBiometric,
         value: s.appLockBiometric.toString(),
+      ),
+      SettingsEntriesCompanion.insert(
+        key: _kWidgetUnitsMode,
+        value: s.widgetUnitsMode.name,
+      ),
+      SettingsEntriesCompanion.insert(
+        key: _kWidgetUnitIds,
+        value: s.widgetUnitIds.join(','),
+      ),
+      SettingsEntriesCompanion.insert(
+        key: _kWidgetHeadline,
+        value: s.widgetHeadline.name,
+      ),
+      SettingsEntriesCompanion.insert(
+        key: _kWidgetProgress,
+        value: s.widgetShowProgress.toString(),
+      ),
+      SettingsEntriesCompanion.insert(
+        key: _kWidgetSplit,
+        value: s.widgetShowSplit.toString(),
+      ),
+      SettingsEntriesCompanion.insert(
+        key: _kWidgetVariant,
+        value: s.widgetVariant.name,
       ),
     ];
   }
@@ -485,6 +519,32 @@ class DriftSettingsRepository implements SettingsRepository {
       appLockBiometric: boolOr(
         map[_kAppLockBiometric],
         defaults.appLockBiometric,
+      ),
+      widgetUnitsMode: byName(
+        map[_kWidgetUnitsMode],
+        BannerUnitsMode.values,
+        defaults.widgetUnitsMode,
+      ),
+      widgetUnitIds: (map[_kWidgetUnitIds] ?? '').isEmpty
+          ? <String>{}
+          : map[_kWidgetUnitIds]!.split(',').toSet(),
+      widgetHeadline: byName(
+        map[_kWidgetHeadline],
+        BannerHeadline.values,
+        defaults.widgetHeadline,
+      ),
+      widgetShowProgress: boolOr(
+        map[_kWidgetProgress],
+        defaults.widgetShowProgress,
+      ),
+      widgetShowSplit: boolOr(
+        map[_kWidgetSplit],
+        defaults.widgetShowSplit,
+      ),
+      widgetVariant: byName(
+        map[_kWidgetVariant],
+        WidgetVariant.values,
+        defaults.widgetVariant,
       ),
     );
   }

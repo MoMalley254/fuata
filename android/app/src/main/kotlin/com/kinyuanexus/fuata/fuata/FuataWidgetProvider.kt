@@ -34,7 +34,7 @@ class FuataWidgetProvider : AppWidgetProvider() {
     ) {
         val snapshot = WidgetDataStore.read(context)
         for (id in ids) {
-            manager.updateAppWidget(id, buildViews(context, snapshot))
+            manager.updateAppWidget(id, buildViews(context, id, snapshot))
         }
     }
 
@@ -44,25 +44,28 @@ class FuataWidgetProvider : AppWidgetProvider() {
         id: Int,
         newOptions: Bundle,
     ) {
-        // A resize can change padding and available width; re-render so
-        // the amount never overlaps the caption.
-        manager.updateAppWidget(id, buildViews(context, WidgetDataStore.read(context)))
+        // A resize can change the variant: re-render so the split line
+        // appears or disappears with the cell width (issue #113).
+        manager.updateAppWidget(
+            id,
+            buildViews(context, id, WidgetDataStore.read(context)),
+        )
     }
 
     private fun buildViews(
         context: Context,
+        id: Int,
         snapshot: WidgetDataStore.Snapshot?,
     ): RemoteViews {
         val views = RemoteViews(context.packageName, R.layout.fuata_widget)
 
         if (snapshot == null) {
-            // Same warm-empty voice the app uses, rather than a blank
-            // card the person can't act on.
             views.setTextViewText(R.id.widget_emoji, "👋")
             views.setTextViewText(R.id.widget_amount, "—")
             views.setTextViewText(R.id.widget_currency, "")
             views.setTextViewText(R.id.widget_caption, "open Fuata")
             views.setViewVisibility(R.id.widget_progress, View.GONE)
+            views.setViewVisibility(R.id.widget_split_line, View.GONE)
         } else {
             views.setTextViewText(R.id.widget_emoji, snapshot.emoji)
             views.setTextViewText(R.id.widget_amount, snapshot.amount)
@@ -80,10 +83,15 @@ class FuataWidgetProvider : AppWidgetProvider() {
             } else {
                 views.setViewVisibility(R.id.widget_progress, View.GONE)
             }
+
+            if (shouldShowSplit(context, id, snapshot)) {
+                views.setViewVisibility(R.id.widget_split_line, View.VISIBLE)
+                views.setTextViewText(R.id.widget_split_line, snapshot.splitLine)
+            } else {
+                views.setViewVisibility(R.id.widget_split_line, View.GONE)
+            }
         }
 
-        // Tap = open the app, singleTop, so an already-running app comes
-        // to the foreground rather than starting a second copy.
         val launch = context.packageManager
             .getLaunchIntentForPackage(context.packageName)
             ?.apply {
@@ -103,6 +111,33 @@ class FuataWidgetProvider : AppWidgetProvider() {
         return views
     }
 
+    /**
+     * Whether this instance shows the split line. A forced variant wins;
+     * `auto` uses the minimum width the launcher reports, so a 2-cell
+     * widget stays compact and a 3-cell one gets the split. The split
+     * line is empty when the person switched it off or no unit is in the
+     * widget's currency, and empty means hide.
+     */
+    private fun shouldShowSplit(
+        context: Context,
+        id: Int,
+        snapshot: WidgetDataStore.Snapshot,
+    ): Boolean {
+        if (snapshot.splitLine.isEmpty()) return false
+        return when (snapshot.variant) {
+            "compact" -> false
+            "rich" -> true
+            else -> {
+                val options = AppWidgetManager.getInstance(context)
+                    .getAppWidgetOptions(id)
+                val widthDp = options.getInt(
+                    AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH,
+                )
+                widthDp >= RICH_MIN_WIDTH_DP
+            }
+        }
+    }
+
     private fun statusColour(context: Context, status: String): Int =
         context.getColor(
             when (status) {
@@ -115,6 +150,12 @@ class FuataWidgetProvider : AppWidgetProvider() {
 
     companion object {
         /** Called from HomeWidgetChannel after every Dart-side write. */
+        /// Below this width (dp) the auto variant stays compact: the split
+        /// line would either wrap or shrink to unreadable. Matches
+        /// fuata_widget_info.xml's targetCellWidth of 3 — a two-cell
+        /// widget is about 140-160 dp on most launchers, a three-cell one
+        /// about 210-240.
+        private const val RICH_MIN_WIDTH_DP = 200
         fun refreshAll(context: Context) {
             val manager = AppWidgetManager.getInstance(context)
             val ids = manager.getAppWidgetIds(

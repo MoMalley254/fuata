@@ -200,6 +200,12 @@ class BackupCodec {
     'quietStartMinute': s.quietStartMinute,
     'quietEndMinute': s.quietEndMinute,
     'amountsHidden': s.amountsHidden,
+    'widgetUnitsMode': s.widgetUnitsMode.name,
+    'widgetUnitIds': (s.widgetUnitIds.toList()..sort()),
+    'widgetHeadline': s.widgetHeadline.name,
+    'widgetShowProgress': s.widgetShowProgress,
+    'widgetShowSplit': s.widgetShowSplit,
+    'widgetVariant': s.widgetVariant.name,
   };
 
   // ---------------------------------------------------------------- decode
@@ -569,6 +575,24 @@ class BackupCodec {
       // must never send the person back through onboarding (#7).
       onboardingComplete: true,
       amountsHidden: flag('amountsHidden', d.amountsHidden),
+      widgetUnitsMode: pick(
+        'widgetUnitsMode',
+        BannerUnitsMode.values,
+        d.widgetUnitsMode,
+      ),
+      widgetUnitIds: names('widgetUnitIds').toSet(),
+      widgetHeadline: pick(
+        'widgetHeadline',
+        BannerHeadline.values,
+        d.widgetHeadline,
+      ),
+      widgetShowProgress: flag('widgetShowProgress', d.widgetShowProgress),
+      widgetShowSplit: flag('widgetShowSplit', d.widgetShowSplit),
+      widgetVariant: pick(
+        'widgetVariant',
+        WidgetVariant.values,
+        d.widgetVariant,
+      ),
     );
   }
 
