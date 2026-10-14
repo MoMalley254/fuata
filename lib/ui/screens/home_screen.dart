@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
@@ -6,6 +7,7 @@ import 'package:intl/intl.dart';
 import '../../domain/logic/summary.dart';
 import '../../domain/models/money.dart';
 import '../../domain/models/settings.dart';
+import '../../domain/models/unit.dart';
 import '../../routing/routes.dart';
 import '../../widgets/activity/grouped_list.dart';
 import '../../widgets/amount_text.dart';
@@ -45,14 +47,16 @@ class HomeScreen extends ConsumerWidget {
           data: (state) => state.units.isEmpty
               ? const EmptyHome()
               : HomeContent(
-                  state: state,
-                  settings: settings,
-                  inboxCount: inboxCount,
-                  pendingCount: pendingCount,
-                  onSeeAllActivity: () =>
-                      StatefulNavigationShell.of(context).goBranch(1),
-                  onOpenInbox: () => context.push(Routes.inboxPath),
-                ),
+            state: state,
+            settings: settings,
+            inboxCount: inboxCount,
+            pendingCount: pendingCount,
+            onSeeAllActivity: () =>
+                StatefulNavigationShell.of(context).goBranch(1),
+            onOpenInbox: () => context.push(Routes.inboxPath),
+            onReorderUnits: (ids) =>
+                ref.read(unitRepositoryProvider).reorderUnits(ids),
+          ),
         ),
       ),
       floatingActionButton: FloatingActionButton(
@@ -70,6 +74,10 @@ class HomeContent extends StatelessWidget {
   final int pendingCount;
   final VoidCallback? onSeeAllActivity;
   final VoidCallback? onOpenInbox;
+
+  /// Issue #117: called with every unit id in its new order after a
+  /// long-press drag on the My money row. Null turns reordering off.
+  final ValueChanged<List<String>>? onReorderUnits;
   const HomeContent({
     super.key,
     required this.state,
@@ -78,6 +86,7 @@ class HomeContent extends StatelessWidget {
     this.pendingCount = 0,
     this.onSeeAllActivity,
     this.onOpenInbox,
+    this.onReorderUnits,
   });
 
   @override
@@ -114,7 +123,7 @@ class HomeContent extends StatelessWidget {
             ),
           ),
           const SizedBox(height: AppSpacing.gutterSm),
-          UnitRow(state: state),
+          UnitRow(state: state, onReorder: onReorderUnits),
         ],
         if (showLately) ...[
           const SizedBox(height: AppSpacing.lg),
@@ -189,8 +198,8 @@ class HomeContent extends StatelessWidget {
     final yesterday = now.subtract(const Duration(days: 1));
     final isYesterday =
         t.year == yesterday.year &&
-        t.month == yesterday.month &&
-        t.day == yesterday.day;
+            t.month == yesterday.month &&
+            t.day == yesterday.day;
     if (isYesterday) return 'yesterday';
     return DateFormat('EEE, d MMM').format(t);
   }
@@ -329,21 +338,21 @@ class HeroSection extends ConsumerWidget {
       final hidden = ref.watch(currentSettingsProvider).amountsHidden;
       final (label, amountMinor, caption) = switch (headline) {
         HomeHeadline.leftToday => (
-          'Altogether you have',
-          total,
-          'Set a daily limit to see how today is going.',
+        'Altogether you have',
+        total,
+        'Set a daily limit to see how today is going.',
         ),
         HomeHeadline.totalIHave => (
-          'Altogether you have',
-          total,
-          'Across everything you\'ve told Fuata about.',
+        'Altogether you have',
+        total,
+        'Across everything you\'ve told Fuata about.',
         ),
         HomeHeadline.spentToday => (
-          'Spent today',
-          state.spentToday,
-          limit == null
-              ? 'Set a daily limit to see how today is going.'
-              : 'of ${Money(limit.amountMinor, currency).format()} · resets at midnight',
+        'Spent today',
+        state.spentToday,
+        limit == null
+            ? 'Set a daily limit to see how today is going.'
+            : 'of ${Money(limit.amountMinor, currency).format()} · resets at midnight',
         ),
       };
 
@@ -414,33 +423,101 @@ class HeroSection extends ConsumerWidget {
   }
 }
 
-class UnitRow extends StatelessWidget {
+/// The horizontal "My money" row on Home. Long-press a card and drag it to
+/// reorder (#117); a plain tap still opens the unit. Pass a null
+/// [onReorder] for the plain, non-draggable row.
+class UnitRow extends StatefulWidget {
   final HomeState state;
-  const UnitRow({super.key, required this.state});
+  final ValueChanged<List<String>>? onReorder;
+  const UnitRow({super.key, required this.state, this.onReorder});
+
+  @override
+  State<UnitRow> createState() => _UnitRowState();
+}
+
+class _UnitRowState extends State<UnitRow> {
+  // The order on screen. Saving goes through the database and comes back
+  // on a stream, a beat after the drop; without a local copy the card
+  // would snap back to its old slot and then jump. Reset only when a
+  // genuinely new list arrives, so an unrelated rebuild can't undo a drop.
+  late List<MoneyUnit> _units = List.of(widget.state.units);
+
+  @override
+  void didUpdateWidget(UnitRow old) {
+    super.didUpdateWidget(old);
+    if (!identical(old.state.units, widget.state.units)) {
+      _units = List.of(widget.state.units);
+    }
+  }
+
+  void _onReorder(int oldIndex, int newIndex) {
+    // ReorderableListView reports newIndex as if the dragged item were
+    // still in the list; moving later shifts everything down one.
+    if (newIndex > oldIndex) newIndex -= 1;
+    if (newIndex == oldIndex) return;
+    setState(() => _units.insert(newIndex, _units.removeAt(oldIndex)));
+    widget.onReorder?.call([for (final u in _units) u.id]);
+  }
+
+  Widget _card(BuildContext context, MoneyUnit unit) {
+    final balance = widget.state.balanceByUnit[unit.id] ?? 0;
+    return UnitCard(
+      kind: unit.kind,
+      title: unit.name,
+      balance: Money(balance, unit.currencyCode).majorValue,
+      emoji: unit.iconEmoji,
+      currencySymbol: currencySymbol(unit.currencyCode),
+      onTap: () => context.push(Routes.unitFor(unit.id)),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
+    final addCard = AddUnitCard(onTap: () => showEditUnitSheet(context));
+
+    if (widget.onReorder == null) {
+      return SizedBox(
+        height: 100,
+        child: ListView.separated(
+          scrollDirection: Axis.horizontal,
+          itemCount: _units.length + 1,
+          separatorBuilder: (_, _) =>
+          const SizedBox(width: AppSpacing.gutterSm),
+          itemBuilder: (context, i) =>
+          i == _units.length ? addCard : _card(context, _units[i]),
+        ),
+      );
+    }
+
     return SizedBox(
       height: 100,
-      child: ListView.separated(
+      child: ReorderableListView.builder(
         scrollDirection: Axis.horizontal,
-        itemCount: state.units.length + 1,
-        separatorBuilder: (_, _) => const SizedBox(width: AppSpacing.gutterSm),
+        // Long-press on every platform (the default shows a drag handle on
+        // desktop, which a card this small has no room for).
+        buildDefaultDragHandles: false,
+        itemCount: _units.length,
+        onReorderStart: (_) => HapticFeedback.mediumImpact(),
+        onReorder: _onReorder,
+        // A transparent Material can't cast a shadow, so the lifted card is
+        // just nudged larger.
+        proxyDecorator: (child, _, _) => Transform.scale(
+          scale: 1.05,
+          child: Material(color: Colors.transparent, child: child),
+        ),
         itemBuilder: (context, i) {
-          if (i == state.units.length) {
-            return AddUnitCard(onTap: () => showEditUnitSheet(context));
-          }
-          final unit = state.units[i];
-          final balance = state.balanceByUnit[unit.id] ?? 0;
-          return UnitCard(
-            kind: unit.kind,
-            title: unit.name,
-            balance: Money(balance, unit.currencyCode).majorValue,
-            emoji: unit.iconEmoji,
-            currencySymbol: currencySymbol(unit.currencyCode),
-            onTap: () => context.push(Routes.unitFor(unit.id)),
+          final unit = _units[i];
+          return ReorderableDelayedDragStartListener(
+            key: ValueKey(unit.id),
+            index: i,
+            child: Padding(
+              padding: const EdgeInsets.only(right: AppSpacing.gutterSm),
+              child: _card(context, unit),
+            ),
           );
         },
+        // Not draggable, and always last.
+        footer: addCard,
       ),
     );
   }
