@@ -139,6 +139,28 @@ class AppAccents {
       swatches.any((s) => s.toARGB32() == c.toARGB32());
 }
 
+/// How much the home-screen widget shows (issue #113). [auto] is the
+/// default: the launcher reports the cell size and the widget picks
+/// compact or rich itself (see FuataWidgetProvider.shouldShowSplit).
+/// [compact] and [rich] force one, for a person who wants the number
+/// alone on a wide cell, or the split on a narrow one.
+enum WidgetVariant { auto, compact, rich }
+
+extension WidgetVariantLabel on WidgetVariant {
+  String get label => switch (this) {
+    WidgetVariant.auto => 'Automatic',
+    WidgetVariant.compact => 'Compact',
+    WidgetVariant.rich => 'Rich',
+  };
+
+  String get description => switch (this) {
+    WidgetVariant.auto =>
+    'Compact on a small cell, with the unit split on a wider one.',
+    WidgetVariant.compact => 'Just the headline number and progress bar.',
+    WidgetVariant.rich => 'The number, progress bar and a unit split line.',
+  };
+}
+
 /// Everything the person controls about how the app looks and behaves,
 /// as opposed to *their money* (units/transactions/limits, which live in
 /// their own repositories). One bundle, one repository, one provider —
@@ -206,6 +228,21 @@ class AppSettings {
   final bool appLockEnabled;
   final bool appLockBiometric;  // false = device credential only
 
+  // Home-screen widget (issue #113). The widget and the banner are the
+  // same "at-a-glance number" in two places, so the option vocabulary is
+  // shared (BannerUnitsMode / BannerHeadline) — but the two have
+  // independent lives: someone who muted the banner can still want a
+  // home-screen glance, and vice versa.
+  final BannerUnitsMode widgetUnitsMode;
+  final Set<String> widgetUnitIds;
+  final BannerHeadline widgetHeadline;
+  final bool widgetShowProgress;
+
+  /// The unit split line under the number ("Cash 760 · Mobile 3,450").
+  /// Only drawn on the rich layout or a wide auto cell — see [widgetVariant].
+  final bool widgetShowSplit;
+  final WidgetVariant widgetVariant;
+
   const AppSettings({
     required this.name,
     required this.accent,
@@ -230,10 +267,16 @@ class AppSettings {
     this.bannerUnitsMode = BannerUnitsMode.all,
     this.appLockBiometric = false,
     this.appLockEnabled = false,
+    this.widgetUnitsMode = BannerUnitsMode.all,
+    this.widgetUnitIds = const <String>{},
+    this.widgetHeadline = BannerHeadline.leftToday,
+    this.widgetShowProgress = true,
+    this.widgetShowSplit = true,
+    this.widgetVariant = WidgetVariant.auto,
   });
 
   static final defaults = AppSettings(
-    name: 'Amina',
+    name: 'Martha',
     accent: AppAccents.teal,
     themeMode: AppThemeMode.system,
     homeHeadline: HomeHeadline.leftToday,
@@ -256,6 +299,12 @@ class AppSettings {
     amountsHidden: false,
     appLockEnabled: false,
     appLockBiometric: false,
+    widgetUnitsMode: BannerUnitsMode.all,
+    widgetUnitIds: <String>{},
+    widgetHeadline: BannerHeadline.leftToday,
+    widgetShowProgress: true,
+    widgetShowSplit: true,
+    widgetVariant: WidgetVariant.auto,
   );
 
   AppSettings copyWith({
@@ -282,6 +331,12 @@ class AppSettings {
     bool? amountsHidden,
     bool? appLockBiometric,
     bool? appLockEnabled,
+    BannerUnitsMode? widgetUnitsMode,
+    Set<String>? widgetUnitIds,
+    BannerHeadline? widgetHeadline,
+    bool? widgetShowProgress,
+    bool? widgetShowSplit,
+    WidgetVariant? widgetVariant,
   }) {
     return AppSettings(
       name: name ?? this.name,
@@ -309,6 +364,12 @@ class AppSettings {
       amountsHidden: amountsHidden ?? this.amountsHidden,
       appLockEnabled: appLockEnabled ?? this.appLockEnabled,
       appLockBiometric: appLockBiometric ?? this.appLockBiometric,
+      widgetUnitsMode: widgetUnitsMode ?? this.widgetUnitsMode,
+      widgetUnitIds: widgetUnitIds ?? this.widgetUnitIds,
+      widgetHeadline: widgetHeadline ?? this.widgetHeadline,
+      widgetShowProgress: widgetShowProgress ?? this.widgetShowProgress,
+      widgetShowSplit: widgetShowSplit ?? this.widgetShowSplit,
+      widgetVariant: widgetVariant ?? this.widgetVariant,
     );
   }
 }

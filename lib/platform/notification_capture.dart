@@ -260,13 +260,16 @@ Future<void> _refreshBanner(AppDatabase db) async {
 /// Rebuilds the home-screen widget's snapshot from the same repositories
 /// the capture just wrote through. Issue #29; the widget has no other
 /// source of truth when the app is closed.
+/// Rebuilds the home-screen widget's snapshot from the same repositories
+/// the capture just wrote through — via the shared loader, so the two
+/// isolates can never disagree about what the widget says (issue #29,
+/// options #113).
 Future<void> _refreshWidget(AppDatabase db) async {
-  final snapshot = WidgetSnapshot.fromData(
-    units: await DriftUnitRepository(db).watchUnits().first,
-    transactions: await DriftTransactionRepository(db)
-        .watchTransactions()
-        .first,
-    limits: await DriftLimitRepository(db).watchLimits().first,
+  final snapshot = await loadWidgetSnapshot(
+    units: DriftUnitRepository(db),
+    transactions: DriftTransactionRepository(db),
+    limits: DriftLimitRepository(db),
+    settings: DriftSettingsRepository(db),
   );
   await AndroidHomeWidgetBridge().push(snapshot);
 }

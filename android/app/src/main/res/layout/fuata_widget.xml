@@ -70,4 +70,15 @@
         android:layout_marginTop="10dp"
         android:max="100"
         android:progressTint="@color/widget_accent" />
+    
+    <TextView
+        android:id="@+id/widget_split_line"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:ellipsize="end"
+        android:maxLines="1"
+        android:textColor="@color/widget_on_surface_variant"
+        android:textSize="12sp"
+        tools:text="Cash 760 · Mobile 3,450" />
 </LinearLayout>

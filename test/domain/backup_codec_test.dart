@@ -404,4 +404,54 @@ void main() {
     expect(decoded.snapshot!.settings!.appLockEnabled, isFalse);
     expect(decoded.snapshot!.settings!.appLockBiometric, isFalse);
   });
+
+  test('the widget options round-trip (#113)', () {
+    final snapshot = BackupSnapshot(
+      settings: customSettings().copyWith(
+        widgetUnitsMode: BannerUnitsMode.selected,
+        widgetUnitIds: {'u1'},
+        widgetHeadline: BannerHeadline.totalIHave,
+        widgetShowProgress: false,
+        widgetShowSplit: false,
+        widgetVariant: WidgetVariant.compact,
+      ),
+    );
+    final decoded = BackupCodec.decode(
+      BackupCodec.encode(snapshot, exportedAt: exportedAt),
+    );
+    expect(decoded.errors, isEmpty);
+    final s = decoded.snapshot!.settings!;
+    expect(s.widgetUnitsMode, BannerUnitsMode.selected);
+    expect(s.widgetUnitIds, {'u1'});
+    expect(s.widgetHeadline, BannerHeadline.totalIHave);
+    expect(s.widgetShowProgress, isFalse);
+    expect(s.widgetShowSplit, isFalse);
+    expect(s.widgetVariant, WidgetVariant.compact);
+  });
+
+  test('a backup made before #113 leaves the widget at its defaults', () {
+    final root = jsonDecode(
+      BackupCodec.encode(
+        BackupSnapshot(settings: customSettings()),
+        exportedAt: exportedAt,
+      ),
+    ) as Map<String, dynamic>;
+    final settings = (root['data'] as Map)['settings'] as Map;
+    for (final k in [
+      'widgetUnitsMode', 'widgetUnitIds', 'widgetHeadline',
+      'widgetShowProgress', 'widgetShowSplit', 'widgetVariant',
+    ]) {
+      settings.remove(k);
+    }
+
+    final decoded = BackupCodec.decode(jsonEncode(root));
+    expect(decoded.errors, isEmpty);
+    final d = AppSettings.defaults;
+    final s = decoded.snapshot!.settings!;
+    expect(s.widgetUnitsMode, d.widgetUnitsMode);
+    expect(s.widgetHeadline, d.widgetHeadline);
+    expect(s.widgetShowProgress, d.widgetShowProgress);
+    expect(s.widgetShowSplit, d.widgetShowSplit);
+    expect(s.widgetVariant, d.widgetVariant);
+  });
 }

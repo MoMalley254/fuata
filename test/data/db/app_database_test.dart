@@ -530,4 +530,35 @@ void main() {
     expect(rows.any((r) => r.id == 'seed_0'), isFalse);  // oldest gone
     expect(rows.any((r) => r.id == 'b'), isTrue);        // newest kept
   });
+
+  test('widget options persist (#113)', () async {
+    final repo = DriftSettingsRepository(db);
+
+    // An install that predates #113 has no keys: the defaults apply.
+    final fresh = await repo.watchSettings().first;
+    expect(fresh.widgetUnitsMode, BannerUnitsMode.all);
+    expect(fresh.widgetHeadline, BannerHeadline.leftToday);
+    expect(fresh.widgetShowProgress, isTrue);
+    expect(fresh.widgetShowSplit, isTrue);
+    expect(fresh.widgetVariant, WidgetVariant.auto);
+
+    await repo.updateSettings(
+      AppSettings.defaults.copyWith(
+        widgetUnitsMode: BannerUnitsMode.selected,
+        widgetUnitIds: {'u1', 'u2'},
+        widgetHeadline: BannerHeadline.totalIHave,
+        widgetShowProgress: false,
+        widgetShowSplit: false,
+        widgetVariant: WidgetVariant.rich,
+      ),
+    );
+
+    final saved = await repo.watchSettings().first;
+    expect(saved.widgetUnitsMode, BannerUnitsMode.selected);
+    expect(saved.widgetUnitIds, {'u1', 'u2'});
+    expect(saved.widgetHeadline, BannerHeadline.totalIHave);
+    expect(saved.widgetShowProgress, isFalse);
+    expect(saved.widgetShowSplit, isFalse);
+    expect(saved.widgetVariant, WidgetVariant.rich);
+  });
 }

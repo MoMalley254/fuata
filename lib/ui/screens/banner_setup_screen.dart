@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:fuata/widgets/banner/widget_preview.dart';
 
 import '../../domain/logic/banner_content.dart';
+import '../../domain/logic/widget_content.dart';
 import '../../domain/models/limit_rule.dart';
 import '../../domain/models/money.dart';
 import '../../domain/models/settings.dart';
@@ -61,10 +63,10 @@ class _BannerSetupScreenState extends ConsumerState<BannerSetupScreen> {
     var status = home.status;
     final sample = _sample;
     if (sample != null) {
-      final code = limit?.currencyCode ??
+      final code =
+          limit?.currencyCode ??
           (units.isEmpty ? 'KES' : units.first.currencyCode);
-      final amount =
-          limit?.amountMinor ?? Money.parseMajor('2000', code).minor;
+      final amount = limit?.amountMinor ?? Money.parseMajor('2000', code).minor;
       limit = LimitRule(
         id: 'preview',
         scope: LimitScope.overall,
@@ -97,7 +99,11 @@ class _BannerSetupScreenState extends ConsumerState<BannerSetupScreen> {
       body: SafeArea(
         child: ListView(
           padding: const EdgeInsets.fromLTRB(
-              AppSpacing.margin, AppSpacing.md, AppSpacing.margin, AppSpacing.xl),
+            AppSpacing.margin,
+            AppSpacing.md,
+            AppSpacing.margin,
+            AppSpacing.xl,
+          ),
           children: [
             if (s.bannerEnabled)
               FutureBuilder<bool>(
@@ -112,14 +118,19 @@ class _BannerSetupScreenState extends ConsumerState<BannerSetupScreen> {
                       padding: const EdgeInsets.all(AppSpacing.md),
                       decoration: BoxDecoration(
                         color: c.statusWarningContainer,
-                        borderRadius: BorderRadius.circular(AppSpacing.unitTileRadius),
+                        borderRadius: BorderRadius.circular(
+                          AppSpacing.unitTileRadius,
+                        ),
                         border: Border.all(color: c.statusWarningBorder),
                       ),
                       child: Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Icon(Icons.info_outline_rounded,
-                              color: c.statusWarning, size: 20),
+                          Icon(
+                            Icons.info_outline_rounded,
+                            color: c.statusWarning,
+                            size: 20,
+                          ),
                           const SizedBox(width: AppSpacing.sm),
                           Expanded(
                             child: Column(
@@ -127,17 +138,21 @@ class _BannerSetupScreenState extends ConsumerState<BannerSetupScreen> {
                               children: [
                                 Text(
                                   "Android is blocking Fuata's notifications",
-                                  style: AppTypography.bodyMd.copyWith(color: c.onSurface),
+                                  style: AppTypography.bodyMd.copyWith(
+                                    color: c.onSurface,
+                                  ),
                                 ),
                                 const SizedBox(height: 2),
                                 Text(
                                   'Turn them on in Android\'s settings to see the banner.',
-                                  style: AppTypography.bodySm
-                                      .copyWith(color: c.onSurfaceVariant),
+                                  style: AppTypography.bodySm.copyWith(
+                                    color: c.onSurfaceVariant,
+                                  ),
                                 ),
                                 const SizedBox(height: AppSpacing.sm),
                                 TextButton(
-                                  onPressed: () => openAppNotificationSettings(),
+                                  onPressed: () =>
+                                      openAppNotificationSettings(),
                                   child: const Text('Open settings'),
                                 ),
                               ],
@@ -190,8 +205,10 @@ class _BannerSetupScreenState extends ConsumerState<BannerSetupScreen> {
                 const SizedBox(height: AppSpacing.sm),
                 Text(
                   'Android limits notification colour, so your status shows as an '
-                      'emoji, a progress bar and a coloured icon.',
-                  style: AppTypography.bodySm.copyWith(color: c.onSurfaceVariant),
+                  'emoji, a progress bar and a coloured icon.',
+                  style: AppTypography.bodySm.copyWith(
+                    color: c.onSurfaceVariant,
+                  ),
                 ),
               ],
             ),
@@ -203,7 +220,8 @@ class _BannerSetupScreenState extends ConsumerState<BannerSetupScreen> {
                   title: 'Banner in my notifications',
                   subtitle: 'See how you are doing without opening the app.',
                   value: s.bannerEnabled,
-                  onChanged: (v) => _update((x) => x.copyWith(bannerEnabled: v)),
+                  onChanged: (v) =>
+                      _update((x) => x.copyWith(bannerEnabled: v)),
                 ),
               ],
             ),
@@ -219,7 +237,8 @@ class _BannerSetupScreenState extends ConsumerState<BannerSetupScreen> {
                       AppChoiceChip(
                         label: h.label,
                         selected: s.bannerHeadline == h,
-                        onTap: () => _update((x) => x.copyWith(bannerHeadline: h)),
+                        onTap: () =>
+                            _update((x) => x.copyWith(bannerHeadline: h)),
                       ),
                   ],
                 ),
@@ -231,7 +250,7 @@ class _BannerSetupScreenState extends ConsumerState<BannerSetupScreen> {
               children: [
                 Text(
                   'Which units appear in the expanded banner. Picking None '
-                      'keeps the banner to the headline and "Spent today" only.',
+                  'keeps the banner to the headline and "Spent today" only.',
                   style: AppTypography.bodySm.copyWith(
                     color: c.onSurfaceVariant,
                   ),
@@ -248,24 +267,28 @@ class _BannerSetupScreenState extends ConsumerState<BannerSetupScreen> {
                       // predictable: leaving "all" and picking a unit
                       // starts a fresh selection rather than resurrecting
                       // whatever was left over from last time.
-                      onTap: () => _update((x) => x.copyWith(
-                        bannerUnitsMode: BannerUnitsMode.all,
-                        bannerUnitIds: <String>{},
-                      )),
+                      onTap: () => _update(
+                        (x) => x.copyWith(
+                          bannerUnitsMode: BannerUnitsMode.all,
+                          bannerUnitIds: <String>{},
+                        ),
+                      ),
                     ),
                     AppChoiceChip(
                       label: 'None',
                       selected: s.bannerUnitsMode == BannerUnitsMode.none,
-                      onTap: () => _update((x) => x.copyWith(
-                        bannerUnitsMode: BannerUnitsMode.none,
-                        bannerUnitIds: <String>{},
-                      )),
+                      onTap: () => _update(
+                        (x) => x.copyWith(
+                          bannerUnitsMode: BannerUnitsMode.none,
+                          bannerUnitIds: <String>{},
+                        ),
+                      ),
                     ),
                     for (final u in units)
                       AppChoiceChip(
                         label: '${u.iconEmoji} ${u.name}',
-                        selected: s.bannerUnitsMode ==
-                            BannerUnitsMode.selected &&
+                        selected:
+                            s.bannerUnitsMode == BannerUnitsMode.selected &&
                             s.bannerUnitIds.contains(u.id),
                         onTap: () => _update((x) {
                           if (x.bannerUnitsMode == BannerUnitsMode.selected) {
@@ -319,10 +342,209 @@ class _BannerSetupScreenState extends ConsumerState<BannerSetupScreen> {
                 const SizedBox(height: AppSpacing.sm),
                 ToggleRow(
                   title: 'Hide amounts on the lock screen',
-                  subtitle: 'Shows only the status until the phone is unlocked.',
+                  subtitle:
+                      'Shows only the status until the phone is unlocked.',
                   value: s.redactedLockScreenBanner,
                   onChanged: (v) =>
                       _update((x) => x.copyWith(redactedLockScreenBanner: v)),
+                ),
+              ],
+            ),
+            const SizedBox(height: AppSpacing.lg),
+            SectionCard(
+              title: 'Home screen widget',
+              children: [
+                Text(
+                  'The same at-a-glance number as the banner, on your home '
+                  'screen instead of in your notifications. The two are '
+                  'separate: you can have either, both, or neither.',
+                  style: AppTypography.bodySm.copyWith(
+                    color: c.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.md),
+                WidgetPreview(
+                  snapshot: WidgetSnapshot.build(
+                    status: status,
+                    spentToday: spent,
+                    dailyLimit: limit,
+                    currencyCode:
+                        limit?.currencyCode ??
+                        (units.isEmpty ? 'KES' : units.first.currencyCode),
+                    headline: s.widgetHeadline,
+                    unitsMode: s.widgetUnitsMode,
+                    selectedUnitIds: s.widgetUnitIds,
+                    showProgress: s.widgetShowProgress,
+                    showSplit: s.widgetShowSplit,
+                    variant: s.widgetVariant,
+                    units: units,
+                    balanceByUnit: home.balanceByUnit,
+                  ),
+                  // Auto shows the rich look on the setup screen: it's a
+                  // preview, and the rich look is the one there are
+                  // choices to see the effect on.
+                  variant: s.widgetVariant == WidgetVariant.auto
+                      ? WidgetVariant.rich
+                      : s.widgetVariant,
+                ),
+                const SizedBox(height: AppSpacing.md),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(AppSpacing.md),
+                  decoration: BoxDecoration(
+                    color: c.surfaceContainer,
+                    borderRadius: BorderRadius.circular(
+                      AppSpacing.unitTileRadius,
+                    ),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'To put it on your home screen',
+                        style: AppTypography.labelLg.copyWith(
+                          color: c.onSurface,
+                        ),
+                      ),
+                      const SizedBox(height: AppSpacing.xs),
+                      Text(
+                        'Long-press your home screen, tap Widgets, and find '
+                        'Fuata. Fuata can’t add it for you — only your '
+                        'launcher can.',
+                        style: AppTypography.bodySm.copyWith(
+                          color: c.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.md),
+                Text(
+                  'The big number',
+                  style: AppTypography.labelMd.copyWith(
+                    color: c.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.xs),
+                Wrap(
+                  spacing: AppSpacing.sm,
+                  runSpacing: AppSpacing.sm,
+                  children: [
+                    for (final h in BannerHeadline.values)
+                      AppChoiceChip(
+                        label: h.label,
+                        selected: s.widgetHeadline == h,
+                        onTap: () =>
+                            _update((x) => x.copyWith(widgetHeadline: h)),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: AppSpacing.md),
+                Text(
+                  'Units shown',
+                  style: AppTypography.labelMd.copyWith(
+                    color: c.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.xs),
+                Wrap(
+                  spacing: AppSpacing.sm,
+                  runSpacing: AppSpacing.sm,
+                  children: [
+                    AppChoiceChip(
+                      label: 'All',
+                      selected: s.widgetUnitsMode == BannerUnitsMode.all,
+                      onTap: () => _update(
+                        (x) => x.copyWith(
+                          widgetUnitsMode: BannerUnitsMode.all,
+                          widgetUnitIds: <String>{},
+                        ),
+                      ),
+                    ),
+                    AppChoiceChip(
+                      label: 'None',
+                      selected: s.widgetUnitsMode == BannerUnitsMode.none,
+                      onTap: () => _update(
+                        (x) => x.copyWith(
+                          widgetUnitsMode: BannerUnitsMode.none,
+                          widgetUnitIds: <String>{},
+                        ),
+                      ),
+                    ),
+                    for (final u in units)
+                      AppChoiceChip(
+                        label: '${u.iconEmoji} ${u.name}',
+                        selected:
+                            s.widgetUnitsMode == BannerUnitsMode.selected &&
+                            s.widgetUnitIds.contains(u.id),
+                        onTap: () => _update((x) {
+                          if (x.widgetUnitsMode == BannerUnitsMode.selected) {
+                            final next = {...x.widgetUnitIds};
+                            if (!next.remove(u.id)) next.add(u.id);
+                            if (next.isEmpty) {
+                              return x.copyWith(
+                                widgetUnitsMode: BannerUnitsMode.none,
+                                widgetUnitIds: <String>{},
+                              );
+                            }
+                            return x.copyWith(
+                              widgetUnitsMode: BannerUnitsMode.selected,
+                              widgetUnitIds: next,
+                            );
+                          }
+                          return x.copyWith(
+                            widgetUnitsMode: BannerUnitsMode.selected,
+                            widgetUnitIds: {u.id},
+                          );
+                        }),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: AppSpacing.md),
+                Text(
+                  'Layout',
+                  style: AppTypography.labelMd.copyWith(
+                    color: c.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.xs),
+                Wrap(
+                  spacing: AppSpacing.sm,
+                  runSpacing: AppSpacing.sm,
+                  children: [
+                    for (final v in WidgetVariant.values)
+                      AppChoiceChip(
+                        label: v.label,
+                        selected: s.widgetVariant == v,
+                        onTap: () =>
+                            _update((x) => x.copyWith(widgetVariant: v)),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: AppSpacing.xs),
+                Text(
+                  s.widgetVariant.description,
+                  style: AppTypography.bodySm.copyWith(
+                    color: c.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.md),
+                ToggleRow(
+                  title: 'Progress bar',
+                  subtitle: 'How much of today’s limit is used.',
+                  value: s.widgetShowProgress,
+                  onChanged: (v) =>
+                      _update((x) => x.copyWith(widgetShowProgress: v)),
+                ),
+                const SizedBox(height: AppSpacing.sm),
+                ToggleRow(
+                  title: 'Unit split line',
+                  subtitle:
+                      'A second line listing each unit. Only drawn on the rich '
+                      'layout or a wide cell.',
+                  value: s.widgetShowSplit,
+                  onChanged: (v) =>
+                      _update((x) => x.copyWith(widgetShowSplit: v)),
                 ),
               ],
             ),

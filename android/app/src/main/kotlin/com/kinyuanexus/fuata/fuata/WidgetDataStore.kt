@@ -29,6 +29,8 @@ object WidgetDataStore {
         val progress: Double,
         val emoji: String,
         val status: String,
+        val splitLine: String,
+        val variant: String,
     )
 
     fun write(context: Context, data: Map<String, Any?>) {
@@ -47,6 +49,8 @@ object WidgetDataStore {
                 progress = o.optDouble("progress", NO_PROGRESS),
                 emoji = o.optString("emoji", ""),
                 status = o.optString("status", "safe"),
+                splitLine = o.optString("splitLine", ""),
+                variant = o.optString("variant", "auto"),
             )
         } catch (_: Exception) {
             // A hand-edited or truncated row is one we can't render;
