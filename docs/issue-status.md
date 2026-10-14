@@ -1,21 +1,21 @@
-# Issue status (generated 2026-10-12T15:54Z)
+# Issue status (generated 2026-10-14T04:43Z)
 
 Source of truth: GitHub. Regenerate with `scripts/refresh-issue-status.sh`.
 
 | # | State | Milestone | Title |
 |---|---|---|---|
-| #118 | OPEN | v1.1 Backlog | feat(settings): custom accent colour picker |
+| #118 | CLOSED | v1.1 Backlog | feat(settings): custom accent colour picker |
 | #117 | OPEN | v1.1 Backlog | feat(units): reorder units on Home and My money |
 | #116 | OPEN | v1.1 Backlog | feat(ui): Empty Home needs a call to action |
 | #115 | OPEN | v1.1 Backlog | fix(ui): every provider error is a bare text message |
 | #114 | OPEN | v1.1 Backlog | feat(settings): a single, app-wide currency |
-| #113 | OPEN | v1.1 Backlog | feat(widget): surface and configure the home widget from Banner setup |
+| #113 | CLOSED | v1.1 Backlog | feat(widget): surface and configure the home widget from Banner setup |
 | #112 | OPEN | v0.1 MVP | fix(ui): Home shows "See my summaries" twice |
 | #111 | CLOSED | v0.1 MVP | fix(onboarding): "Show me how" doesn't open Auto-catch |
 | #110 | CLOSED | v0.1 MVP | fix(ui): Home hero number overflows for large amounts |
 | #109 | OPEN | v0.1 MVP | fix(ledger): week-peek bars group by UTC day, not local day |
 | #108 | OPEN | v0.1 MVP | fix(ledger): day/week/month ranges seem to include the wrong days |
-| #107 | OPEN | v0.1 MVP | fix(ledger): day and limit numbers don't roll over at midnight |
+| #107 | CLOSED | v0.1 MVP | fix(ledger): day and limit numbers don't roll over at midnight |
 | #106 | CLOSED | v0.1 MVP | fix(ledger): day/week/month ranges seem to include the wrong days |
 | #105 | CLOSED | v0.1 MVP | fix(ledger): day and limit numbers don't roll over at midnight |
 | #87 | CLOSED | v0.1 MVP | fix(ui): educational empty state for reading rules |
@@ -51,7 +51,7 @@ Source of truth: GitHub. Regenerate with `scripts/refresh-issue-status.sh`.
 | #31 | OPEN | v1.1 Backlog | feat: Scheduled daily/weekly/monthly summary notifications |
 | #30 | OPEN | v1.1 Backlog | feat: Outing mode (temporary budget with its own banner) |
 | #29 | CLOSED | v1.1 Backlog | feat: Home screen widget |
-| #28 | OPEN | v1.1 Backlog | feat: SQLCipher encryption with Android Keystore and app lock |
+| #28 | CLOSED | v1.1 Backlog | feat: SQLCipher encryption with Android Keystore and app lock |
 | #27 | OPEN | v0.1 MVP | chore(release): v0.1.0 |
 | #26 | CLOSED | v0.1 MVP | test: manual device test pass |
 | #25 | CLOSED | v0.1 MVP | chore(privacy): remove INTERNET permission and disable backup |
