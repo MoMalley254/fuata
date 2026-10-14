@@ -26,6 +26,12 @@ abstract class UnitRepository {
   /// so a restored unit comes back to the same place in the list it left
   /// from (finding F9's "restored units keep their sort position").
   Future<void> unarchiveUnit(String unitId);
+
+  /// Issue #117: saves the order the person dragged their units into.
+  /// [orderedIds] runs first-to-last as shown on Home and My money; ids
+  /// that match no unit are ignored. Archived units are not expected here
+  /// and keep their sortOrder (see [unitSortOrdersFor]).
+  Future<void> reorderUnits(List<String> orderedIds);
 }
 
 abstract class TransactionRepository {
