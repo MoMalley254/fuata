@@ -59,10 +59,15 @@ class HomeScreen extends ConsumerWidget {
           ),
         ),
       ),
-      floatingActionButton: FloatingActionButton(
+      // #116: the + adds a transaction, which needs a unit to attach to.
+// On a fresh install there is nothing to attach to, so the Empty Home
+// state carries the only action that works — adding the first unit.
+      floatingActionButton: (homeAsync.value?.units.isNotEmpty ?? false)
+          ? FloatingActionButton(
         onPressed: () => showAddTransactionSheet(context),
         child: const Icon(Icons.add),
-      ),
+      )
+          : null,
     );
   }
 }
@@ -559,7 +564,7 @@ class EmptyHome extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = context.colors;
     return Center(
-      child: Padding(
+      child: SingleChildScrollView(
         padding: const EdgeInsets.all(AppSpacing.xl),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -570,6 +575,24 @@ class EmptyHome extends StatelessWidget {
               'Add your first bit of money to get started.',
               style: AppTypography.headlineSm.copyWith(color: c.onSurface),
               textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: AppSpacing.lg),
+            // #116: a real action, not a dead end. The floating + adds a
+            // transaction, which needs a unit to attach to — so the first
+            // thing to do is add the unit itself.
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton(
+                onPressed: () => showEditUnitSheet(context),
+                child: const Text('Add some money'),
+              ),
+            ),
+            const SizedBox(height: AppSpacing.md),
+            Text(
+              'Want Fuata to catch payments for you? Turn on Auto-catch '
+                  'in Settings.',
+              textAlign: TextAlign.center,
+              style: AppTypography.bodySm.copyWith(color: c.onSurfaceVariant),
             ),
           ],
         ),
