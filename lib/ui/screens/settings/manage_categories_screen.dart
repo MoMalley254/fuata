@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:fuata/widgets/provider_error_card.dart';
 
 import '../../../domain/models/category.dart';
 import '../../../widgets/personalization/educational_empty_state.dart';
@@ -46,8 +47,13 @@ class ManageCategoriesScreen extends ConsumerWidget {
       ),
       body: SafeArea(
         child: categoriesAsync.when(
-          loading: () => const Center(child: CircularProgressIndicator.adaptive()),
-          error: (e, st) => Center(child: Text('Something went wrong: $e')),
+          loading: () =>
+              const Center(child: CircularProgressIndicator.adaptive()),
+          error: (e, st) => ProviderErrorCard(
+            headline: "Couldn't load your categories",
+            error: e,
+            onRetry: () => ref.invalidate(allCategoriesProvider),
+          ),
           data: (categories) {
             final active = categories.where((c) => !c.archived).toList();
             final archived = categories.where((c) => c.archived).toList();
@@ -56,7 +62,7 @@ class ManageCategoriesScreen extends ConsumerWidget {
                 emoji: '🏷️',
                 headline: 'No categories yet',
                 description:
-                'Categories tell you where money went at a glance — Food, '
+                    'Categories tell you where money went at a glance — Food, '
                     'Transport, Rent — without having to remember the shop name.',
                 primaryLabel: 'Add a category',
                 onPrimary: () => _add(context, ref),
@@ -72,7 +78,7 @@ class ManageCategoriesScreen extends ConsumerWidget {
               children: [
                 Text(
                   'Categories are what you spent on, not who you paid. Tap one '
-                      'to rename or recolour it; use the ⋮ menu to put one away.',
+                  'to rename or recolour it; use the ⋮ menu to put one away.',
                   style: AppTypography.bodySm.copyWith(
                     color: context.colors.onSurfaceVariant,
                   ),
@@ -153,8 +159,10 @@ class _CategoryRow extends StatelessWidget {
                   shape: BoxShape.circle,
                 ),
                 alignment: Alignment.center,
-                child: Text(category.emoji,
-                    style: const TextStyle(fontSize: 18)),
+                child: Text(
+                  category.emoji,
+                  style: const TextStyle(fontSize: 18),
+                ),
               ),
               const SizedBox(width: AppSpacing.md),
               Expanded(
@@ -168,9 +176,7 @@ class _CategoryRow extends StatelessWidget {
               IconButton(
                 tooltip: archived ? 'Bring back' : 'Put away',
                 icon: Icon(
-                  archived
-                      ? Icons.unarchive_outlined
-                      : Icons.archive_outlined,
+                  archived ? Icons.unarchive_outlined : Icons.archive_outlined,
                   color: c.onSurfaceVariant,
                 ),
                 onPressed: onArchive,
@@ -182,4 +188,3 @@ class _CategoryRow extends StatelessWidget {
     );
   }
 }
-

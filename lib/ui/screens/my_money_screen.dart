@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:fuata/ui/providers/app_providers.dart';
 import 'package:fuata/widgets/personalization/amount_visibility_toggle.dart';
+import 'package:fuata/widgets/provider_error_card.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../domain/models/money.dart';
@@ -41,9 +42,9 @@ class _MyMoneyScreenState extends ConsumerState<MyMoneyScreen> {
       _units = List.of(_units);
       _units.insert(newIndex, _units.removeAt(oldIndex));
     });
-    ref
-        .read(unitRepositoryProvider)
-        .reorderUnits([for (final u in _units) u.id]);
+    ref.read(unitRepositoryProvider).reorderUnits([
+      for (final u in _units) u.id,
+    ]);
   }
 
   @override
@@ -58,8 +59,8 @@ class _MyMoneyScreenState extends ConsumerState<MyMoneyScreen> {
         title: const Text('My Money'),
         actions: [
           IconButton(
-              onPressed: () => showEditUnitSheet(context),
-              icon: Icon(Icons.add)
+            onPressed: () => showEditUnitSheet(context),
+            icon: Icon(Icons.add),
           ),
           const AmountVisibilityToggle(),
           // Only shown when there is something to show. The count lives in the
@@ -89,8 +90,12 @@ class _MyMoneyScreenState extends ConsumerState<MyMoneyScreen> {
       body: SafeArea(
         child: homeAsync.when(
           loading: () =>
-          const Center(child: CircularProgressIndicator.adaptive()),
-          error: (e, st) => Center(child: Text('Something went wrong: $e')),
+              const Center(child: CircularProgressIndicator.adaptive()),
+          error: (e, st) => ProviderErrorCard(
+            headline: "Couldn't load your money right now",
+            error: e,
+            onRetry: () => ref.invalidate(homeStateProvider),
+          ),
           data: (state) {
             final currency = state.units.isNotEmpty
                 ? state.units.first.currencyCode

@@ -84,7 +84,7 @@ class _LockScreenState extends ConsumerState<LockScreen> {
     'Too many tries. Unlock your phone with its PIN, then try again.',
     'PermanentlyLockedOut' =>
     'Unlock your phone with its PIN, then try again.',
-    _ => 'Could not unlock: ${e.message ?? e.code}',
+    _ => 'Could not unlock, please try again',
   };
 
   @override

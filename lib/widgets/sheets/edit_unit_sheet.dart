@@ -116,7 +116,7 @@ class _EditUnitSheetState extends ConsumerState<EditUnitSheet> {
     } catch (error) {
       setState(() {
         _saving = false;
-        _error = 'Could not save: $error';
+        _error = 'Could not save, please try again';
       });
     }
   }

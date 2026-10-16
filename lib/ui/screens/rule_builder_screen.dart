@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:fuata/ui/providers/app_providers.dart';
 import 'package:fuata/ui/theme/app_colors.dart';
+import 'package:fuata/widgets/provider_error_card.dart';
 
 import '../../data/constants/rule_builder_constants.dart';
 import '../../domain/logic/parser.dart';
@@ -319,7 +320,7 @@ class _RuleBuilderScreenState extends ConsumerState<RuleBuilderScreen> {
     } catch (e) {
       setState(() {
         _saving = false;
-        _error = 'Could not save: $e';
+        _error = 'Could not save, please try again';
       });
     }
   }
@@ -337,7 +338,11 @@ class _RuleBuilderScreenState extends ConsumerState<RuleBuilderScreen> {
         child: unitsAsync.when(
           loading: () =>
               const Center(child: CircularProgressIndicator.adaptive()),
-          error: (e, st) => Center(child: Text('Something went wrong: $e')),
+          error: (e, st) => ProviderErrorCard(
+            headline: "Couldn't load your money right now",
+            error: e,
+            onRetry: () => ref.invalidate(unitsProvider),
+          ),
           data: (units) {
             if (units.isEmpty) {
               return Center(
@@ -548,8 +553,7 @@ class _RuleBuilderScreenState extends ConsumerState<RuleBuilderScreen> {
     if (!template.readsOwnSample) {
       return HintCard(
         c: c,
-        message:
-            "This rule can't read its own sample, so a label probably includes something it can't match. Try labeling a smaller part of the message.",
+        message: "This rule can't read its own sample, so a label probably includes something it can't match. Try labeling a smaller part of the message.",
       );
     }
     try {
@@ -565,7 +569,11 @@ class _RuleBuilderScreenState extends ConsumerState<RuleBuilderScreen> {
       }
       return FoundCard(fields: fields, currencyCode: currencyCode);
     } catch (e) {
-      return HintCard(c: c, message: "Couldn't build the preview: $e");
+      return HintCard(
+        c: c,
+        message: 'Could not build the preview. Try labeling a smaller part '
+            'of the message.',
+      );
     }
   }
 
@@ -597,8 +605,12 @@ class _RuleBuilderScreenState extends ConsumerState<RuleBuilderScreen> {
           } else {
             resultCard = FoundCard(fields: fields, currencyCode: currencyCode);
           }
-        } catch (e) {
-          return HintCard(c: c, message: "Couldn't build the preview: $e");
+        } catch (_) {
+          return HintCard(
+            c: c,
+            message: 'Could not build the preview. Try labeling a smaller part '
+                'of the message.',
+          );
         }
       }
     }

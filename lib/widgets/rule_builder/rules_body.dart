@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:fuata/widgets/provider_error_card.dart';
 import 'package:go_router/go_router.dart';
 import 'package:fuata/widgets/rule_builder/rule_card.dart';
 
@@ -34,25 +35,25 @@ class RulesBody extends ConsumerWidget {
 
     return templatesAsync.when(
       loading: () => const Center(child: CircularProgressIndicator.adaptive()),
-      error: (e, st) => Center(child: Text('Something went wrong: $e')),
+      error: (e, st) => ProviderErrorCard(
+        headline: "Couldn't load the rules for this units",
+        error: e,
+        onRetry: () => ref.invalidate(unitTemplatesProvider(unit.id)),
+      ),
       data: (templates) {
         if (templates.isEmpty) {
           return EducationalEmptyState(
             emoji: '📖',
             headline: 'Teach Fuata to read your bank messages',
             description:
-            'A rule shows Fuata what one kind of message looks like, so '
+                'A rule shows Fuata what one kind of message looks like, so '
                 'it can pull out the amount, who it was to and when.',
-            steps: const [
-              'Paste a message',
-              'Tap the words',
-              'Save it',
-            ],
+            steps: const ['Paste a message', 'Tap the words', 'Save it'],
             example: const _LabelledExample(),
             primaryLabel: 'Teach a message',
             onPrimary: () => _openBuilder(context),
             footer:
-            'Rules stay on this phone. You can switch them off or '
+                'Rules stay on this phone. You can switch them off or '
                 'delete them any time.',
           );
         }

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:fuata/domain/logic/ledger.dart';
 import 'package:fuata/widgets/personalization/amount_visibility_toggle.dart';
+import 'package:fuata/widgets/provider_error_card.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
@@ -42,8 +43,8 @@ class UnitDetailScreen extends ConsumerWidget {
         title: Text('Archive ${unit.name}?'),
         content: const Text(
           "It'll disappear from Home, My money and the banner. Its history "
-              'stays safe, and its reading rules pause.\n\n'
-              "You can restore it any time from My money → Archived.",
+          'stays safe, and its reading rules pause.\n\n'
+          "You can restore it any time from My money → Archived.",
         ),
         actions: [
           TextButton(
@@ -66,19 +67,14 @@ class UnitDetailScreen extends ConsumerWidget {
     );
   }
 
-  void _confirmUnarchive(
-      BuildContext context,
-      WidgetRef ref,
-      MoneyUnit unit,
-      ) {
+  void _confirmUnarchive(BuildContext context, WidgetRef ref, MoneyUnit unit) {
     // No dialog here: restoring is not destructive, and the notice on the
     // page already says what the button does. A confirm step would just be
     // an extra tap on the only action a person came here to take.
     ref.read(unitRepositoryProvider).unarchiveUnit(unit.id).then((_) {
       if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('${unit.name} is back.')),
-      );
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('${unit.name} is back.')));
     });
   }
 
@@ -91,7 +87,11 @@ class UnitDetailScreen extends ConsumerWidget {
 
     return unitsAsync.when(
       loading: () => const Center(child: CircularProgressIndicator.adaptive()),
-      error: (e, st) => Center(child: Text('Something went wrong: $e')),
+      error: (e, st) => ProviderErrorCard(
+        headline: "Couldn't load this unit right now",
+        error: e,
+        onRetry: () => ref.invalidate(allUnitsProvider),
+      ),
       data: (units) {
         final unit = units.where((u) => u.id == unitId).firstOrNull;
         if (unit == null) {
@@ -108,15 +108,19 @@ class UnitDetailScreen extends ConsumerWidget {
 
         return txAsync.when(
           loading: () =>
-          const Center(child: CircularProgressIndicator.adaptive()),
-          error: (e, st) => Center(child: Text('Something went wrong: $e')),
+              const Center(child: CircularProgressIndicator.adaptive()),
+          error: (e, st) => ProviderErrorCard(
+            headline: "Couldn't load its's activity right now",
+            error: e,
+            onRetry: () => ref.invalidate(transactionsProvider),
+          ),
           data: (allTransactions) {
             final balance = Ledger.balanceOf(unit, allTransactions);
             final unitTransactions =
-            allTransactions
-                .where((t) => t.unitId == unit.id && t.isConfirmed)
-                .toList()
-              ..sort((a, b) => b.occurredAt.compareTo(a.occurredAt));
+                allTransactions
+                    .where((t) => t.unitId == unit.id && t.isConfirmed)
+                    .toList()
+                  ..sort((a, b) => b.occurredAt.compareTo(a.occurredAt));
 
             return Scaffold(
               appBar: AppBar(
@@ -126,7 +130,8 @@ class UnitDetailScreen extends ConsumerWidget {
                   if (!unit.archived)
                     IconButton(
                       tooltip: 'Edit',
-                      onPressed: () => showEditUnitSheet(context, existing: unit),
+                      onPressed: () =>
+                          showEditUnitSheet(context, existing: unit),
                       icon: const Icon(Icons.edit_outlined),
                     ),
                   PopupMenuButton<String>(
@@ -163,7 +168,6 @@ class UnitDetailScreen extends ConsumerWidget {
                         ),
                     ],
                   ),
-
                 ],
               ),
               body: SafeArea(
@@ -193,8 +197,12 @@ class UnitDetailScreen extends ConsumerWidget {
                               padding: const EdgeInsets.all(AppSpacing.md),
                               decoration: BoxDecoration(
                                 color: c.statusWarningContainer,
-                                borderRadius: BorderRadius.circular(AppSpacing.unitTileRadius),
-                                border: Border.all(color: c.statusWarningBorder),
+                                borderRadius: BorderRadius.circular(
+                                  AppSpacing.unitTileRadius,
+                                ),
+                                border: Border.all(
+                                  color: c.statusWarningBorder,
+                                ),
                               ),
                               child: Row(
                                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -208,8 +216,10 @@ class UnitDetailScreen extends ConsumerWidget {
                                   Expanded(
                                     child: Text(
                                       "This one's archived. Its history still counts, and its "
-                                          'reading rules are paused. Use Restore above to bring it back.',
-                                      style: AppTypography.bodySm.copyWith(color: c.onSurface),
+                                      'reading rules are paused. Use Restore above to bring it back.',
+                                      style: AppTypography.bodySm.copyWith(
+                                        color: c.onSurface,
+                                      ),
                                     ),
                                   ),
                                 ],
@@ -257,9 +267,9 @@ class UnitDetailScreen extends ConsumerWidget {
                             onPressed: unit.archived
                                 ? null
                                 : () => showUpdateBalanceSheet(
-                              unit: unit,
-                              currentBalanceMinor: balance,
-                            ),
+                                    unit: unit,
+                                    currentBalanceMinor: balance,
+                                  ),
                             child: const Text('Update balance'),
                           ),
                         ],
@@ -272,7 +282,7 @@ class UnitDetailScreen extends ConsumerWidget {
                       subtitle: unitLimitSummary(
                         ref.watch(limitsProvider).value ?? const <LimitRule>[],
                         unit,
-                        masked: hidden
+                        masked: hidden,
                       ),
                       onTap: () => showEditUnitLimitsSheet(unit: unit),
                     ),
@@ -281,14 +291,15 @@ class UnitDetailScreen extends ConsumerWidget {
                       builder: (context) {
                         final templates =
                             ref.watch(unitTemplatesProvider(unit.id)).value ??
-                                [];
+                            [];
                         return ActionRow(
                           icon: Icons.mark_email_read_outlined,
                           title: 'Reading messages',
                           subtitle: templates.isEmpty
                               ? 'Teach the app to read messages for this unit'
                               : '${templates.length} rule${templates.length == 1 ? '' : 's'} · add or review',
-                          onTap: () => context.push(Routes.manageRulesFor(unit.id)),
+                          onTap: () =>
+                              context.push(Routes.manageRulesFor(unit.id)),
                         );
                       },
                     ),

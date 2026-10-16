@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:fuata/widgets/provider_error_card.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
@@ -31,8 +32,13 @@ class ArchivedUnitsScreen extends ConsumerWidget {
       appBar: AppBar(title: const Text('Archived')),
       body: SafeArea(
         child: archivedAsync.when(
-          loading: () => const Center(child: CircularProgressIndicator.adaptive()),
-          error: (e, st) => Center(child: Text('Something went wrong: $e')),
+          loading: () =>
+              const Center(child: CircularProgressIndicator.adaptive()),
+          error: (e, st) => ProviderErrorCard(
+            headline: "Could not load your archived units",
+            error: e,
+            onRetry: () => ref.invalidate(allUnitsProvider),
+          ),
           data: (_) {
             final archived = ref.watch(archivedUnitsProvider);
             if (archived.isEmpty) {
@@ -40,7 +46,7 @@ class ArchivedUnitsScreen extends ConsumerWidget {
                 emoji: '📦',
                 headline: 'Nothing archived',
                 description:
-                "Units you put away wait here, with their history and "
+                    "Units you put away wait here, with their history and "
                     'rules kept.',
                 primaryLabel: 'Back to My money',
                 onPrimary: () => context.pop(),
@@ -50,8 +56,12 @@ class ArchivedUnitsScreen extends ConsumerWidget {
             final txAsync = ref.watch(transactionsProvider);
             return txAsync.when(
               loading: () =>
-              const Center(child: CircularProgressIndicator.adaptive()),
-              error: (e, st) => Center(child: Text('Something went wrong: $e')),
+                  const Center(child: CircularProgressIndicator.adaptive()),
+              error: (e, st) => ProviderErrorCard(
+                headline: " Couldn't load their history",
+                error: e,
+                onRetry: () => ref.invalidate(transactionsProvider),
+              ),
               data: (transactions) {
                 final balances = {
                   for (final u in archived)
@@ -67,8 +77,8 @@ class ArchivedUnitsScreen extends ConsumerWidget {
                   children: [
                     Text(
                       'Put away, not gone. Their history still counts toward '
-                          'totals, and restoring one brings it back exactly as it '
-                          'was.',
+                      'totals, and restoring one brings it back exactly as it '
+                      'was.',
                       style: AppTypography.bodySm.copyWith(
                         color: context.colors.onSurfaceVariant,
                       ),
@@ -94,15 +104,14 @@ class ArchivedUnitsScreen extends ConsumerWidget {
   }
 
   Future<void> _restore(
-      BuildContext context,
-      WidgetRef ref,
-      MoneyUnit unit,
-      ) async {
+    BuildContext context,
+    WidgetRef ref,
+    MoneyUnit unit,
+  ) async {
     await ref.read(unitRepositoryProvider).unarchiveUnit(unit.id);
     if (!context.mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('${unit.name} is back.')),
-    );
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text('${unit.name} is back.')));
   }
 }
 
@@ -140,9 +149,7 @@ class _ArchivedUnitTile extends StatelessWidget {
           decoration: BoxDecoration(
             color: c.surface,
             borderRadius: BorderRadius.circular(AppSpacing.unitTileRadius),
-            border: Border.all(
-              color: c.outlineVariant.withValues(alpha: 0.35),
-            ),
+            border: Border.all(color: c.outlineVariant.withValues(alpha: 0.35)),
           ),
           padding: const EdgeInsets.all(AppSpacing.md),
           child: Row(
@@ -167,9 +174,7 @@ class _ArchivedUnitTile extends StatelessWidget {
                   children: [
                     Text(
                       unit.name,
-                      style: AppTypography.bodyLg.copyWith(
-                        color: c.onSurface,
-                      ),
+                      style: AppTypography.bodyLg.copyWith(color: c.onSurface),
                     ),
                     Text(
                       '$_archivedLine · ${Money(balanceMinor, unit.currencyCode).format()}',

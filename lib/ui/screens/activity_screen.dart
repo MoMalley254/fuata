@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:fuata/domain/models/transaction.dart';
 import 'package:fuata/domain/models/unit.dart';
 import 'package:fuata/ui/providers/capture_providers.dart';
+import 'package:fuata/widgets/provider_error_card.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../routing/routes.dart';
@@ -106,14 +107,22 @@ class _ActivityScreenState extends ConsumerState<ActivityScreen> {
       body: SafeArea(
         child: unitsAsync.when(
           loading: () =>
-          const Center(child: CircularProgressIndicator.adaptive()),
-          error: (e, st) => Center(child: Text('Something went wrong: $e')),
+              const Center(child: CircularProgressIndicator.adaptive()),
+          error: (e, st) => ProviderErrorCard(
+            headline: "Couldn't load your activity right now",
+            error: e,
+            onRetry: () => ref.invalidate(allUnitsProvider),
+          ),
           data: (units) {
             final unitById = {for (final u in units) u.id: u};
             return txAsync.when(
               loading: () =>
-              const Center(child: CircularProgressIndicator.adaptive()),
-              error: (e, st) => Center(child: Text('Something went wrong: $e')),
+                  const Center(child: CircularProgressIndicator.adaptive()),
+              error: (e, st) => ProviderErrorCard(
+                headline: "Could not load your activity right now",
+                error: e,
+                onRetry: () => ref.invalidate(transactionsProvider),
+              ),
               data: (transactions) {
                 // Pending (unconfirmed) captures live in the review inbox
                 // (#21/#22), not built yet, so Activity only shows
@@ -137,9 +146,9 @@ class _ActivityScreenState extends ConsumerState<ActivityScreen> {
                       child: filtered.isEmpty
                           ? const EmptyActivity()
                           : GroupedList(
-                        transactions: filtered,
-                        unitById: unitById,
-                      ),
+                              transactions: filtered,
+                              unitById: unitById,
+                            ),
                     ),
                   ],
                 );

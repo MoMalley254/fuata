@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:fuata/widgets/provider_error_card.dart';
 
 import '../../domain/logic/summary.dart';
 import '../../domain/models/unit.dart';
@@ -24,7 +25,7 @@ class SummaryScreen extends ConsumerStatefulWidget {
   const SummaryScreen({super.key, this.initialPeriod = SummaryPeriod.day});
 
   @override
-  ConsumerState<SummaryScreen> createState () => _SummaryScreenState();
+  ConsumerState<SummaryScreen> createState() => _SummaryScreenState();
 }
 
 class _SummaryScreenState extends ConsumerState<SummaryScreen> {
@@ -38,9 +39,7 @@ class _SummaryScreenState extends ConsumerState<SummaryScreen> {
     final hidden = ref.watch(currentSettingsProvider).amountsHidden;
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Summary'),
-      ),
+      appBar: AppBar(title: const Text('Summary')),
       body: SafeArea(
         child: ListView(
           padding: const EdgeInsets.fromLTRB(
@@ -71,7 +70,16 @@ class _SummaryScreenState extends ConsumerState<SummaryScreen> {
                   child: Center(child: CircularProgressIndicator.adaptive()),
                 ),
               ],
-              error: (e, st) => [Text('Something went wrong: $e')],
+              error: (e, st) => [
+                ProviderErrorCard(
+                  headline: "Couldn't build this summary",
+                  error: e,
+                  onRetry: () {
+                    ref.invalidate(unitsProvider);
+                    ref.invalidate(transactionsProvider);
+                  },
+                ),
+              ],
               data: (data) => _cards(context, data, unitById, hidden),
             ),
           ],
@@ -80,7 +88,12 @@ class _SummaryScreenState extends ConsumerState<SummaryScreen> {
     );
   }
 
-  List<Widget> _cards(BuildContext context, SummaryData data, Map<String, MoneyUnit> unitById, bool hidden) {
+  List<Widget> _cards(
+    BuildContext context,
+    SummaryData data,
+    Map<String, MoneyUnit> unitById,
+    bool hidden,
+  ) {
     final c = context.colors;
     final s = data.summary;
     final cc = data.currencyCode;

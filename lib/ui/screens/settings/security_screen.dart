@@ -87,10 +87,10 @@ class _SecurityScreenState extends ConsumerState<SecurityScreen> {
     } on PlatformException catch (e) {
       if (mounted) _explainSetupFailure(e);
       return;
-    } catch (e) {
+    } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not turn on App lock: $e')),
+          SnackBar(content: Text('Could not turn on App lock, please try again')),
         );
       }
       return;
