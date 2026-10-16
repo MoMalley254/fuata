@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:fuata/domain/models/unit.dart';
 import 'package:fuata/ui/providers/app_providers.dart';
 import 'package:fuata/ui/theme/app_colors.dart';
+import 'package:fuata/widgets/provider_error_card.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
@@ -90,9 +91,10 @@ class _AddTransactionSheetState extends ConsumerState<AddTransactionSheet> {
         height: 200,
         child: CircularProgressIndicator.adaptive(),
       ),
-      error: (e, st) => SizedBox(
-        height: 200,
-        child: Center(child: Text('Could not load your money: $e')),
+      error: (e, st) => ProviderErrorCard(
+        headline: "Couldn't load your money right now",
+        error: e,
+        onRetry: () => ref.invalidate(unitsProvider),
       ),
       data: (units) {
         if (units.isEmpty) {
@@ -369,7 +371,7 @@ class _AddTransactionSheetState extends ConsumerState<AddTransactionSheet> {
     } catch (e) {
       setState(() {
         _saving = false;
-        _error = 'Could not save: $e';
+        _error = 'Could not save, please try again';
       });
     }
   }
@@ -651,5 +653,3 @@ class MoreSection extends StatelessWidget {
     );
   }
 }
-
-

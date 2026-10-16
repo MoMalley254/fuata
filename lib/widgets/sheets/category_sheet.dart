@@ -78,7 +78,7 @@ class CategorySheetState extends ConsumerState<CategorySheet> {
     } catch (e) {
       setState(() {
         _saving = false;
-        _error = 'Could not save: $e';
+        _error = 'Could not save, please try again';
       });
     }
   }
