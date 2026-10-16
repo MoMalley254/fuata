@@ -43,7 +43,13 @@ class GroupedList extends StatelessWidget {
   Widget build(BuildContext context) {
     final groups = <DateTime, List<MoneyTransaction>>{};
     for (final t in transactions) {
-      final day = DateTime(t.occurredAt.year, t.occurredAt.month, t.occurredAt.day);
+      // Issue #109: group by the *local* calendar day. An occurredAt
+      // stored as UTC (the parser's ISO branch, a backup import) would
+      // otherwise key on its UTC calendar day, and a payment made at
+      // 02:00 local in EAT (23:00 UTC the day before) would land under
+      // yesterday's header.
+      final local = t.occurredAt.toLocal();
+      final day = DateTime(local.year, local.month, local.day);
       groups.putIfAbsent(day, () => []).add(t);
     }
     final days = groups.keys.toList()..sort((a, b) => b.compareTo(a));
