@@ -259,6 +259,16 @@ class DriftSettingsRepository implements SettingsRepository {
   static const _kBannerProgress = 'bannerShowProgress';
   static const _kBannerQuickAdd = 'bannerShowQuickAdd';
 
+  static const _kSummaryEnabled = 'summaryNotificationsEnabled';
+  static const _kSummaryDailyEnabled = 'summaryDailyEnabled';
+  static const _kSummaryDailyMinute = 'summaryDailyMinute';
+  static const _kSummaryWeeklyEnabled = 'summaryWeeklyEnabled';
+  static const _kSummaryWeeklyWeekday = 'summaryWeeklyWeekday';
+  static const _kSummaryWeeklyMinute = 'summaryWeeklyMinute';
+  static const _kSummaryMonthlyEnabled = 'summaryMonthlyEnabled';
+  static const _kSummaryMonthlyDay = 'summaryMonthlyDay';
+  static const _kSummaryMonthlyMinute = 'summaryMonthlyMinute';
+
   static const _kAlertsEnabled = 'alertsEnabled';
   static const _kQuietEnabled = 'quietHoursEnabled';
   static const _kQuietStart = 'quietStartMinute';
@@ -361,6 +371,15 @@ class DriftSettingsRepository implements SettingsRepository {
         key: _kAlertsEnabled,
         value: s.alertsEnabled.toString(),
       ),
+      SettingsEntriesCompanion.insert(key: _kSummaryEnabled, value: s.summaryNotificationsEnabled.toString()),
+      SettingsEntriesCompanion.insert(key: _kSummaryDailyEnabled, value: s.summaryDailyEnabled.toString()),
+      SettingsEntriesCompanion.insert(key: _kSummaryDailyMinute, value: s.summaryDailyMinute.toString()),
+      SettingsEntriesCompanion.insert(key: _kSummaryWeeklyEnabled, value: s.summaryWeeklyEnabled.toString()),
+      SettingsEntriesCompanion.insert(key: _kSummaryWeeklyWeekday, value: s.summaryWeeklyWeekday.toString()),
+      SettingsEntriesCompanion.insert(key: _kSummaryWeeklyMinute, value: s.summaryWeeklyMinute.toString()),
+      SettingsEntriesCompanion.insert(key: _kSummaryMonthlyEnabled, value: s.summaryMonthlyEnabled.toString()),
+      SettingsEntriesCompanion.insert(key: _kSummaryMonthlyDay, value: s.summaryMonthlyDay.toString()),
+      SettingsEntriesCompanion.insert(key: _kSummaryMonthlyMinute, value: s.summaryMonthlyMinute.toString()),
       SettingsEntriesCompanion.insert(
         key: _kQuietEnabled,
         value: s.quietHoursEnabled.toString(),
@@ -442,6 +461,11 @@ class DriftSettingsRepository implements SettingsRepository {
       return v != null && v >= 0 && v < 24 * 60 ? v : fallback;
     }
 
+    int boundedInt(String? raw, int min, int max, int fallback) {
+      final v = int.tryParse(raw ?? '');
+      return (v != null && v >= min && v <= max) ? v : fallback;
+    }
+
     return AppSettings(
       name: map[_kName] ?? defaults.name,
       accent: map[_kAccent] != null
@@ -516,6 +540,15 @@ class DriftSettingsRepository implements SettingsRepository {
         map[_kBannerQuickAdd],
         defaults.bannerShowQuickAdd,
       ),
+      summaryNotificationsEnabled: boolOr(map[_kSummaryEnabled], defaults.summaryNotificationsEnabled),
+      summaryDailyEnabled: boolOr(map[_kSummaryDailyEnabled], defaults.summaryDailyEnabled),
+      summaryDailyMinute: minuteOr(map[_kSummaryDailyMinute], defaults.summaryDailyMinute),
+      summaryWeeklyEnabled: boolOr(map[_kSummaryWeeklyEnabled], defaults.summaryWeeklyEnabled),
+      summaryWeeklyWeekday: boundedInt(map[_kSummaryWeeklyWeekday], 1, 7, defaults.summaryWeeklyWeekday),
+      summaryWeeklyMinute: minuteOr(map[_kSummaryWeeklyMinute], defaults.summaryWeeklyMinute),
+      summaryMonthlyEnabled: boolOr(map[_kSummaryMonthlyEnabled], defaults.summaryMonthlyEnabled),
+      summaryMonthlyDay: boundedInt(map[_kSummaryMonthlyDay], 1, 28, defaults.summaryMonthlyDay),
+      summaryMonthlyMinute: minuteOr(map[_kSummaryMonthlyMinute], defaults.summaryMonthlyMinute),
       alertsEnabled: boolOr(map[_kAlertsEnabled], defaults.alertsEnabled),
       quietHoursEnabled: boolOr(
         map[_kQuietEnabled],

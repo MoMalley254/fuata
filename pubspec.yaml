@@ -31,6 +31,8 @@ dependencies:
   sqlcipher_flutter_libs: ^0.7.0+eol
   flutter_secure_storage: ^11.2.0
   local_auth: ^3.0.2
+  timezone: ^0.11.2
+  flutter_timezone: ^5.1.1
 
 dev_dependencies:
   flutter_test:

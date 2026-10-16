@@ -195,6 +195,15 @@ class BackupCodec {
     'bannerUnitsMode': s.bannerUnitsMode.name,
     'bannerShowProgress': s.bannerShowProgress,
     'bannerShowQuickAdd': s.bannerShowQuickAdd,
+    'summaryNotificationsEnabled': s.summaryNotificationsEnabled,
+    'summaryDailyEnabled': s.summaryDailyEnabled,
+    'summaryDailyMinute': s.summaryDailyMinute,
+    'summaryWeeklyEnabled': s.summaryWeeklyEnabled,
+    'summaryWeeklyWeekday': s.summaryWeeklyWeekday,
+    'summaryWeeklyMinute': s.summaryWeeklyMinute,
+    'summaryMonthlyEnabled': s.summaryMonthlyEnabled,
+    'summaryMonthlyDay': s.summaryMonthlyDay,
+    'summaryMonthlyMinute': s.summaryMonthlyMinute,
     'alertsEnabled': s.alertsEnabled,
     'quietHoursEnabled': s.quietHoursEnabled,
     'quietStartMinute': s.quietStartMinute,
@@ -567,6 +576,27 @@ class BackupCodec {
       ),
       bannerShowProgress: flag('bannerShowProgress', d.bannerShowProgress),
       bannerShowQuickAdd: flag('bannerShowQuickAdd', d.bannerShowQuickAdd),
+      summaryNotificationsEnabled: flag(
+        'summaryNotificationsEnabled',
+        d.summaryNotificationsEnabled,
+      ),
+      summaryDailyEnabled: flag('summaryDailyEnabled', d.summaryDailyEnabled),
+      summaryDailyMinute: minute('summaryDailyMinute', d.summaryDailyMinute),
+      summaryWeeklyEnabled: flag('summaryWeeklyEnabled', d.summaryWeeklyEnabled),
+      summaryWeeklyWeekday: m['summaryWeeklyWeekday'] is int &&
+          (m['summaryWeeklyWeekday'] as int >= 1) &&
+          (m['summaryWeeklyWeekday'] as int <= 7)
+          ? m['summaryWeeklyWeekday'] as int
+          : d.summaryWeeklyWeekday,
+      summaryWeeklyMinute: minute('summaryWeeklyMinute', d.summaryWeeklyMinute),
+      summaryMonthlyEnabled: flag('summaryMonthlyEnabled', d.summaryMonthlyEnabled),
+      summaryMonthlyDay: m['summaryMonthlyDay'] is int &&
+          (m['summaryMonthlyDay'] as int >= 1) &&
+          (m['summaryMonthlyDay'] as int <= 31)
+          ? m['summaryMonthlyDay'] as int
+          : d.summaryMonthlyDay,
+      summaryMonthlyMinute: minute('summaryMonthlyMinute', d.summaryMonthlyMinute),
+
       alertsEnabled: flag('alertsEnabled', d.alertsEnabled),
       quietHoursEnabled: flag('quietHoursEnabled', d.quietHoursEnabled),
       quietStartMinute: minute('quietStartMinute', d.quietStartMinute),

@@ -67,6 +67,15 @@ class BannerPlatform {
   static const quietAlertChannelDescription =
       'Limit alerts that arrive during your quiet hours, without sound.';
 
+  /// Issue #31: scheduled summary notifications. Default importance so
+  /// they show on the lock screen (design.md 5.3 — MIUI hides LOW
+  /// channels entirely), but the person only sees them if they turned the
+  /// feature on.
+  static const summaryChannelId = 'fuata_summary';
+  static const summaryChannelName = 'Summary notifications';
+  static const summaryChannelDescription =
+      'Daily, weekly and monthly reminders of how your money went.';
+
   final _plugin = FlutterLocalNotificationsPlugin();
   final _actions = StreamController<BannerAction>.broadcast();
   bool _initialised = false;
@@ -126,6 +135,15 @@ class BannerPlatform {
         importance: Importance.low,
         playSound: false,
         enableVibration: false,
+      ),
+    );
+
+    await android.createNotificationChannel(
+      const AndroidNotificationChannel(
+        summaryChannelId,
+        summaryChannelName,
+        description: summaryChannelDescription,
+        importance: Importance.defaultImportance,
       ),
     );
   }
