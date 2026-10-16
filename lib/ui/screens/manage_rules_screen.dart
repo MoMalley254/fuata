@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:fuata/ui/providers/app_providers.dart';
 import 'package:fuata/ui/theme/app_colors.dart';
+import 'package:fuata/widgets/provider_error_card.dart';
 
 import '../../widgets/rule_builder/rules_body.dart';
 import '../theme/app_typography.dart';
@@ -25,16 +26,15 @@ class ManageRulesScreen extends ConsumerWidget {
     final unitsAsync = ref.read(unitsProvider);
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Reading Rules'),
-      ),
+      appBar: AppBar(title: const Text('Reading Rules')),
       body: SafeArea(
         child: unitsAsync.when(
-          loading: () => const Center(child: CircularProgressIndicator.adaptive(),),
-          error: (e, st) => Center(
-            child: Text(
-              'Something went wrong: $e'
-            ),
+          loading: () =>
+              const Center(child: CircularProgressIndicator.adaptive()),
+          error: (e, st) => ProviderErrorCard(
+            headline: "Couldn't load your money right now",
+            error: e,
+            onRetry: () => ref.invalidate(unitsProvider),
           ),
           data: (units) {
             final unit = units.where((u) => u.id == unitId).firstOrNull;
@@ -42,13 +42,14 @@ class ManageRulesScreen extends ConsumerWidget {
               return Center(
                 child: Text(
                   "This unit's gone.",
-                  style:
-                  AppTypography.bodyMd.copyWith(color: c.onSurfaceVariant),
+                  style: AppTypography.bodyMd.copyWith(
+                    color: c.onSurfaceVariant,
+                  ),
                 ),
               );
             }
             return RulesBody(unit: unit);
-          }
+          },
         ),
       ),
     );

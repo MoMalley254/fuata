@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:fuata/ui/theme/app_colors.dart';
+import 'package:fuata/widgets/provider_error_card.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../domain/models/transaction.dart';
@@ -33,24 +34,21 @@ class ReviewInboxScreen extends ConsumerWidget {
     final text = data?.text;
     if (text == null || text.trim().isEmpty) {
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Nothing to paste.')),
-        );
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('Nothing to paste.')));
       }
       return;
     }
 
     CaptureOutcome outcome;
     try {
-      outcome = await ref.read(captureServiceProvider).capture(
-        text,
-        source: TxSource.shared,
-      );
-    } catch (e) {
+      outcome = await ref
+          .read(captureServiceProvider)
+          .capture(text, source: TxSource.shared);
+    } catch (_) {
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not read that: $e')),
-        );
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Could not read that message')));
       }
       return;
     }
@@ -59,21 +57,27 @@ class ReviewInboxScreen extends ConsumerWidget {
     final messenger = ScaffoldMessenger.of(context);
     switch (outcome) {
       case Captured(:final autoAccepted):
-        messenger.showSnackBar(SnackBar(
-          content: Text(autoAccepted
-              ? 'Caught it — already added to your money.'
-              : 'Caught it — waiting for your check below.'),
-        ));
+        messenger.showSnackBar(
+          SnackBar(
+            content: Text(
+              autoAccepted
+                  ? 'Caught it — already added to your money.'
+                  : 'Caught it — waiting for your check below.',
+            ),
+          ),
+        );
       case CaptureDuplicate():
-        messenger.showSnackBar(const SnackBar(
-          content: Text('Already caught that one.'),
-        ));
+        messenger.showSnackBar(
+          const SnackBar(content: Text('Already caught that one.')),
+        );
       case CaptureUnparsed():
-        messenger.showSnackBar(const SnackBar(
-          content: Text("Couldn't read that one yet."),
-        ));
+        messenger.showSnackBar(
+          const SnackBar(content: Text("Couldn't read that one yet.")),
+        );
       case CaptureIgnored():
-        messenger.showSnackBar(const SnackBar(content: Text('Nothing to paste.')));
+        messenger.showSnackBar(
+          const SnackBar(content: Text('Nothing to paste.')),
+        );
     }
   }
 
@@ -81,23 +85,17 @@ class ReviewInboxScreen extends ConsumerWidget {
   /// then try it again — a freshly saved rule usually reads the message
   /// that produced it, in which case the unparsed row retires itself.
   Future<void> _teachMe(
-      BuildContext context,
-      WidgetRef ref,
-      UnparsedCapture entry,
-      ) async {
-    await context.push<String>(
-      Routes.ruleBuilderNewPath,
-      extra: entry.rawText,
-    );
+    BuildContext context,
+    WidgetRef ref,
+    UnparsedCapture entry,
+  ) async {
+    await context.push<String>(Routes.ruleBuilderNewPath, extra: entry.rawText);
     if (!context.mounted) return;
-    final outcome = await ref.read(captureServiceProvider).capture(
-      entry.rawText,
-      source: TxSource.shared,
-    );
+    final outcome = await ref
+        .read(captureServiceProvider)
+        .capture(entry.rawText, source: TxSource.shared);
     if (outcome is Captured && context.mounted) {
-      await ref
-          .read(captureRepositoryProvider)
-          .deleteUnparsed(entry.id);
+      await ref.read(captureRepositoryProvider).deleteUnparsed(entry.id);
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Got it now — see it above.')),
@@ -126,93 +124,106 @@ class ReviewInboxScreen extends ConsumerWidget {
       ),
       body: SafeArea(
         child: unitsAsync.when(
-          loading: () => const Center(child: CircularProgressIndicator.adaptive(),),
-          error: (e, st) => Center(child: Text('Something went wrong: $e'),),
+          loading: () =>
+              const Center(child: CircularProgressIndicator.adaptive()),
+          error: (e, st) => ProviderErrorCard(
+            headline: "Couldn't load your money right now",
+            error: e,
+            onRetry: () => ref.invalidate(unitsProvider),
+          ),
           data: (units) {
             final unitById = {for (final u in units) u.id: u};
             return unparsedAsync.when(
-              loading: () => const Center(child: CircularProgressIndicator.adaptive(),),
-              error: (e, st) => Center(child: Text('Something went wrong: $e'),),
+              loading: () =>
+                  const Center(child: CircularProgressIndicator.adaptive()),
+              error: (e, st) => ProviderErrorCard(
+                headline: "Couldn't load it's activity right now",
+                error: e,
+                onRetry: () => ref.invalidate(unparsedCapturesProvider),
+              ),
               data: (unparsed) {
-                  final c = context.colors;
-                  final isEmpty = pending.isEmpty && unparsed.isEmpty;
+                final c = context.colors;
+                final isEmpty = pending.isEmpty && unparsed.isEmpty;
 
-                  return ListView(
-                    padding: const EdgeInsets.fromLTRB(
-                      AppSpacing.margin,
-                      AppSpacing.sm,
-                      AppSpacing.margin,
-                      AppSpacing.xl,
+                return ListView(
+                  padding: const EdgeInsets.fromLTRB(
+                    AppSpacing.margin,
+                    AppSpacing.sm,
+                    AppSpacing.margin,
+                    AppSpacing.xl,
+                  ),
+                  children: [
+                    // Always visible — it's a setting, not a per-capture action.
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Auto-accept new captures',
+                                style: AppTypography.bodyMd.copyWith(
+                                  color: c.onSurface,
+                                ),
+                              ),
+                              Text(
+                                'Skips this screen and adds them straight away.',
+                                style: AppTypography.bodySm.copyWith(
+                                  color: c.onSurfaceVariant,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        Switch.adaptive(
+                          value: settings.autoAcceptCaptures,
+                          onChanged: (v) => ref
+                              .read(settingsRepositoryProvider)
+                              .updateSettings(
+                                settings.copyWith(autoAcceptCaptures: v),
+                              ),
+                        ),
+                      ],
                     ),
-                    children: [
-                      // Always visible — it's a setting, not a per-capture action.
-                      Row(
-                        children: [
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  'Auto-accept new captures',
-                                  style: AppTypography.bodyMd.copyWith(color: c.onSurface),
-                                ),
-                                Text(
-                                  'Skips this screen and adds them straight away.',
-                                  style: AppTypography.bodySm
-                                      .copyWith(color: c.onSurfaceVariant),
-                                ),
-                              ],
-                            ),
-                          ),
-                          Switch.adaptive(
-                            value: settings.autoAcceptCaptures,
-                            onChanged: (v) => ref
-                                .read(settingsRepositoryProvider)
-                                .updateSettings(
-                              settings.copyWith(autoAcceptCaptures: v),
-                            ),
-                          ),
-                        ],
-                      ),
 
-                      if (isEmpty)
-                        const AllCaughtUp()
-                      else ...[
-                        if (pending.isNotEmpty) ...[
-                          const SizedBox(height: AppSpacing.md),
-                          Label('Waiting for you · ${pending.length}'),
+                    if (isEmpty)
+                      const AllCaughtUp()
+                    else ...[
+                      if (pending.isNotEmpty) ...[
+                        const SizedBox(height: AppSpacing.md),
+                        Label('Waiting for you · ${pending.length}'),
+                        const SizedBox(height: AppSpacing.sm),
+                        for (final t in pending) ...[
+                          PendingCard(t: t, unit: unitById[t.unitId]),
                           const SizedBox(height: AppSpacing.sm),
-                          for (final t in pending) ...[
-                            PendingCard(t: t, unit: unitById[t.unitId]),
-                            const SizedBox(height: AppSpacing.sm),
-                          ],
                         ],
-                        if (unparsed.isNotEmpty) ...[
-                          const SizedBox(height: AppSpacing.lg),
-                          Label("Couldn't read these"),
-                          const SizedBox(height: AppSpacing.xs),
-                          Text(
-                            'Teach Fuata what one of these means and it will '
-                                'read the rest.',
-                            style: AppTypography.bodySm
-                                .copyWith(color: c.onSurfaceVariant),
+                      ],
+                      if (unparsed.isNotEmpty) ...[
+                        const SizedBox(height: AppSpacing.lg),
+                        Label("Couldn't read these"),
+                        const SizedBox(height: AppSpacing.xs),
+                        Text(
+                          'Teach Fuata what one of these means and it will '
+                          'read the rest.',
+                          style: AppTypography.bodySm.copyWith(
+                            color: c.onSurfaceVariant,
+                          ),
+                        ),
+                        const SizedBox(height: AppSpacing.sm),
+                        for (final entry in unparsed) ...[
+                          UnparsedCard(
+                            entry: entry,
+                            onTeachMe: () => _teachMe(context, ref, entry),
                           ),
                           const SizedBox(height: AppSpacing.sm),
-                          for (final entry in unparsed) ...[
-                            UnparsedCard(
-                              entry: entry,
-                              onTeachMe: () => _teachMe(context, ref, entry),
-                            ),
-                            const SizedBox(height: AppSpacing.sm),
-                          ],
                         ],
                       ],
                     ],
-                  );
-                }
-
+                  ],
+                );
+              },
             );
-          }
+          },
         ),
       ),
     );
