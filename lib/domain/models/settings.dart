@@ -195,6 +195,23 @@ class AppSettings {
   final bool bannerShowProgress;
   final bool bannerShowQuickAdd;
 
+  /// Issue #31: scheduled daily / weekly / monthly summary notifications.
+  /// The master switch gates all three; each period has its own toggle
+  /// and its own time (minutes after local midnight).
+  final bool summaryNotificationsEnabled;
+  final bool summaryDailyEnabled;
+  final int summaryDailyMinute;
+  final bool summaryWeeklyEnabled;
+  /// 1 = Monday … 7 = Sunday (matches Dart's `DateTime.weekday`).
+  final int summaryWeeklyWeekday;
+  final int summaryWeeklyMinute;
+  final bool summaryMonthlyEnabled;
+  /// 1–28, so every month has one. Days 29–31 are deliberately excluded:
+  /// a monthly summary that silently skips February would be worse than
+  /// one that fires slightly early.
+  final int summaryMonthlyDay;
+  final int summaryMonthlyMinute;
+
   // Limit alerts (issue #63, US-06). Alert *levels* live on each LimitRule
   // (warnAt / dangerAt); these are the switches around them. Quiet hours
   // are minutes after local midnight and may wrap (22:00 -> 07:00).
@@ -258,6 +275,17 @@ class AppSettings {
     required this.bannerUnitIds,
     required this.bannerShowProgress,
     required this.bannerShowQuickAdd,
+
+    this.summaryNotificationsEnabled = false,
+    this.summaryDailyEnabled = false,
+    this.summaryDailyMinute = 20 * 60,          // 20:00
+    this.summaryWeeklyEnabled = false,
+    this.summaryWeeklyWeekday = DateTime.sunday, // 7
+    this.summaryWeeklyMinute = 20 * 60,
+    this.summaryMonthlyEnabled = false,
+    this.summaryMonthlyDay = 1,
+    this.summaryMonthlyMinute = 20 * 60,
+
     this.alertsEnabled = true,
     this.quietHoursEnabled = false,
     this.quietStartMinute = 22 * 60,
@@ -291,6 +319,15 @@ class AppSettings {
     bannerUnitsMode: BannerUnitsMode.all,
     bannerShowProgress: true,
     bannerShowQuickAdd: true,
+    summaryNotificationsEnabled: false,
+    summaryDailyEnabled: false,
+    summaryDailyMinute: 20 * 60,          // 20:00
+    summaryWeeklyEnabled: false,
+    summaryWeeklyWeekday: DateTime.sunday, // 7
+    summaryWeeklyMinute: 20 * 60,
+    summaryMonthlyEnabled: false,
+    summaryMonthlyDay: 1,
+    summaryMonthlyMinute: 20 * 60,
     alertsEnabled: true,
     quietHoursEnabled: false,
     quietStartMinute: 22 * 60,
@@ -323,6 +360,15 @@ class AppSettings {
     BannerUnitsMode? bannerUnitsMode,
     bool? bannerShowProgress,
     bool? bannerShowQuickAdd,
+    bool?  summaryNotificationsEnabled,
+    bool?  summaryDailyEnabled,
+    int ? summaryDailyMinute,
+    bool?  summaryWeeklyEnabled,
+    int ? summaryWeeklyWeekday,
+    int ? summaryWeeklyMinute,
+    bool?  summaryMonthlyEnabled,
+    int ? summaryMonthlyDay,
+    int ? summaryMonthlyMinute,
     bool? alertsEnabled,
     bool? quietHoursEnabled,
     int? quietStartMinute,
@@ -356,6 +402,15 @@ class AppSettings {
       bannerUnitsMode: bannerUnitsMode ?? this.bannerUnitsMode,
       bannerShowProgress: bannerShowProgress ?? this.bannerShowProgress,
       bannerShowQuickAdd: bannerShowQuickAdd ?? this.bannerShowQuickAdd,
+      summaryNotificationsEnabled: summaryNotificationsEnabled ?? this.summaryNotificationsEnabled,
+      summaryDailyEnabled: summaryDailyEnabled ?? this.summaryDailyEnabled,
+      summaryDailyMinute: summaryDailyMinute ?? this.summaryDailyMinute,
+      summaryWeeklyEnabled: summaryWeeklyEnabled ?? this.summaryWeeklyEnabled,
+      summaryWeeklyWeekday: summaryWeeklyWeekday ?? this.summaryWeeklyWeekday,
+      summaryWeeklyMinute: summaryWeeklyMinute ?? this.summaryWeeklyMinute,
+      summaryMonthlyEnabled: summaryMonthlyEnabled ?? this.summaryMonthlyEnabled,
+      summaryMonthlyDay: summaryMonthlyDay ?? this.summaryMonthlyDay,
+      summaryMonthlyMinute: summaryMonthlyMinute ?? this.summaryMonthlyMinute,
       alertsEnabled: alertsEnabled ?? this.alertsEnabled,
       quietHoursEnabled: quietHoursEnabled ?? this.quietHoursEnabled,
       quietStartMinute: quietStartMinute ?? this.quietStartMinute,
