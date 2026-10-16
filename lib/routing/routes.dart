@@ -29,6 +29,8 @@ class Routes {
   static const lock = 'lock';
   static const settingsSecurity = 'settingsSecurity';
 
+  static const settingsSummaryNotifications = 'settingsSummaryNotifications';
+
   // ---- Paths ----
   static const splashPath = '/splash';
   static const onboardingPath = '/onboarding';
@@ -58,6 +60,9 @@ class Routes {
   static const settingsCategoriesPath = '/settings/categories';
   static const lockPath = '/lock';
   static const settingsSecurityPath = '/settings/security';
+
+  static const settingsSummaryNotificationsPath =
+      '/settings/summary-notifications';
 
   // ---- Helpers ----
   static String unitFor(String id) => '/unit/$id';

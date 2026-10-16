@@ -31,6 +31,7 @@ import '../ui/screens/settings/manage_categories_screen.dart';
 import '../ui/screens/settings/privacy_data_screen.dart';
 import '../ui/screens/settings/security_screen.dart';
 import '../ui/screens/settings/settings_screen.dart';
+import '../ui/screens/settings/summary_notifications_screen.dart';
 import '../ui/screens/summary_screen.dart';
 import '../ui/screens/unit_detail_screen.dart';
 import '../widgets/sheets/add_transaction_sheet.dart';
@@ -320,6 +321,12 @@ final routerProvider = Provider<GoRouter>((ref) {
           name: Routes.settingsSecurity,
           parentNavigatorKey: rootNavigatorKey,
           builder: (_, _) => const SecurityScreen(),
+        ),
+        GoRoute(
+          path: Routes.settingsSummaryNotificationsPath,
+          name: Routes.settingsSummaryNotifications,
+          parentNavigatorKey: rootNavigatorKey,
+          builder: (_, _) => const SummaryNotificationsScreen(),
         ),
       ]
   );

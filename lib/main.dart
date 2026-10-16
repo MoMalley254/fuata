@@ -8,6 +8,7 @@ import 'package:fuata/platform/banner.dart';
 import 'package:fuata/platform/notification_capture.dart';
 import 'package:fuata/platform/privacy.dart';
 import 'package:fuata/platform/share_intake.dart';
+import 'package:fuata/platform/summary_notifications.dart';
 import 'package:fuata/routing/app_router.dart';
 import 'package:fuata/routing/routes.dart';
 import 'package:fuata/ui/providers/alert_providers.dart';
@@ -15,6 +16,7 @@ import 'package:fuata/ui/providers/app_providers.dart';
 import 'package:fuata/ui/providers/banner_providers.dart';
 import 'package:fuata/ui/providers/capture_providers.dart';
 import 'package:fuata/ui/providers/privacy_providers.dart';
+import 'package:fuata/ui/providers/summary_notifications_providers.dart';
 import 'package:fuata/ui/providers/widget_providers.dart';
 import 'package:fuata/ui/theme/app_theme.dart';
 
@@ -28,6 +30,10 @@ void main() async {
   // read. privacySyncProvider flips this to the person's real choice as
   // soon as the settings stream emits.
   await applySecure(true);
+
+  // Issue #31: load the timezone database before the first schedule, so
+  // "8pm" means 8pm local rather than 8pm UTC.
+  await SummaryNotificationScheduler.instance.init();
 
   // Issue #22: register the background isolate entry point so Android can
   // start it cold from a notification.
@@ -128,6 +134,7 @@ class _FuataState extends ConsumerState<Fuata> with WidgetsBindingObserver {
     ref.watch(alertSyncProvider);
     ref.watch(widgetSyncProvider); //Issue #29
     ref.watch(privacySyncProvider);   // issue #84
+    ref.watch(summaryNotificationSyncProvider); // Issue #31
 
     final settings = ref.watch(currentSettingsProvider);
     final router = ref.watch(routerProvider);

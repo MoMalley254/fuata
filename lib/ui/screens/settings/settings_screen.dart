@@ -115,6 +115,16 @@ class SettingsScreen extends ConsumerWidget {
                   : 'Off — choose what the notification banner shows',
               onTap: () => context.push(Routes.bannerPath),
             ),
+            const SizedBox(height: AppSpacing.sm,),
+            const SizedBox(height: AppSpacing.sm),
+            ActionRow(
+              icon: Icons.schedule_send_outlined,
+              title: 'Summary notifications',
+              subtitle: settings.summaryNotificationsEnabled
+                  ? 'On — daily, weekly or monthly reminders'
+                  : 'Off — a periodic nudge about how your money went',
+              onTap: () => context.push(Routes.settingsSummaryNotificationsPath),
+            ),
 
             const SizedBox(height: AppSpacing.lg),
 
