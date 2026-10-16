@@ -62,9 +62,9 @@ Future<void> eraseAllData(WidgetRef ref) async {
     messenger?.showSnackBar(
       const SnackBar(content: Text('Everything erased.')),
     );
-  } catch (e) {
+  } catch (_) {
     messenger?.showSnackBar(
-      SnackBar(content: Text("Couldn't erase everything: $e")),
+      SnackBar(content: Text("Couldn't erase everything. Please try again.")),
     );
   }
 }
