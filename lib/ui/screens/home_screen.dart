@@ -13,6 +13,7 @@ import '../../widgets/activity/grouped_list.dart';
 import '../../widgets/amount_text.dart';
 import '../../widgets/home/week_peek.dart';
 import '../../widgets/personalization/amount_visibility_toggle.dart';
+import '../../widgets/provider_error_card.dart';
 import '../../widgets/sheets/add_transaction_sheet.dart';
 import '../../widgets/sheets/edit_unit_sheet.dart';
 import 'summary_screen.dart';
@@ -43,30 +44,34 @@ class HomeScreen extends ConsumerWidget {
       body: SafeArea(
         child: homeAsync.when(
           loading: () => const Center(child: CircularProgressIndicator()),
-          error: (e, st) => Center(child: Text('Something went wrong: $e')),
+          error: (e, st) => ProviderErrorCard(
+            headline: "Couldn't load your money right now",
+            error: e,
+            onRetry: () => ref.invalidate(homeStateProvider),
+          ),
           data: (state) => state.units.isEmpty
               ? const EmptyHome()
               : HomeContent(
-            state: state,
-            settings: settings,
-            inboxCount: inboxCount,
-            pendingCount: pendingCount,
-            onSeeAllActivity: () =>
-                StatefulNavigationShell.of(context).goBranch(1),
-            onOpenInbox: () => context.push(Routes.inboxPath),
-            onReorderUnits: (ids) =>
-                ref.read(unitRepositoryProvider).reorderUnits(ids),
-          ),
+                  state: state,
+                  settings: settings,
+                  inboxCount: inboxCount,
+                  pendingCount: pendingCount,
+                  onSeeAllActivity: () =>
+                      StatefulNavigationShell.of(context).goBranch(1),
+                  onOpenInbox: () => context.push(Routes.inboxPath),
+                  onReorderUnits: (ids) =>
+                      ref.read(unitRepositoryProvider).reorderUnits(ids),
+                ),
         ),
       ),
       // #116: the + adds a transaction, which needs a unit to attach to.
-// On a fresh install there is nothing to attach to, so the Empty Home
-// state carries the only action that works — adding the first unit.
+      // On a fresh install there is nothing to attach to, so the Empty Home
+      // state carries the only action that works — adding the first unit.
       floatingActionButton: (homeAsync.value?.units.isNotEmpty ?? false)
           ? FloatingActionButton(
-        onPressed: () => showAddTransactionSheet(context),
-        child: const Icon(Icons.add),
-      )
+              onPressed: () => showAddTransactionSheet(context),
+              child: const Icon(Icons.add),
+            )
           : null,
     );
   }
@@ -189,9 +194,9 @@ class HomeContent extends StatelessWidget {
           Align(
             alignment: Alignment.centerLeft,
             child: TextButton.icon(
-              onPressed: () => Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const SummaryScreen()),
-              ),
+              onPressed: () => Navigator.of(
+                context,
+              ).push(MaterialPageRoute(builder: (_) => const SummaryScreen())),
               icon: const Icon(Icons.insights_rounded),
               label: const Text('See my summaries'),
             ),
@@ -209,8 +214,8 @@ class HomeContent extends StatelessWidget {
     final yesterday = now.subtract(const Duration(days: 1));
     final isYesterday =
         t.year == yesterday.year &&
-            t.month == yesterday.month &&
-            t.day == yesterday.day;
+        t.month == yesterday.month &&
+        t.day == yesterday.day;
     if (isYesterday) return 'yesterday';
     return DateFormat('EEE, d MMM').format(t);
   }
@@ -349,21 +354,21 @@ class HeroSection extends ConsumerWidget {
       final hidden = ref.watch(currentSettingsProvider).amountsHidden;
       final (label, amountMinor, caption) = switch (headline) {
         HomeHeadline.leftToday => (
-        'Altogether you have',
-        total,
-        'Set a daily limit to see how today is going.',
+          'Altogether you have',
+          total,
+          'Set a daily limit to see how today is going.',
         ),
         HomeHeadline.totalIHave => (
-        'Altogether you have',
-        total,
-        'Across everything you\'ve told Fuata about.',
+          'Altogether you have',
+          total,
+          'Across everything you\'ve told Fuata about.',
         ),
         HomeHeadline.spentToday => (
-        'Spent today',
-        state.spentToday,
-        limit == null
-            ? 'Set a daily limit to see how today is going.'
-            : 'of ${Money(limit.amountMinor, currency).format()} · resets at midnight',
+          'Spent today',
+          state.spentToday,
+          limit == null
+              ? 'Set a daily limit to see how today is going.'
+              : 'of ${Money(limit.amountMinor, currency).format()} · resets at midnight',
         ),
       };
 
@@ -493,9 +498,9 @@ class _UnitRowState extends State<UnitRow> {
           scrollDirection: Axis.horizontal,
           itemCount: _units.length + 1,
           separatorBuilder: (_, _) =>
-          const SizedBox(width: AppSpacing.gutterSm),
+              const SizedBox(width: AppSpacing.gutterSm),
           itemBuilder: (context, i) =>
-          i == _units.length ? addCard : _card(context, _units[i]),
+              i == _units.length ? addCard : _card(context, _units[i]),
         ),
       );
     }
@@ -590,7 +595,7 @@ class EmptyHome extends StatelessWidget {
             const SizedBox(height: AppSpacing.md),
             Text(
               'Want Fuata to catch payments for you? Turn on Auto-catch '
-                  'in Settings.',
+              'in Settings.',
               textAlign: TextAlign.center,
               style: AppTypography.bodySm.copyWith(color: c.onSurfaceVariant),
             ),
