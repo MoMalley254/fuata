@@ -69,7 +69,7 @@ flutter test --coverage    # optional
 | T-15 | Quiet hours 22:00–07:00 | 23:00 and 06:59 quiet; 07:00 and 12:00 not; start == end never quiet |
 | T-16 | Two claims for the same (limit, period, level) | Exactly one wins (drift primary key) |
 | T-17 | Limit amount changed / limit deleted | Its announcements are cleared; editing levels or the switch keeps them |
-
+| L-17 | An `occurredAt` stored as UTC (parser ISO output, a backup import) | Buckets by its **local** calendar day, not its UTC one (#109) |
 ### Summaries (US-12) — issue #23
 
 | ID | Case | Expected |

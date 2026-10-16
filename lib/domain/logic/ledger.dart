@@ -86,18 +86,26 @@ class Ledger {
   /// [now] is injectable so tests can pin the window; production callers
   /// leave it out. Boundaries are local calendar days — a transaction at
   /// 23:59 belongs to the day it happened, not the day it was confirmed.
+  ///
+  /// Issue #109: an `occurredAt` stored as UTC (the parser's ISO 8601
+  /// branch, a backup import) is normalised with `.toLocal()` before its
+  /// calendar fields are read. A 23:00 UTC payment in EAT (UTC+3) is 02:00
+  /// the next day locally, and must land in *that* day's bar, not the
+  /// UTC day's. [now] is normalised the same way, so a UTC `now` passed by
+  /// a test or a background caller can't skew the window either.
   static List<int> spentByDay(
       Iterable<MoneyTransaction> all, {
         required DateTime now,
         int days = 7,
       }) {
-    final today = DateTime(now.year, now.month, now.day);
+    final nowLocal = now.toLocal();
+    final today = DateTime(nowLocal.year, nowLocal.month, nowLocal.day);
     final start = today.subtract(Duration(days: days - 1));
     final out = List<int>.filled(days, 0);
 
     for (final t in all) {
       if (!t.countsAsSpending) continue;
-      final at = t.occurredAt;
+      final at = t.occurredAt.toLocal();
       final day = DateTime(at.year, at.month, at.day);
       if (day.isBefore(start) || day.isAfter(today)) continue;
       out[day.difference(start).inDays] += -t.amountMinor;

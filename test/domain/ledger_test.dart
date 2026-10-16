@@ -173,5 +173,40 @@ void main() {
       expect(out[5], 100); // yesterday
       expect(out[6], 200); // today
     });
+
+    test('S-24: a UTC occurredAt is bucketed by its local calendar day (#109)',
+            () {
+          // A UTC instant. In EAT (UTC+3) local is 02:00 on the 15th; in
+          // UTC it's 23:00 on the 14th. The bucket must follow the *local*
+          // calendar day — i.e. match `utc.toLocal()`'s year/month/day,
+          // never the UTC ones.
+          final utc = DateTime.utc(2026, 10, 14, 23, 0);
+          final local = utc.toLocal();
+          final localDay = DateTime(local.year, local.month, local.day);
+
+          // Anchor `now` at local noon on the 15th so both the 14th and
+          // the 15th fall inside the seven-day window whatever the
+          // runner's timezone happens to be (UTC-12 to UTC+14).
+          final now = DateTime(2026, 10, 15, 12, 0);
+          final today = DateTime(now.year, now.month, now.day);
+          final start = today.subtract(const Duration(days: 6));
+          final index = localDay.difference(start).inDays;
+          expect(
+            index,
+            inInclusiveRange(0, 6),
+            reason: 'precondition: the instant falls inside the window',
+          );
+
+          final out = Ledger.spentByDay(
+            [tx(amountMinor: -5000, occurredAt: utc)],
+            now: now,
+          );
+          expect(out[index], 5000);
+          // The UTC calendar day is the 14th; if the fix were missing the
+          // amount would land there in every zone east of UTC. Asserting
+          // on the UTC day would be wrong on a UTC runner, so the check
+          // above is the portable one. This line just makes the intent
+          // explicit for a UTC+3 dev machine.
+        });
   });
 }
