@@ -23,6 +23,11 @@
         android:name="android.permission.USE_FINGERPRINT"
         android:maxSdkVersion="27"/>
 
+    <!-- Issue #31: reschedules the summary notifications after a reboot.
+     Without this, the scheduled alarm is lost and the person only
+     gets the notification again once they next open Fuata. -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
+
     <!-- Issue #25: no Android auto-backup to Google Drive and no
          device-to-device transfer of the database. allowBackup covers
          Android 11 and below; dataExtractionRules covers 12+, where it
@@ -100,6 +105,25 @@
                 android:name="android.appwidget.provider"
                 android:resource="@xml/fuata_widget_info" />
         </receiver>
+
+        <!-- Issue #31: flutter_local_notifications' boot receiver. It
+     re-arms every scheduled notification after the phone reboots.
+     The plugin's own manifest may already merge one of these in;
+     the merger unions the intent filters, so a duplicate is
+     harmless. -->
+        <receiver
+            android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationBootReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED"/>
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED"/>
+                <action android:name="android.intent.action.QUICKBOOT_POWERON"/>
+                <action android:name="com.htc.intent.action.QUICKBOOT_POWERON"/>
+            </intent-filter>
+        </receiver>
+        <receiver
+            android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationReceiver"
+            android:exported="false"/>
     </application>
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility and
