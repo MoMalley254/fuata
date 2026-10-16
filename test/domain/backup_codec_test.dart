@@ -429,6 +429,36 @@ void main() {
     expect(s.widgetVariant, WidgetVariant.compact);
   });
 
+  test('the summary notification options round-trip', () {
+    final snapshot = BackupSnapshot(
+      settings: customSettings().copyWith(
+        summaryNotificationsEnabled: true,
+        summaryDailyEnabled: true,
+        summaryDailyMinute: 480, // 8:00 AM
+        summaryWeeklyEnabled: true,
+        summaryWeeklyWeekday: 1, // Monday
+        summaryWeeklyMinute: 540, // 9:00 AM
+        summaryMonthlyEnabled: false,
+        summaryMonthlyDay: 15,
+        summaryMonthlyMinute: 600, // 10:00 AM
+      ),
+    );
+    final decoded = BackupCodec.decode(
+      BackupCodec.encode(snapshot, exportedAt: exportedAt),
+    );
+    expect(decoded.errors, isEmpty);
+    final s = decoded.snapshot!.settings!;
+    expect(s.summaryNotificationsEnabled, isTrue);
+    expect(s.summaryDailyEnabled, isTrue);
+    expect(s.summaryDailyMinute, 480);
+    expect(s.summaryWeeklyEnabled, isTrue);
+    expect(s.summaryWeeklyWeekday, 1);
+    expect(s.summaryWeeklyMinute, 540);
+    expect(s.summaryMonthlyEnabled, isFalse);
+    expect(s.summaryMonthlyDay, 15);
+    expect(s.summaryMonthlyMinute, 600);
+  });
+
   test('a backup made before #113 leaves the widget at its defaults', () {
     final root = jsonDecode(
       BackupCodec.encode(
@@ -453,5 +483,36 @@ void main() {
     expect(s.widgetShowProgress, d.widgetShowProgress);
     expect(s.widgetShowSplit, d.widgetShowSplit);
     expect(s.widgetVariant, d.widgetVariant);
+  });
+
+  test('a backup made before summary settings leaves them at defaults', () {
+    final root = jsonDecode(
+      BackupCodec.encode(
+        BackupSnapshot(settings: customSettings()),
+        exportedAt: exportedAt,
+      ),
+    ) as Map<String, dynamic>;
+    final settings = (root['data'] as Map)['settings'] as Map;
+    for (final k in [
+      'summaryNotificationsEnabled', 'summaryDailyEnabled', 'summaryDailyMinute',
+      'summaryWeeklyEnabled', 'summaryWeeklyWeekday', 'summaryWeeklyMinute',
+      'summaryMonthlyEnabled', 'summaryMonthlyDay', 'summaryMonthlyMinute',
+    ]) {
+      settings.remove(k);
+    }
+
+    final decoded = BackupCodec.decode(jsonEncode(root));
+    expect(decoded.errors, isEmpty);
+    final d = AppSettings.defaults;
+    final s = decoded.snapshot!.settings!;
+    expect(s.summaryNotificationsEnabled, d.summaryNotificationsEnabled);
+    expect(s.summaryDailyEnabled, d.summaryDailyEnabled);
+    expect(s.summaryDailyMinute, d.summaryDailyMinute);
+    expect(s.summaryWeeklyEnabled, d.summaryWeeklyEnabled);
+    expect(s.summaryWeeklyWeekday, d.summaryWeeklyWeekday);
+    expect(s.summaryWeeklyMinute, d.summaryWeeklyMinute);
+    expect(s.summaryMonthlyEnabled, d.summaryMonthlyEnabled);
+    expect(s.summaryMonthlyDay, d.summaryMonthlyDay);
+    expect(s.summaryMonthlyMinute, d.summaryMonthlyMinute);
   });
 }
