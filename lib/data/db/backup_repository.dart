@@ -76,7 +76,15 @@ class DriftBackupRepository implements BackupRepository {
   }
 
   @override
-  Future<void> apply(BackupSnapshot records, {AppSettings? settings}) {
+  Future<void> apply(BackupSnapshot records, {AppSettings? settings}) async {
+    // #114: what the app-wide currency will be once this import is done.
+    // If the file's settings are being restored, the file decides; if not,
+    // the phone's own setting does. Read it *before* the transaction so
+    // there's no re-entrant stream read inside one.
+    final finalCurrency = settings?.currencyCode ??
+        (await DriftSettingsRepository(_db).watchSettings().first)
+        .currencyCode;
+
     return _db.transaction(() async {
       // Parents before children, so foreign keys hold at every step:
       // categories, units and apps first; then the rules that point at
@@ -133,6 +141,14 @@ class DriftBackupRepository implements BackupRepository {
       if (settings != null) {
         await DriftSettingsRepository(_db).updateSettings(settings);
       }
+
+      // #114: every unit agrees with the app-wide currency. The per-unit
+      // field is display state (see MoneyUnit.currencyCode's doc), so a
+      // file from before #114 — or one whose units were hand-edited —
+      // can't leave two different symbols on screen.
+      await _db.update(_db.units).write(
+        UnitsCompanion(currency: Value(finalCurrency)),
+      );
     });
   }
 

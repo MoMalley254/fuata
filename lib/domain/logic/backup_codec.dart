@@ -215,6 +215,7 @@ class BackupCodec {
     'widgetShowProgress': s.widgetShowProgress,
     'widgetShowSplit': s.widgetShowSplit,
     'widgetVariant': s.widgetVariant.name,
+    'currencyCode': s.currencyCode,
   };
 
   // ---------------------------------------------------------------- decode
@@ -542,6 +543,11 @@ class BackupCodec {
 
     final rawName = m['name'];
 
+    final currencyRaw = m['currencyCode'];
+    final currencyCode = currencyRaw is String && currencyRaw.trim().isNotEmpty
+        ? currencyRaw.trim()
+        : d.currencyCode;
+
     return AppSettings(
       name: rawName is String && rawName.trim().isNotEmpty ? rawName : d.name,
       accent: accent,
@@ -623,6 +629,7 @@ class BackupCodec {
         WidgetVariant.values,
         d.widgetVariant,
       ),
+      currencyCode: currencyCode,
     );
   }
 
