@@ -1,3 +1,4 @@
+import 'package:currency_picker/currency_picker.dart';
 import 'package:flutter/material.dart';
 
 import '../../domain/models/settings.dart';
@@ -20,6 +21,8 @@ class WelcomeStep extends StatelessWidget {
     required this.onAccent,
     required this.onContinue,
     required this.onSkip,
+    required this.currencyCode,
+    required this.onCurrencyChanged,
   });
 
   final TextEditingController nameController;
@@ -27,10 +30,14 @@ class WelcomeStep extends StatelessWidget {
   final ValueChanged<Color> onAccent;
   final VoidCallback onContinue;
   final VoidCallback onSkip;
+  final String currencyCode;
+  final ValueChanged<String> onCurrencyChanged;
 
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
+    final currencyInfo = CurrencyService().findByCode(currencyCode);
+
     return StepFrame(
       title: 'Your money, in one glance.',
       subtitle: 'Everything stays on this phone.',
@@ -75,6 +82,56 @@ class WelcomeStep extends StatelessWidget {
                 },
               ),
             ],
+          ),
+          const SizedBox(height: AppSpacing.lg),
+          const Label('Currency'),
+          const SizedBox(height: AppSpacing.sm),
+          InkWell(
+            onTap: () => showCurrencyPicker(
+              context: context,
+              showFlag: false,
+              onSelect: (Currency picked) => onCurrencyChanged(picked.code),
+            ),
+            borderRadius: BorderRadius.circular(AppSpacing.unitTileRadius),
+            child: Container(
+              padding: const EdgeInsets.symmetric(
+                horizontal: AppSpacing.md,
+                vertical: AppSpacing.sm,
+              ),
+              decoration: BoxDecoration(
+                color: c.surfaceContainer,
+                borderRadius: BorderRadius.circular(AppSpacing.unitTileRadius),
+                border: Border.all(
+                  color: c.outlineVariant.withValues(alpha: 0.4),
+                ),
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          currencyInfo == null
+                              ? currencyCode
+                              : '${currencyInfo.name} (${currencyInfo.code})',
+                          style:
+                          AppTypography.bodyLg.copyWith(color: c.onSurface),
+                        ),
+                        Text(
+                          'Fuata uses one currency everywhere. '
+                              'You can change it later.',
+                          style: AppTypography.bodySm
+                              .copyWith(color: c.onSurfaceVariant),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Icon(Icons.chevron_right_rounded,
+                      color: c.onSurfaceVariant),
+                ],
+              ),
+            ),
           ),
         ],
       ),

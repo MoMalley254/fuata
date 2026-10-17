@@ -33,6 +33,7 @@ dependencies:
   local_auth: ^3.0.2
   timezone: ^0.11.2
   flutter_timezone: ^5.1.1
+  currency_picker: ^2.0.22
 
 dev_dependencies:
   flutter_test:

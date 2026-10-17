@@ -20,9 +20,11 @@ import '../models/unit.dart';
 /// optional, because every step can be skipped.
 @immutable
 class OnboardingDraft {
-  /// Onboarding is KES-only, matching the unit sheet (edit_unit_sheet.dart):
-  /// multi-currency is future work.
-  static const currencyCode = 'KES';
+  /// The app-wide currency (issue #114). Chosen on the welcome step
+  /// alongside name and accent; defaults to KES so a draft that never
+  /// touches it (a widget test, a preview that doesn't care) stays on
+  /// the original market.
+  final String currencyCode;
 
   final String name;
   final Color accent;
@@ -43,6 +45,7 @@ class OnboardingDraft {
     this.units = const [],
     this.dailyLimitMinor,
     this.bannerOn = false,
+    this.currencyCode = 'KES',
   });
 
   OnboardingDraft copyWith({
@@ -50,6 +53,7 @@ class OnboardingDraft {
     Color? accent,
     List<MoneyUnit>? units,
     bool? bannerOn,
+    String? currencyCode
   }) {
     return OnboardingDraft(
       name: name ?? this.name,
@@ -57,6 +61,22 @@ class OnboardingDraft {
       units: units ?? this.units,
       dailyLimitMinor: dailyLimitMinor,
       bannerOn: bannerOn ?? this.bannerOn,
+      currencyCode: currencyCode ?? this.currencyCode,
+    );
+  }
+
+  /// Every draft unit re-stamped with [code]. Used when the person changes
+  /// currency on the welcome step after they've added units — the units
+  /// are display state (see MoneyUnit.currencyCode's doc), so a sweep is
+  /// exactly right.
+  OnboardingDraft withCurrencyCode(String code) {
+    return OnboardingDraft(
+      name: name,
+      accent: accent,
+      units: [for (final u in units) u.copyWith(currencyCode: code)],
+      dailyLimitMinor: dailyLimitMinor,
+      bannerOn: bannerOn,
+      currencyCode: code,
     );
   }
 
@@ -69,6 +89,7 @@ class OnboardingDraft {
       units: units,
       dailyLimitMinor: minor,
       bannerOn: bannerOn,
+      currencyCode: currencyCode,
     );
   }
 
@@ -114,6 +135,7 @@ class OnboardingDraft {
       accent: accent,
       bannerEnabled: bannerOn,
       onboardingComplete: true,
+      currencyCode: currencyCode,
     );
   }
 }
@@ -143,12 +165,11 @@ class LimitStepper {
   static int down(int v) => (v - _stepAt(v - 1)).clamp(min, max).toInt();
 
   /// Whole shillings to the minor units the limit is stored in.
-  static int toMinor(int majorUnits) =>
-      majorUnits * pow10(minorUnitExponent(OnboardingDraft.currencyCode));
+  static int toMinor(int majorUnits, String currencyCode) =>
+      majorUnits * pow10(minorUnitExponent(currencyCode));
 
-  /// "1,000" style, for the big number.
-  static String format(int majorUnits) =>
-      Money(toMinor(majorUnits), OnboardingDraft.currencyCode)
+  static String format(int majorUnits, String currencyCode) =>
+      Money(toMinor(majorUnits, currencyCode), currencyCode)
           .format()
           .replaceAll(RegExp(r'\.0+$'), '');
 }

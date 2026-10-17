@@ -20,6 +20,7 @@ class MoneyStep extends StatelessWidget {
     required this.onRemoveUnit,
     required this.onContinue,
     required this.onSkip,
+    required this.currencyCode,
   });
 
   final List<MoneyUnit> units;
@@ -27,6 +28,7 @@ class MoneyStep extends StatelessWidget {
   final ValueChanged<String> onRemoveUnit;
   final VoidCallback onContinue;
   final VoidCallback onSkip;
+  final String currencyCode;
 
   KindDefaults _defaultsFor(UnitKind kind) =>
       kindQuickPicks.firstWhere((k) => k.kind == kind);
@@ -58,6 +60,7 @@ class MoneyStep extends StatelessWidget {
                     context,
                     defaults: k,
                     onSave: onSaveUnit,
+                    currencyCode: currencyCode,
                   ),
                 ),
             ],
@@ -80,6 +83,7 @@ class MoneyStep extends StatelessWidget {
                   existing: u,
                   onSave: onSaveUnit,
                   onRemove: () => onRemoveUnit(u.id),
+                  currencyCode: currencyCode
                 ),
               ),
               const SizedBox(height: AppSpacing.sm),

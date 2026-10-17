@@ -40,7 +40,7 @@ class BannerStep extends StatelessWidget {
               id: 'sample_cash',
               name: 'Cash',
               kind: UnitKind.cash,
-              currencyCode: OnboardingDraft.currencyCode,
+              currencyCode: draft.currencyCode,
               iconEmoji: '💵',
               color: c.unitCash,
               openingBalanceMinor: 76000,
@@ -51,7 +51,7 @@ class BannerStep extends StatelessWidget {
               id: 'sample_mobile',
               name: 'Mobile money',
               kind: UnitKind.mobileMoney,
-              currencyCode: OnboardingDraft.currencyCode,
+              currencyCode: draft.currencyCode,
               iconEmoji: '📱',
               color: c.unitMobileMoney,
               openingBalanceMinor: 234000,
@@ -68,7 +68,7 @@ class BannerStep extends StatelessWidget {
             scope: LimitScope.overall,
             period: LimitPeriod.day,
             amountMinor: limitMinor,
-            currencyCode: OnboardingDraft.currencyCode,
+      currencyCode: draft.currencyCode,
           );
     // A comfortable quarter of the limit, or a round example amount.
     final spent = limit == null ? 35000 : (limit.amountMinor * 0.25).round();

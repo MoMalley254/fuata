@@ -67,6 +67,7 @@ Future<void> showUnitDraftSheet(
   MoneyUnit? existing,
   required ValueChanged<MoneyUnit> onSave,
   VoidCallback? onRemove,
+  required String currencyCode,
 }) {
   return showModalBottomSheet<void>(
     context: context,
@@ -77,6 +78,7 @@ Future<void> showUnitDraftSheet(
       existing: existing,
       onSave: onSave,
       onRemove: onRemove,
+      currencyCode: currencyCode,
     ),
   );
 }
@@ -87,12 +89,14 @@ class _UnitDraftSheet extends StatefulWidget {
     required this.existing,
     required this.onSave,
     required this.onRemove,
+    required this.currencyCode,
   });
 
   final KindDefaults defaults;
   final MoneyUnit? existing;
   final ValueChanged<MoneyUnit> onSave;
   final VoidCallback? onRemove;
+  final String currencyCode;
 
   @override
   State<_UnitDraftSheet> createState() => _UnitDraftSheetState();
@@ -134,7 +138,7 @@ class _UnitDraftSheetState extends State<_UnitDraftSheet> {
     final text = _opening.text.trim();
     if (text.isNotEmpty) {
       try {
-        openingMinor = Money.parseMajor(text, OnboardingDraft.currencyCode).minor;
+        openingMinor = Money.parseMajor(text, widget.currencyCode).minor;
       } on FormatException {
         setState(() => _error = "That doesn't look like an amount");
         return;
@@ -152,7 +156,7 @@ class _UnitDraftSheetState extends State<_UnitDraftSheet> {
         id: existing?.id ?? 'unit_${now.microsecondsSinceEpoch}',
         name: name,
         kind: widget.defaults.kind,
-        currencyCode: OnboardingDraft.currencyCode,
+        currencyCode: widget.currencyCode,
         iconEmoji: _emoji,
         color: _color ?? widget.defaults.color(c),
         openingBalanceMinor: openingMinor,

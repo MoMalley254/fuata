@@ -66,10 +66,10 @@ void main() {
     });
 
     test('formats for the big number and converts to minor units', () {
-      expect(LimitStepper.format(1000), '1,000');
-      expect(LimitStepper.format(500), '500');
-      expect(LimitStepper.format(25000), '25,000');
-      expect(LimitStepper.toMinor(1000), 100000);
+      expect(LimitStepper.format(1000, 'KES'), '1,000');
+      expect(LimitStepper.format(500, 'KES'), '500');
+      expect(LimitStepper.format(25000, 'KES'), '25,000');
+      expect(LimitStepper.toMinor(1000, 'KES'), 100000);
     });
   });
 
