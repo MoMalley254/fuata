@@ -124,6 +124,24 @@
         <receiver
             android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationReceiver"
             android:exported="false"/>
+        <!-- Issue #35: the alarm receiver and the boot re-arm. Neither is
+     exported — the alarm is posted by this app's own AlarmManager, and
+     the boot broadcast is delivered to the app regardless of `exported`. -->
+        <receiver
+            android:name=".ScheduledExportReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.kinyuanexus.fuata.SCHEDULED_EXPORT_FIRE" />
+            </intent-filter>
+        </receiver>
+        <receiver
+            android:name=".ScheduledExportBootReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
     </application>
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility and

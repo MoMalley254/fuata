@@ -31,6 +31,8 @@ class Routes {
 
   static const settingsSummaryNotifications = 'settingsSummaryNotifications';
 
+  static const scheduledExport = 'scheduledExport';
+
   // ---- Paths ----
   static const splashPath = '/splash';
   static const onboardingPath = '/onboarding';
@@ -63,6 +65,7 @@ class Routes {
 
   static const settingsSummaryNotificationsPath =
       '/settings/summary-notifications';
+  static const scheduledExportPath = '/settings/scheduled-export';
 
   // ---- Helpers ----
   static String unitFor(String id) => '/unit/$id';

@@ -28,6 +28,8 @@ class MainActivity : FlutterFragmentActivity() {
 
     private var privacy: PrivacyChannel? = null   // issue #84
 
+    private var scheduledExport: ScheduledExportChannel? = null  // #35
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
 
@@ -55,6 +57,10 @@ class MainActivity : FlutterFragmentActivity() {
             flutterEngine.dartExecutor.binaryMessenger,
         )
 
+        scheduledExport = ScheduledExportChannel(
+            this, flutterEngine.dartExecutor.binaryMessenger,
+        )
+
         // The intent that started (or restarted) this activity may be a
         // share; route it now that the channel exists.
         shareIntake?.handleShareIntent(intent)
@@ -69,6 +75,8 @@ class MainActivity : FlutterFragmentActivity() {
         homeWidget = null
         backupFiles?.dispose()
         backupFiles = null
+        scheduledExport?.dispose()
+        scheduledExport = null
         super.cleanUpFlutterEngine(flutterEngine)
     }
 
@@ -76,6 +84,7 @@ class MainActivity : FlutterFragmentActivity() {
         // Our picker results are consumed here; everything else (plugins)
         // goes on to Flutter's own handling.
         if (backupFiles?.handleActivityResult(requestCode, resultCode, data) == true) return
+        if (scheduledExport?.handleActivityResult(requestCode, resultCode, data) == true) return
         super.onActivityResult(requestCode, resultCode, data)
     }
 
