@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../domain/logic/backup_crypto.dart';
 import '../../domain/logic/backup_import.dart';
 import '../../domain/logic/backup_service.dart';
 import '../../platform/backup_files.dart';
+import '../../platform/backup_passphrase_store.dart';
 import '../../widgets/backup/import_preview_card.dart';
+import '../../widgets/dialogs/enter_passphrase_dialog.dart';
 import '../../widgets/personalization/section_card.dart';
 import '../../widgets/personalization/toggle_row.dart';
 import '../providers/app_providers.dart';
@@ -83,27 +86,57 @@ class _DataBackupScreenState extends ConsumerState<DataBackupScreen> {
       _message = null;
     });
     try {
-      final text = await ref.read(backupFilesProvider).pickText();
-      if (text == null) return; // backed out
-      final preview = await ref.read(backupServiceProvider).preview(text);
+      final picked = await ref.read(backupFilesProvider).pickText();
+      if (picked == null) return;
+
+      var plaintext = picked;
+      if (BackupCrypto.looksEncrypted(picked)) {
+        var decrypted = false;
+
+        // Try the cached passphrase first — the person set it for scheduled
+        // backups, so if this is one, it will already be cached.
+        final cached = await BackupPassphraseStore.read();
+        if (cached != null) {
+          try {
+            plaintext = await BackupCrypto.decode(picked, passphrase: cached);
+            decrypted = true;
+          } on Exception {
+            // Wrong cached passphrase (file from a different Fuata setup).
+            // Fall through to prompting.
+          }
+        }
+
+        if (!decrypted) {
+          if (!mounted) return;
+          final entered = await showEnterPassphraseDialog();
+          if (entered == null) return;
+          try {
+            plaintext = await BackupCrypto.decode(picked, passphrase: entered);
+          } on Exception {
+            if (mounted) {
+              setState(() => _say(
+                "That passphrase didn't open this file. Nothing was changed.",
+                isError: true,
+              ));
+            }
+            return;
+          }
+        }
+      }
+
+      final preview = await ref.read(backupServiceProvider).preview(plaintext);
       if (!mounted) return;
       setState(() {
         _preview = preview;
         _policy = ConflictPolicy.keepMine;
-        // On a fresh phone the whole point of restoring is to get the old
-        // setup back; on one with data, replacing settings must be asked for.
         _restoreSettings = preview.hasSettings && !preview.phoneHasData;
       });
     } on BackupFileException catch (e) {
       if (mounted) setState(() => _say(e.message, isError: true));
     } catch (_) {
       if (mounted) {
-        setState(
-          () => _say(
-            "Couldn't read that file. Nothing was changed.",
-            isError: true,
-          ),
-        );
+        setState(() =>
+            _say("Couldn't read that file. Nothing was changed.", isError: true));
       }
     } finally {
       if (mounted) setState(() => _busy = false);
