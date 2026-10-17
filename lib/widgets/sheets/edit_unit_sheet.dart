@@ -103,7 +103,7 @@ class _EditUnitSheetState extends ConsumerState<EditUnitSheet> {
             id: 'unit_${now.microsecondsSinceEpoch}',
             name: name,
             kind: _kind,
-            currencyCode: 'KES',
+            currencyCode: ref.read(currentSettingsProvider).currencyCode,
             iconEmoji: _emoji,
             color: _color!,
             openingBalanceMinor: openingMinor,
