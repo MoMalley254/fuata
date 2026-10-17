@@ -260,6 +260,12 @@ class AppSettings {
   final bool widgetShowSplit;
   final WidgetVariant widgetVariant;
 
+  /// The single currency the app shows (issue #114). Any ISO 4217 code is
+  /// valid — display is entirely intl's job. `MoneyUnit.currencyCode` is
+  /// kept on the schema and the backup format but is vestigial: units are
+  /// created with this code, and changing this value updates every unit.
+  final String currencyCode;
+
   const AppSettings({
     required this.name,
     required this.accent,
@@ -301,6 +307,7 @@ class AppSettings {
     this.widgetShowProgress = true,
     this.widgetShowSplit = true,
     this.widgetVariant = WidgetVariant.auto,
+    this.currencyCode = 'KES'
   });
 
   static final defaults = AppSettings(
@@ -342,6 +349,7 @@ class AppSettings {
     widgetShowProgress: true,
     widgetShowSplit: true,
     widgetVariant: WidgetVariant.auto,
+    currencyCode: 'KES',
   );
 
   AppSettings copyWith({
@@ -383,6 +391,7 @@ class AppSettings {
     bool? widgetShowProgress,
     bool? widgetShowSplit,
     WidgetVariant? widgetVariant,
+    String? currencyCode,
   }) {
     return AppSettings(
       name: name ?? this.name,
@@ -425,6 +434,7 @@ class AppSettings {
       widgetShowProgress: widgetShowProgress ?? this.widgetShowProgress,
       widgetShowSplit: widgetShowSplit ?? this.widgetShowSplit,
       widgetVariant: widgetVariant ?? this.widgetVariant,
+      currencyCode: currencyCode ?? this.currencyCode,
     );
   }
 }

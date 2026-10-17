@@ -32,6 +32,10 @@ abstract class UnitRepository {
   /// that match no unit are ignored. Archived units are not expected here
   /// and keep their sortOrder (see [unitSortOrdersFor]).
   Future<void> reorderUnits(List<String> orderedIds);
+
+  /// Issue #114: The per-unit field stays on the schema and the backup
+  /// format, but from here on it never disagrees with AppSettings.
+  Future<void> updateAllCurrencies(String currencyCode);
 }
 
 abstract class TransactionRepository {

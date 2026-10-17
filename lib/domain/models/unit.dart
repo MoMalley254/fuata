@@ -9,7 +9,15 @@ class MoneyUnit {
   final String id;
   final String name;
   final UnitKind kind;
+
+  /// Vestigial as of #114: the app has a single currency
+  /// (`AppSettings.currencyCode`), and every unit is created with it and
+  /// kept in step with `UnitRepository.updateAllCurrencies`. Kept on the
+  /// model, the schema and the backup format so nothing churns; a screen
+  /// may still read it (it drives per-unit `Money` formatting), but it is
+  /// always equal to the app-wide setting.
   final String currencyCode;
+
   final String iconEmoji; // v0.1: emoji only; photo/icon-pack deferred
   final Color color;
   final int openingBalanceMinor;
@@ -52,12 +60,13 @@ class MoneyUnit {
     bool? archived,
     Object? archivedAt = _unset,
     Object? lastVerifiedAt = _unset,
+    String? currencyCode,
   }) {
     return MoneyUnit(
       id: id,
       name: name ?? this.name,
       kind: kind,
-      currencyCode: currencyCode,
+      currencyCode: currencyCode ?? this.currencyCode,
       iconEmoji: iconEmoji ?? this.iconEmoji,
       color: color ?? this.color,
       openingBalanceMinor: openingBalanceMinor,
