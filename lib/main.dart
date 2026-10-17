@@ -7,6 +7,7 @@ import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
 import 'package:fuata/platform/banner.dart';
 import 'package:fuata/platform/notification_capture.dart';
 import 'package:fuata/platform/privacy.dart';
+import 'package:fuata/platform/scheduled_export.dart';
 import 'package:fuata/platform/share_intake.dart';
 import 'package:fuata/platform/summary_notifications.dart';
 import 'package:fuata/routing/app_router.dart';
@@ -16,6 +17,7 @@ import 'package:fuata/ui/providers/app_providers.dart';
 import 'package:fuata/ui/providers/banner_providers.dart';
 import 'package:fuata/ui/providers/capture_providers.dart';
 import 'package:fuata/ui/providers/privacy_providers.dart';
+import 'package:fuata/ui/providers/scheduled_export_providers.dart';
 import 'package:fuata/ui/providers/summary_notifications_providers.dart';
 import 'package:fuata/ui/providers/widget_providers.dart';
 import 'package:fuata/ui/theme/app_theme.dart';
@@ -38,6 +40,11 @@ void main() async {
   // Issue #22: register the background isolate entry point so Android can
   // start it cold from a notification.
   await registerCaptureCallback();
+
+  // Issue #35: register the scheduled-export background entry point so
+  // ScheduledExportReceiver can find it when the alarm fires.
+  await registerScheduledExportCallback();
+
   // Issue #21: share-sheet intake.
   await initShareIntake();
 
@@ -48,9 +55,7 @@ void main() async {
 
   runApp(
     ProviderScope(
-      overrides: [
-        initialBannerActionProvider.overrideWithValue(launchAction),
-      ],
+      overrides: [initialBannerActionProvider.overrideWithValue(launchAction)],
       child: const Fuata(),
     ),
   );
@@ -99,11 +104,11 @@ class _FuataState extends ConsumerState<Fuata> with WidgetsBindingObserver {
     final router = ref.read(routerProvider);
     switch (action) {
       case BannerAction.open:
-      // The app is already coming to the front; land on Today.
+        // The app is already coming to the front; land on Today.
         router.go(Routes.homePath);
       case BannerAction.quickAdd:
-      // The redirect bounces this to /onboarding while setup is
-      // unfinished; otherwise it opens the sheet.
+        // The redirect bounces this to /onboarding while setup is
+        // unfinished; otherwise it opens the sheet.
         router.push(Routes.addPath);
     }
   }
@@ -133,8 +138,9 @@ class _FuataState extends ConsumerState<Fuata> with WidgetsBindingObserver {
     ref.watch(bannerSyncProvider);
     ref.watch(alertSyncProvider);
     ref.watch(widgetSyncProvider); //Issue #29
-    ref.watch(privacySyncProvider);   // issue #84
+    ref.watch(privacySyncProvider); // issue #84
     ref.watch(summaryNotificationSyncProvider); // Issue #31
+    ref.watch(scheduledExportSyncProvider);
 
     final settings = ref.watch(currentSettingsProvider);
     final router = ref.watch(routerProvider);

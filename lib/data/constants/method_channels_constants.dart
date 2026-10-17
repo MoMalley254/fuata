@@ -21,3 +21,11 @@ const String homeWidgetMethodName = 'fuata/home_widget';
 // Issue #84. Sets/clears Android's FLAG_SECURE on the window: blank card
 // in the app switcher, no screenshots. One method — setSecure(bool).
 const String privacyMethodName = 'fuata/privacy';
+
+// Issue #35: scheduled encrypted export. `scheduled_export` is the UI
+// isolate's channel (schedule, cancel, pick folder, run-now write);
+// `scheduled_export_bg` is the background isolate's (report a result,
+// write a file). Splitting them keeps the Activity-dependent methods
+// (folder picker) off the background engine, where there is no Activity.
+const String scheduledExportMethodName = 'fuata/scheduled_export';
+const String scheduledExportBackgroundMethodName = 'fuata/scheduled_export_bg';
