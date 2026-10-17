@@ -1,4 +1,4 @@
-# Issue status (generated 2026-10-16T06:35Z)
+# Issue status (generated 2026-10-17T07:22Z)
 
 Source of truth: GitHub. Regenerate with `scripts/refresh-issue-status.sh`.
 
@@ -48,7 +48,7 @@ Source of truth: GitHub. Regenerate with `scripts/refresh-issue-status.sh`.
 | #34 | OPEN | v1.1 Backlog | feat: Template packs: export/import/share by file or QR, bundled presets |
 | #33 | OPEN | v1.1 Backlog | feat: Recurring bills and expected income |
 | #32 | OPEN | v1.1 Backlog | feat: Recipient to category rules |
-| #31 | OPEN | v1.1 Backlog | feat: Scheduled daily/weekly/monthly summary notifications |
+| #31 | CLOSED | v1.1 Backlog | feat: Scheduled daily/weekly/monthly summary notifications |
 | #30 | OPEN | v1.1 Backlog | feat: Outing mode (temporary budget with its own banner) |
 | #29 | CLOSED | v1.1 Backlog | feat: Home screen widget |
 | #28 | CLOSED | v1.1 Backlog | feat: SQLCipher encryption with Android Keystore and app lock |
