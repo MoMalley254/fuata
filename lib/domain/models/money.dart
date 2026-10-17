@@ -6,26 +6,43 @@ import 'package:intl/intl.dart';
 /// exactly what hiding is for.
 const kHiddenAmountMask = '••••';
 
-/// Number of decimal places for a currency's minor unit.
-/// Extend as needed; unknown codes default to 2 (matches ADR-003).
+/// Decimal places for a currency, from intl's ISO 4217 data. Every code
+/// intl knows gets the right answer; the two-decimal default only applies
+/// to a code intl has never heard of, which in practice only happens on a
+/// hand-edited backup file. Issue #114.
 int minorUnitExponent(String currencyCode) {
-  const zeroDecimal = {'JPY', 'UGX', 'KRW', 'VND', 'CLP'};
-  return zeroDecimal.contains(currencyCode.toUpperCase()) ? 0 : 2;
+  try {
+    return NumberFormat.simpleCurrency(
+      name: currencyCode.toUpperCase(),
+      locale: 'en_US',
+    ).decimalDigits ?? 2;
+  } catch (_) {
+    return 2;
+  }
 }
 
-/// Display symbol/prefix for a currency. Falls back to the code itself
-/// (with a trailing space) for anything not listed — never guess wrong.
+/// Display symbol/prefix for a currency. intl's CLDR data decides the
+/// symbol; the space rule below is the only Fuata-specific thing, and
+/// exists because "KSh 1,250" reads better than "KSh1,250" while
+/// "$1,250" reads better than "$ 1,250". Letter-shaped symbols get a
+/// trailing space, punctuation symbols don't. Issue #114.
 String currencySymbol(String currencyCode) {
-  const symbols = {
-    'KES': 'KSh ',
-    'UGX': 'USh ',
-    'TZS': 'TSh ',
-    'USD': '\$',
-    'EUR': '€',
-    'GBP': '£',
-    'NGN': '₦',
-  };
-  return symbols[currencyCode.toUpperCase()] ?? '${currencyCode.toUpperCase()} ';
+  String symbol;
+  try {
+    final s = NumberFormat.simpleCurrency(
+      name: currencyCode.toUpperCase(),
+      locale: 'en_US',
+    ).currencySymbol;
+    symbol = s.isNotEmpty ? s : '${currencyCode.toUpperCase()} ';
+  } catch (_) {
+    symbol = '${currencyCode.toUpperCase()} ';
+  }
+  if (symbol.isNotEmpty &&
+      !symbol.endsWith(' ') &&
+      RegExp(r'^[A-Za-z]').hasMatch(symbol)) {
+    return '$symbol ';
+  }
+  return symbol;
 }
 
 int pow10(int exponent) {

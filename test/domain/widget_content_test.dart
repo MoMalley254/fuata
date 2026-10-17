@@ -67,7 +67,7 @@ void main() {
   test('with a daily limit: amount left, currency, progress', () {
     final s = build(spent: 50000, limit: dayLimit);
     expect(s.amount, '1,500');
-    expect(s.currency, 'KSh');
+    expect(s.currency, 'Ksh');
     expect(s.caption, 'left today');
     expect(s.progress, closeTo(0.25, 1e-9));
     expect(s.status, 'safe');
