@@ -216,6 +216,11 @@ class BackupCodec {
     'widgetShowSplit': s.widgetShowSplit,
     'widgetVariant': s.widgetVariant.name,
     'currencyCode': s.currencyCode,
+    'scheduledExportEnabled': s.scheduledExportEnabled,
+    'scheduledExportFrequency': s.scheduledExportFrequency.name,
+    'scheduledExportMinute': s.scheduledExportMinute,
+    'scheduledExportWeekday': s.scheduledExportWeekday,
+    'scheduledExportIncludeRawText': s.scheduledExportIncludeRawText,
   };
 
   // ---------------------------------------------------------------- decode
@@ -630,6 +635,20 @@ class BackupCodec {
         d.widgetVariant,
       ),
       currencyCode: currencyCode,
+      scheduledExportEnabled: flag('scheduledExportEnabled', d.scheduledExportEnabled),
+      scheduledExportFrequency: pick(
+        'scheduledExportFrequency',
+        ScheduledExportFrequency.values,
+        d.scheduledExportFrequency,
+      ),
+      scheduledExportMinute: minute('scheduledExportMinute', d.scheduledExportMinute),
+      scheduledExportWeekday: m['scheduledExportWeekday'] is int &&
+          (m['scheduledExportWeekday'] as int >= 1) &&
+          (m['scheduledExportWeekday'] as int <= 7)
+          ? m['scheduledExportWeekday'] as int
+          : d.scheduledExportWeekday,
+      scheduledExportIncludeRawText: flag(
+          'scheduledExportIncludeRawText', d.scheduledExportIncludeRawText),
     );
   }
 

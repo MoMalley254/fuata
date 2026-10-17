@@ -302,6 +302,14 @@ class DriftSettingsRepository implements SettingsRepository {
 
   static const _kCurrencyCode = 'currencyCode';
 
+  static const _kScheduledExportEnabled = 'scheduledExportEnabled';
+  static const _kScheduledExportFrequency = 'scheduledExportFrequency';
+  static const _kScheduledExportMinute = 'scheduledExportMinute';
+  static const _kScheduledExportWeekday = 'scheduledExportWeekday';
+  static const _kScheduledExportFolderUri = 'scheduledExportFolderUri';
+  static const _kScheduledExportPassphraseSet = 'scheduledExportPassphraseSet';
+  static const _kScheduledExportIncludeRawText = 'scheduledExportIncludeRawText';
+
   @override
   Stream<AppSettings> watchSettings() {
     return _db.select(_db.settingsEntries).watch().map(_toSettings);
@@ -445,6 +453,13 @@ class DriftSettingsRepository implements SettingsRepository {
         key: _kCurrencyCode,
         value: s.currencyCode,
       ),
+      SettingsEntriesCompanion.insert(key: _kScheduledExportEnabled, value: s.scheduledExportEnabled.toString()),
+      SettingsEntriesCompanion.insert(key: _kScheduledExportFrequency, value: s.scheduledExportFrequency.name),
+      SettingsEntriesCompanion.insert(key: _kScheduledExportMinute, value: s.scheduledExportMinute.toString()),
+      SettingsEntriesCompanion.insert(key: _kScheduledExportWeekday, value: s.scheduledExportWeekday.toString()),
+      SettingsEntriesCompanion.insert(key: _kScheduledExportFolderUri, value: s.scheduledExportFolderUri ?? ''),
+      SettingsEntriesCompanion.insert(key: _kScheduledExportPassphraseSet, value: s.scheduledExportPassphraseSet.toString()),
+      SettingsEntriesCompanion.insert(key: _kScheduledExportIncludeRawText, value: s.scheduledExportIncludeRawText.toString()),
     ];
   }
 
@@ -614,6 +629,28 @@ class DriftSettingsRepository implements SettingsRepository {
       currencyCode: (map[_kCurrencyCode]?.trim().isNotEmpty ?? false)
           ? map[_kCurrencyCode]!
           : defaults.currencyCode,
+      scheduledExportEnabled: boolOr(map[_kScheduledExportEnabled], defaults.scheduledExportEnabled),
+      scheduledExportFrequency: byName(
+        map[_kScheduledExportFrequency],
+        ScheduledExportFrequency.values,
+        defaults.scheduledExportFrequency,
+      ),
+      scheduledExportMinute: minuteOr(map[_kScheduledExportMinute], defaults.scheduledExportMinute),
+      scheduledExportWeekday: boundedInt(
+        map[_kScheduledExportWeekday], 1, 7, defaults.scheduledExportWeekday,
+      ),
+      scheduledExportFolderUri:
+      (map[_kScheduledExportFolderUri]?.isEmpty ?? true)
+          ? null
+          : map[_kScheduledExportFolderUri],
+      scheduledExportPassphraseSet: boolOr(
+        map[_kScheduledExportPassphraseSet],
+        defaults.scheduledExportPassphraseSet,
+      ),
+      scheduledExportIncludeRawText: boolOr(
+        map[_kScheduledExportIncludeRawText],
+        defaults.scheduledExportIncludeRawText,
+      ),
     );
   }
 }

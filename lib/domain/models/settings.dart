@@ -161,6 +161,16 @@ extension WidgetVariantLabel on WidgetVariant {
   };
 }
 
+/// How often the scheduled encrypted export runs (issue #35).
+enum ScheduledExportFrequency { daily, weekly }
+
+extension ScheduledExportFrequencyLabel on ScheduledExportFrequency {
+  String get label => switch (this) {
+    ScheduledExportFrequency.daily => 'Every day',
+    ScheduledExportFrequency.weekly => 'Every week',
+  };
+}
+
 /// Everything the person controls about how the app looks and behaves,
 /// as opposed to *their money* (units/transactions/limits, which live in
 /// their own repositories). One bundle, one repository, one provider —
@@ -266,6 +276,35 @@ class AppSettings {
   /// created with this code, and changing this value updates every unit.
   final String currencyCode;
 
+  // Scheduled encrypted export (issue #35). Deliberately *not* gated on the
+// banner or alerts: a person may want unattended backups while keeping
+// the ongoing notifications off.
+
+  /// Whether the person has scheduled unattended encrypted exports. The
+  /// sync provider still requires [scheduledExportFolderUri] and a cached
+  /// passphrase before actually scheduling — those are preconditions the
+  /// settings screen enforces, not this flag.
+  final bool scheduledExportEnabled;
+  final ScheduledExportFrequency scheduledExportFrequency;
+
+  /// Minutes after local midnight. Same representation as the summary
+  /// notification times, for consistency.
+  final int scheduledExportMinute;
+  final int scheduledExportWeekday; // 1=Mon … 7=Sun, weekly only
+
+  /// The SAF tree URI chosen as the export folder. Device-specific: on a new
+  /// phone the person re-picks. Deliberately NOT carried in a backup (see
+  /// ADR-011).
+  final String? scheduledExportFolderUri;
+
+  /// Whether an export passphrase is cached. The passphrase itself lives in
+  /// Keystore-backed secure storage, not here — this flag exists so the UI
+  /// can say "Set" / "Not set" without a secure-storage read on every build.
+  /// Not carried in a backup: a new phone must re-enter the passphrase.
+  final bool scheduledExportPassphraseSet;
+
+  final bool scheduledExportIncludeRawText;
+
   const AppSettings({
     required this.name,
     required this.accent,
@@ -307,11 +346,19 @@ class AppSettings {
     this.widgetShowProgress = true,
     this.widgetShowSplit = true,
     this.widgetVariant = WidgetVariant.auto,
-    this.currencyCode = 'KES'
+    this.currencyCode = 'KES',
+
+    this.scheduledExportEnabled = false,
+    this.scheduledExportFrequency = ScheduledExportFrequency.daily,
+    this.scheduledExportMinute = 20 * 60, // 20:00
+    this.scheduledExportWeekday = DateTime.sunday,
+    this.scheduledExportFolderUri,
+    this.scheduledExportPassphraseSet = false,
+    this.scheduledExportIncludeRawText = false,
   });
 
   static final defaults = AppSettings(
-    name: 'Martha',
+    name: 'Marvaa',
     accent: AppAccents.teal,
     themeMode: AppThemeMode.system,
     homeHeadline: HomeHeadline.leftToday,
@@ -350,6 +397,13 @@ class AppSettings {
     widgetShowSplit: true,
     widgetVariant: WidgetVariant.auto,
     currencyCode: 'KES',
+    scheduledExportEnabled: false,
+    scheduledExportFrequency: ScheduledExportFrequency.daily,
+    scheduledExportMinute: 20 * 60,
+    scheduledExportWeekday: DateTime.sunday,
+    scheduledExportFolderUri: null,
+    scheduledExportPassphraseSet: false,
+    scheduledExportIncludeRawText: false,
   );
 
   AppSettings copyWith({
@@ -392,6 +446,13 @@ class AppSettings {
     bool? widgetShowSplit,
     WidgetVariant? widgetVariant,
     String? currencyCode,
+    bool? scheduledExportEnabled,
+    ScheduledExportFrequency? scheduledExportFrequency,
+    int? scheduledExportMinute,
+    int? scheduledExportWeekday,
+    String? scheduledExportFolderUri  ,
+    bool? scheduledExportPassphraseSet,
+    bool? scheduledExportIncludeRawText,
   }) {
     return AppSettings(
       name: name ?? this.name,
@@ -435,6 +496,13 @@ class AppSettings {
       widgetShowSplit: widgetShowSplit ?? this.widgetShowSplit,
       widgetVariant: widgetVariant ?? this.widgetVariant,
       currencyCode: currencyCode ?? this.currencyCode,
+      scheduledExportEnabled: scheduledExportEnabled ?? this.scheduledExportEnabled,
+      scheduledExportFrequency: scheduledExportFrequency ?? this.scheduledExportFrequency,
+      scheduledExportMinute: scheduledExportMinute ?? this.scheduledExportMinute,
+      scheduledExportWeekday: scheduledExportWeekday ?? this.scheduledExportWeekday,
+      scheduledExportFolderUri: scheduledExportFolderUri ?? this.scheduledExportFolderUri,
+      scheduledExportPassphraseSet: scheduledExportPassphraseSet ?? this.scheduledExportPassphraseSet,
+      scheduledExportIncludeRawText: scheduledExportIncludeRawText ?? this.scheduledExportIncludeRawText,
     );
   }
 }
