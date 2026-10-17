@@ -20,12 +20,17 @@ class PrivacyCard extends StatelessWidget {
   /// dialogs and the erase call itself belong to the screen that knows
   /// what to do afterwards.
   final VoidCallback onErase;
+
+  /// #35: opens Scheduled backups. A callback like [onOpenBackup] so this
+  /// widget stays free of screen imports.
+  final VoidCallback onOpenScheduledExport;
   const PrivacyCard({
     super.key,
     required this.settings,
     required this.onChanged,
     required this.onOpenBackup,
     required this.onErase,
+    required this.onOpenScheduledExport,
   });
 
   @override
@@ -86,6 +91,13 @@ class PrivacyCard extends StatelessWidget {
           title: 'Back up & restore',
           subtitle: 'Save your data as a file, or bring it back from one',
           onTap: onOpenBackup,
+        ),
+        const SizedBox(height: AppSpacing.sm),
+        ActionRow(
+          icon: Icons.schedule_outlined,
+          title: 'Scheduled backups',
+          subtitle: 'Unattended encrypted backups to a folder you choose',
+          onTap: onOpenScheduledExport,
         ),
         const SizedBox(height: AppSpacing.sm),
         // Deliberately an ActionRow (something real happens) rather than a

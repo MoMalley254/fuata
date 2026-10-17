@@ -29,6 +29,7 @@ import '../ui/screens/settings/detail_level_screen.dart';
 import '../ui/screens/settings/home_settings_screen.dart';
 import '../ui/screens/settings/manage_categories_screen.dart';
 import '../ui/screens/settings/privacy_data_screen.dart';
+import '../ui/screens/settings/scheduled_export_screen.dart';
 import '../ui/screens/settings/security_screen.dart';
 import '../ui/screens/settings/settings_screen.dart';
 import '../ui/screens/settings/summary_notifications_screen.dart';
@@ -327,6 +328,12 @@ final routerProvider = Provider<GoRouter>((ref) {
           name: Routes.settingsSummaryNotifications,
           parentNavigatorKey: rootNavigatorKey,
           builder: (_, _) => const SummaryNotificationsScreen(),
+        ),
+        GoRoute(
+          path: Routes.scheduledExportPath,
+          name: Routes.scheduledExport,
+          parentNavigatorKey: rootNavigatorKey,
+          builder: (_, _) => const ScheduledExportScreen(),
         ),
       ]
   );

@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../../domain/models/settings.dart';
 import '../../../routing/routes.dart';
+import '../../../widgets/personalization/action_row.dart';
 import '../../../widgets/personalization/privayc_card.dart';
 import '../../providers/app_providers.dart';
 import '../../theme/app_spacing.dart';
@@ -41,7 +42,9 @@ class PrivacyDataScreen extends ConsumerWidget {
               onChanged: update,
               onOpenBackup: () => context.push(Routes.backupPath),
               onErase: () => eraseAllData(ref),
+              onOpenScheduledExport: () => context.push(Routes.scheduledExportPath),
             ),
+
           ],
         ),
       ),
