@@ -237,6 +237,16 @@ class MockUnitRepository implements UnitRepository {
       );
     }
   }
+
+  @override
+  Future<void> updateAllCurrencies(String currencyCode) async {
+    for (final id in _store.items.map((u) => u.id).toList()) {
+      _store.update(
+            (u) => u.id == id,
+            (u) => u.copyWith(currencyCode: currencyCode),
+      );
+    }
+  }
 }
 
 class MockTransactionRepository implements TransactionRepository {

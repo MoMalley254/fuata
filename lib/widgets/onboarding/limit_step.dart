@@ -17,6 +17,7 @@ class LimitStep extends StatelessWidget {
     required this.onChanged,
     required this.onSet,
     required this.onSkip,
+    required this.currencyCode,
   });
 
   /// Whole shillings.
@@ -24,11 +25,12 @@ class LimitStep extends StatelessWidget {
   final ValueChanged<int> onChanged;
   final VoidCallback onSet;
   final VoidCallback onSkip;
+  final String currencyCode;
 
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
-    final symbol = currencySymbol(OnboardingDraft.currencyCode);
+    final symbol = currencySymbol(currencyCode);
     return StepFrame(
       title: 'A daily limit?',
       subtitle:
@@ -70,7 +72,7 @@ class LimitStep extends StatelessWidget {
                       child: FittedBox(
                         fit: BoxFit.scaleDown,
                         child: Text(
-                          '$symbol${LimitStepper.format(value)}',
+                          '$symbol${LimitStepper.format(value, currencyCode)}',
                           style: AppTypography.displayHero.copyWith(
                             color: c.onSurface,
                           ),
@@ -103,7 +105,7 @@ class LimitStep extends StatelessWidget {
             children: [
               for (final p in LimitStepper.presets)
                 AppChoiceChip(
-                  label: LimitStepper.format(p),
+                  label: LimitStepper.format(p, currencyCode),
                   selected: value == p,
                   onTap: () => onChanged(p),
                 ),

@@ -37,6 +37,7 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
   final _name = TextEditingController();
   late OnboardingDraft _draft = OnboardingDraft(
     accent: ref.read(currentSettingsProvider).accent,
+    currencyCode: ref.read(currentSettingsProvider).currencyCode,
   );
   int _step = 0;
   int _limitValue = LimitStepper.initial;
@@ -81,10 +82,16 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
   void _removeUnit(String id) =>
       setState(() => _draft = _draft.withoutUnit(id));
 
+  void _setCurrency(String code) {
+    setState(() => _draft = _draft.withCurrencyCode(code));
+  }
+
   void _setLimit(int? majorUnits) {
     setState(() {
       _draft = _draft.withDailyLimit(
-        majorUnits == null ? null : LimitStepper.toMinor(majorUnits),
+        majorUnits == null
+            ? null
+            : LimitStepper.toMinor(majorUnits, _draft.currencyCode),
       );
     });
     _next();
@@ -191,6 +198,8 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
         onAccent: _setAccent,
         onContinue: _next,
         onSkip: _next,
+        currencyCode: _draft.currencyCode,
+        onCurrencyChanged: _setCurrency,
       ),
       2 => MoneyStep(
         units: _draft.units,
@@ -198,9 +207,11 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
         onRemoveUnit: _removeUnit,
         onContinue: _next,
         onSkip: _next,
+        currencyCode: _draft.currencyCode,
       ),
       3 => LimitStep(
         value: _limitValue,
+        currencyCode: _draft.currencyCode,
         onChanged: (v) => setState(() => _limitValue = v),
         onSet: () => _setLimit(_limitValue),
         onSkip: () => _setLimit(null),

@@ -89,6 +89,13 @@ class DriftUnitRepository implements UnitRepository {
       }
     });
   }
+
+  @override
+  Future<void> updateAllCurrencies(String currencyCode) {
+    return _db.update(_db.units).write(
+      UnitsCompanion(currency: Value(currencyCode)),
+    );
+  }
 }
 
 class DriftTransactionRepository implements TransactionRepository {
@@ -293,6 +300,8 @@ class DriftSettingsRepository implements SettingsRepository {
   static const _kWidgetSplit = 'widgetShowSplit';
   static const _kWidgetVariant = 'widgetVariant';
 
+  static const _kCurrencyCode = 'currencyCode';
+
   @override
   Stream<AppSettings> watchSettings() {
     return _db.select(_db.settingsEntries).watch().map(_toSettings);
@@ -431,6 +440,10 @@ class DriftSettingsRepository implements SettingsRepository {
       SettingsEntriesCompanion.insert(
         key: _kWidgetVariant,
         value: s.widgetVariant.name,
+      ),
+      SettingsEntriesCompanion.insert(
+        key: _kCurrencyCode,
+        value: s.currencyCode,
       ),
     ];
   }
@@ -596,6 +609,11 @@ class DriftSettingsRepository implements SettingsRepository {
         WidgetVariant.values,
         defaults.widgetVariant,
       ),
+      // Fll back rather than letting an empty string reach
+// NumberFormat.simpleCurrency.
+      currencyCode: (map[_kCurrencyCode]?.trim().isNotEmpty ?? false)
+          ? map[_kCurrencyCode]!
+          : defaults.currencyCode,
     );
   }
 }

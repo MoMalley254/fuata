@@ -169,7 +169,7 @@ void main() {
       ]);
       expect(
         s.story('KES'),
-        'Today you spent KSh 8,420. Java House was your top spot. '
+        'Today you spent Ksh 8,420. Java House was your top spot. '
         'Quite a bit more than yesterday.',
       );
     });
@@ -188,7 +188,7 @@ void main() {
 
     test('S-15 nothing to compare with means no comparison sentence', () {
       final s = day([tx('t', -5000, who: 'Naivas')]);
-      expect(s.story('KES'), 'Today you spent KSh 50. Naivas was your top spot.');
+      expect(s.story('KES'), 'Today you spent Ksh 50. Naivas was your top spot.');
     });
 
     test('S-16 empty period says so, without alarm', () {
@@ -201,7 +201,7 @@ void main() {
       final s = day([tx('a', 5000, type: TxType.got, who: 'Mum')]);
       expect(
         s.story('KES'),
-        "You haven't spent anything today, and KSh 50 came in.",
+        "You haven't spent anything today, and Ksh 50 came in.",
       );
     });
 
@@ -219,8 +219,8 @@ void main() {
     });
 
     test('S-19 friendlyMoney drops .00 but keeps real cents', () {
-      expect(friendlyMoney(842000, 'KES'), 'KSh 8,420');
-      expect(friendlyMoney(842050, 'KES'), 'KSh 8,420.50');
+      expect(friendlyMoney(842000, 'KES'), 'Ksh 8,420');
+      expect(friendlyMoney(842050, 'KES'), 'Ksh 8,420.50');
     });
   });
 
