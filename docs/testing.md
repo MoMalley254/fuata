@@ -303,6 +303,19 @@ Run against real drift repositories on an in-memory database (`test/domain/captu
 - [ ] TalkBack reads the hero status and amounts sensibly
 - [ ] Tap targets are comfortably large
 
+### Message reading packs (#34)
+- [ ] Settings > Message reading packs shows three built-in packs
+- [ ] Tapping M-PESA Kenya shows its six templates with their sample messages
+- [ ] With one unit, the unit chip is pre-selected; with more than one, the first is pre-selected
+- [ ] "Add these 6 rules" writes them; Manage rules for that unit now shows them
+- [ ] Tapping M-PESA Kenya again on the same unit says "All 6 rules are already on this unit"
+- [ ] Adding the same pack to a *different* unit imports it there
+- [ ] Manage rules > Share > Save as a file opens the SAF picker; the file imports via Settings > Message reading packs > import icon
+- [ ] Manage rules > Share > Show as a QR renders a QR the size of a phone screen; scanning it with any QR app shows the JSON
+- [ ] Importing via Settings > Message reading packs > QR scan icon opens the camera; pointing at a QR from another Fuata adds the pack
+- [ ] Sharing a pack larger than ~2.5 KB from QR disables the option and shows the "too big" dialog, and sharing as a file still works
+- [ ] Picking a Fuata *backup* file in the import flow shows the "this is a backup, not a pack" message, not a crash
+
 ## 4. Privacy verification (before tagging v0.1.0)
 
 Build the release APK and inspect the merged manifest. Adjust the build-tools version to yours.
@@ -352,3 +365,7 @@ Failures found during a run become GitHub issues labelled `type: bug`, with step
 - Import only adds and replaces; it never deletes. A transaction deleted on the phone comes back if an older backup that still has it is imported.
 - Backups don't include unparsed messages (kept 7 days by design) or which alerts were already shown, so a restored phone can nudge again for a period it had already warned about.
 - Backup files are plain, unencrypted JSON (ADR-010). Keep them somewhere safe.
+- Template packs are one-shot: once imported, only the templates exist, and "packs I have received" is not browsable. To keep the pack itself around, keep the .json file.
+- Preset packs ship with the app; a preset that stops matching real messages is fixed by an update. There is no remote update (no INTERNET permission; ADR-009).
+- Pack QR uses the lowest error correction level, so a screen-to-camera read is more sensitive to glare and distance than a typical Wi-Fi QR. "Share as a file" is the fallback.
+- Packs are unencrypted. A shared pack contains only message-reading patterns and one sample message — no transactions, no balances, no person's name — so the exposure is lower than a full backup, but the sender should treat a pack as public information, not a private one.

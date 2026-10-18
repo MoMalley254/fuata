@@ -99,6 +99,13 @@ class SettingsScreen extends ConsumerWidget {
             ),
             const SizedBox(height: AppSpacing.sm),
             ActionRow(
+              icon: Icons.inventory_2_outlined,
+              title: 'Message reading packs',
+              subtitle: 'Ready-made rules for M-PESA, Airtel and banks',
+              onTap: () => context.push(Routes.templatePacksPath),
+            ),
+            const SizedBox(height: AppSpacing.md,),
+            ActionRow(
               icon: Icons.speed_rounded,
               title: 'Limits & alerts',
               subtitle: dailyLimit == null

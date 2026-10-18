@@ -33,6 +33,8 @@ class Routes {
 
   static const scheduledExport = 'scheduledExport';
 
+  static const templatePacks = 'templatePacks';
+
   // ---- Paths ----
   static const splashPath = '/splash';
   static const onboardingPath = '/onboarding';
@@ -66,6 +68,8 @@ class Routes {
   static const settingsSummaryNotificationsPath =
       '/settings/summary-notifications';
   static const scheduledExportPath = '/settings/scheduled-export';
+
+  static const templatePacksPath = '/settings/template-packs';
 
   // ---- Helpers ----
   static String unitFor(String id) => '/unit/$id';
