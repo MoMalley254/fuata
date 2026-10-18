@@ -5,6 +5,7 @@ import 'package:fuata/ui/theme/app_colors.dart';
 import 'package:fuata/widgets/provider_error_card.dart';
 
 import '../../widgets/rule_builder/rules_body.dart';
+import '../../widgets/sheets/share_pack_sheet.dart';
 import '../theme/app_typography.dart';
 
 /// Manage the message-reading rules for a unit  #20.
@@ -26,7 +27,28 @@ class ManageRulesScreen extends ConsumerWidget {
     final unitsAsync = ref.read(unitsProvider);
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Reading Rules')),
+      appBar: AppBar(title: const Text('Reading Rules')
+      , actions: [
+          // Only meaningful once the unit has rules. Watching the templates
+          // stream from inside the app bar keeps this fresh without lifting
+          // state out of RulesBody.
+          Consumer(
+            builder: (context, ref, _) {
+              final templates =
+                  ref.watch(unitTemplatesProvider(unitId)).value ?? const [];
+              return IconButton(
+                tooltip: 'Share these rules',
+                icon: const Icon(Icons.ios_share_rounded),
+                onPressed: templates.isEmpty
+                    ? null
+                    : () => showSharePackSheet(
+                  unitId: unitId,
+                  templates: templates,
+                ),
+              );
+            },
+          ),
+        ],),
       body: SafeArea(
         child: unitsAsync.when(
           loading: () =>
