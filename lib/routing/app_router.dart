@@ -34,6 +34,7 @@ import '../ui/screens/settings/security_screen.dart';
 import '../ui/screens/settings/settings_screen.dart';
 import '../ui/screens/settings/summary_notifications_screen.dart';
 import '../ui/screens/summary_screen.dart';
+import '../ui/screens/template_pack_screens.dart';
 import '../ui/screens/unit_detail_screen.dart';
 import '../widgets/sheets/add_transaction_sheet.dart';
 import 'app_keys.dart';
@@ -334,6 +335,12 @@ final routerProvider = Provider<GoRouter>((ref) {
           name: Routes.scheduledExport,
           parentNavigatorKey: rootNavigatorKey,
           builder: (_, _) => const ScheduledExportScreen(),
+        ),
+        GoRoute(
+          path: Routes.templatePacksPath,
+          name: Routes.templatePacks,
+          parentNavigatorKey: rootNavigatorKey,
+          builder: (_, _) => const TemplatePacksScreen(),
         ),
       ]
   );
