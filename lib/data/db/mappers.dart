@@ -19,6 +19,7 @@ import 'package:fuata/domain/models/template.dart';
 import '../../domain/models/capture_source.dart';
 import '../../domain/models/category.dart';
 import '../../domain/models/limit_rule.dart';
+import '../../domain/models/outing.dart';
 import '../../domain/models/transaction.dart';
 import '../../domain/models/unit.dart';
 import '../../domain/models/unparsed_capture.dart';
@@ -164,6 +165,41 @@ LimitRulesCompanion limitRuleToCompanion(LimitRule l) {
     enabled: Value(l.enabled),
   );
 }
+
+// --- Outing (#30) --------------------------------------------------------
+
+Outing outingFromRow(OutingRow row) => Outing(
+  id: row.id,
+  name: row.name,
+  amountMinor: row.amountMinor,
+  currencyCode: row.currency,
+  // #30: drift stores DateTimes as epoch and returns them from the DB in
+  // UTC on read. Everything this app *displays* — "ends Fri 20 Oct",
+  // "starts Mon 15" — is in the person's local time, and every outings
+  // test constructs local DateTimes. Convert on the way out, so the
+  // model is always local and callers never have to reason about it.
+  startAt: row.startAt.toLocal(),
+  endAt: row.endAt.toLocal(),
+  unitIds: row.unitIds.isEmpty
+      ? const <String>{}
+      : row.unitIds.split(',').toSet(),
+  bannerEnabled: row.bannerEnabled,
+  enabled: row.enabled,
+  createdAt: row.createdAt.toLocal(),
+);
+
+OutingsCompanion outingToCompanion(Outing o) => OutingsCompanion.insert(
+  id: o.id,
+  name: o.name,
+  amountMinor: o.amountMinor,
+  currency: o.currencyCode,
+  startAt: o.startAt,
+  endAt: o.endAt,
+  unitIds: Value(o.unitIds.join(',')),
+  bannerEnabled: Value(o.bannerEnabled),
+  enabled: Value(o.enabled),
+  createdAt: o.createdAt,
+);
 
 // --- Template ------------------------------------------------------------
 
