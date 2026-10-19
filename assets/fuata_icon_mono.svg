@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- Android 13+ themed icon. Android replaces the colour with the
+       wallpaper-derived tint, so all shapes are one solid fill. -->
+  <circle cx="610" cy="400" r="155" fill="#000000"/>
+  <circle cx="475" cy="575" r="14"  fill="#000000"/>
+  <circle cx="430" cy="610" r="17"  fill="#000000"/>
+  <circle cx="380" cy="655" r="20"  fill="#000000"/>
+  <circle cx="320" cy="710" r="24"  fill="#000000"/>
+</svg>
