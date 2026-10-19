@@ -15,6 +15,7 @@ import '../../domain/logic/unit_order.dart';
 import '../../domain/models/category.dart';
 import '../../domain/models/limit_alert.dart';
 import '../../domain/models/limit_rule.dart';
+import '../../domain/models/outing.dart';
 import '../../domain/models/settings.dart';
 import '../../domain/models/template.dart';
 import '../../domain/models/transaction.dart';
@@ -816,5 +817,42 @@ class DriftCaptureSourceRepository implements CaptureSourceRepository {
     return _db
         .into(_db.captureSources)
         .insertOnConflictUpdate(captureSourceToCompanion(source));
+  }
+}
+
+class DriftOutingRepository implements OutingRepository {
+  DriftOutingRepository(this._db);
+  final AppDatabase _db;
+
+  @override
+  Stream<List<Outing>> watchOutings() {
+    return (_db.select(_db.outings)
+      ..orderBy([(o) => OrderingTerm.desc(o.startAt)]))
+        .watch()
+        .map((rows) => rows.map(outingFromRow).toList());
+  }
+
+  @override
+  Future<void> saveOuting(Outing outing) =>
+      _db.into(_db.outings).insertOnConflictUpdate(outingToCompanion(outing));
+
+  @override
+  Future<void> deleteOuting(String outingId) =>
+      (_db.delete(_db.outings)..where((o) => o.id.equals(outingId))).go();
+
+  @override
+  Future<void> endOutingNow(String outingId) async {
+    // Both fields in one write. An "ending" is one operation, not two, and
+    // the reason this method exists (rather than the caller doing two
+    // updates) is that the two must land together: an outing with
+    // enabled=false but endAt in the future would still be "ended" for
+    // the banner (banner checks isActive which checks enabled), but the
+    // Past/Active lists would disagree about when it ended.
+    final now = DateTime.now();
+    await (_db.update(_db.outings)..where((o) => o.id.equals(outingId)))
+        .write(OutingsCompanion(
+      enabled: const Value(false),
+      endAt: Value(now),
+    ));
   }
 }

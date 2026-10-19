@@ -24,6 +24,7 @@ import 'dart:convert';
 import '../models/backup_snapshot.dart';
 import '../models/capture_source.dart';
 import '../models/limit_rule.dart';
+import '../models/outing.dart';
 import '../models/settings.dart';
 import '../models/template.dart';
 import '../models/transaction.dart';
@@ -71,6 +72,8 @@ class ImportPlan {
   /// asks for it — never as part of "merge my records".
   final AppSettings? incomingSettings;
 
+  final TablePlan<Outing> outings;
+
   /// References that don't resolve. Any problem means the import can't run.
   final List<String> problems;
   final int moreProblems;
@@ -83,6 +86,7 @@ class ImportPlan {
     required this.transactions,
     required this.limits,
     required this.incomingSettings,
+    required this.outings,
     this.problems = const [],
     this.moreProblems = 0,
   });
@@ -95,7 +99,8 @@ class ImportPlan {
       captureSources.added.length +
       templates.added.length +
       transactions.added.length +
-      limits.added.length;
+      limits.added.length +
+      outings.added.length;
 
   int get identicalCount =>
       categories.identicalCount +
@@ -103,7 +108,8 @@ class ImportPlan {
       captureSources.identicalCount +
       templates.identicalCount +
       transactions.identicalCount +
-      limits.identicalCount;
+      limits.identicalCount +
+      outings.identicalCount;
 
   int get conflictCount =>
       categories.conflicts.length +
@@ -111,6 +117,7 @@ class ImportPlan {
       captureSources.conflicts.length +
       templates.conflicts.length +
       transactions.conflicts.length +
+      limits.conflicts.length +
       limits.conflicts.length;
 
   bool get hasConflicts => conflictCount > 0;
@@ -134,6 +141,7 @@ class ImportPlan {
       templates: pick(templates),
       transactions: pick(transactions),
       limits: pick(limits),
+      outings: pick(outings),
     );
   }
 }
@@ -199,6 +207,13 @@ class ImportPlanner {
                 : c.incoming,
           ),
       ],
+    );
+
+    final outings = _diff<Outing>(
+      incoming.outings,
+      existing.outings,
+          (o) => o.id,
+          (o) => jsonEncode(BackupCodec.outingToJson(o)),
     );
 
     final problems = <String>[];
@@ -279,6 +294,7 @@ class ImportPlanner {
       transactions: transactions,
       limits: limits,
       incomingSettings: incoming.settings,
+      outings: outings,
       problems: problems,
       moreProblems: more,
     );

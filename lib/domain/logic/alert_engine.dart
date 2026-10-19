@@ -143,7 +143,7 @@ class AlertText {
 
   static ({String title, String body}) build(LimitAlert a) {
     final limit = a.limit;
-    final period = switch (limit.period) {
+    final period = a.periodLabel ?? switch (limit.period) {
       LimitPeriod.day => "today's",
       LimitPeriod.week => "this week's",
       LimitPeriod.month => "this month's",

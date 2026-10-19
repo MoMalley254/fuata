@@ -7,9 +7,11 @@
 // ---------------------------------------------------------------------------
 
 import '../models/limit_rule.dart';
+import '../models/outing.dart';
 import '../repositories/repositories.dart';
 import 'banner_content.dart';
 import 'ledger.dart';
+import 'outings.dart';
 
 /// Returns the content the banner should show, or null when the banner
 /// is switched off in settings (in which case the caller should cancel
@@ -22,6 +24,7 @@ Future<BannerContent?> loadBannerContent({
   required TransactionRepository transactions,
   required LimitRepository limits,
   required SettingsRepository settings,
+  required OutingRepository outings,
   DateTime Function()? now,
 }) async {
   final clock = now ?? DateTime.now;
@@ -29,11 +32,16 @@ Future<BannerContent?> loadBannerContent({
   final s = await settings.watchSettings().first;
   if (!s.bannerEnabled) return null;
 
-  final unitList = await units.watchUnits().first;
+  final unitList = await units.watchUnits(includeArchived: true).first;
+  final activeUnits = unitList.where((u) => !u.archived).toList();
   final txList = await transactions.watchTransactions().first;
   final limitList = await limits.watchLimits().first;
+  final outingList = await outings.watchOutings().first;
 
-  final (start, end) = Ledger.todayRange(clock());
+  final at = clock();
+  final activeOuting = Outings.activeFrom(outingList, now: at);
+
+  final (start, end) = Ledger.todayRange(at);
   final spentToday = Ledger.spentInPeriod(txList, start, end);
 
   final dailyLimit = limitList
@@ -44,25 +52,40 @@ Future<BannerContent?> loadBannerContent({
       .firstOrNull;
 
   final balanceByUnit = {
-    for (final u in unitList) u.id: Ledger.balanceOf(u, txList),
+    for (final u in activeUnits) u.id: Ledger.balanceOf(u, txList),
   };
+
+  int outingSpent = 0;
+  SpendStatus? outingStatus;
+  Outing? banneredOuting;
+  if (activeOuting != null && activeOuting.bannerEnabled) {
+    final currencyByUnit = {
+      for (final u in unitList) u.id: u.currencyCode,
+    };
+    outingSpent = Outings.spentIn(
+      activeOuting,
+      txList,
+      currencyByUnit: currencyByUnit,
+    );
+    outingStatus = Outings.statusFor(activeOuting, outingSpent);
+    banneredOuting = activeOuting;
+  }
 
   return BannerContent.build(
     status: Ledger.statusFor(dailyLimit, spentToday),
     spentToday: spentToday,
     dailyLimit: dailyLimit,
-    units: unitList,
+    units: activeUnits,
     balanceByUnit: balanceByUnit,
     headline: s.bannerHeadline,
     unitsMode: s.bannerUnitsMode,
     selectedUnitIds: s.bannerUnitIds,
     showProgress: s.bannerShowProgress,
     showQuickAdd: s.bannerShowQuickAdd,
-    // Never pre-redacted here: the *real* banner defers redaction to
-    // Android's lock-screen visibility (see BannerPlatform.show). The
-    // setup screen's preview uses `redacted: true` on its own to mock
-    // what the lock screen version looks like.
     redacted: false,
+    activeOuting: banneredOuting,
+    outingSpentMinor: outingSpent,
+    outingStatus: outingStatus,
   );
 }
 

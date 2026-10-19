@@ -41,6 +41,7 @@ final alertSyncProvider = Provider<void>((ref) {
   final limitRepo = ref.read(limitRepositoryProvider);
   final settingsRepo = ref.read(settingsRepositoryProvider);
   final log = ref.read(alertLogRepositoryProvider);
+  final outingsRepo = ref.read(outingRepositoryProvider);
 
   // Serialised so two quick changes can't run two evaluations at once in
   // this isolate. An alert failure must never surface to the person.
@@ -50,6 +51,7 @@ final alertSyncProvider = Provider<void>((ref) {
         units: unitRepo,
         transactions: txRepo,
         limits: limitRepo,
+        outings: outingsRepo,
         settings: settingsRepo,
         log: log,
       );

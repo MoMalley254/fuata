@@ -20,6 +20,7 @@ import '../ui/screens/limits_screen.dart';
 import '../ui/screens/manage_rules_screen.dart';
 import '../ui/screens/my_money_screen.dart';
 import '../ui/screens/onboarding_screen.dart';
+import '../ui/screens/outings_screen.dart';
 import '../ui/screens/profile_screen.dart';
 import '../ui/screens/review_inbox_screen.dart';
 import '../ui/screens/root_shell.dart';
@@ -341,6 +342,12 @@ final routerProvider = Provider<GoRouter>((ref) {
           name: Routes.templatePacks,
           parentNavigatorKey: rootNavigatorKey,
           builder: (_, _) => const TemplatePacksScreen(),
+        ),
+        GoRoute(
+          path: Routes.outingsPath,
+          name: Routes.outings,
+          parentNavigatorKey: rootNavigatorKey,
+          builder: (_, _) => const OutingsScreen(),
         ),
       ]
   );

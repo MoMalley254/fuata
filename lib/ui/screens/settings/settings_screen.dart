@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../../domain/models/limit_rule.dart';
 import '../../../domain/models/money.dart';
+import '../../../domain/models/outing.dart';
 import '../../../domain/models/settings.dart';
 import '../../../routing/routes.dart';
 import '../../../widgets/personalization/action_row.dart';
@@ -34,6 +35,7 @@ class SettingsScreen extends ConsumerWidget {
           l.enabled,
     )
         .firstOrNull;
+    final outingsCount = (ref.watch(outingsProvider).value ?? const <Outing>[]).length;
 
     return Scaffold(
       appBar: AppBar(title: const Text('Settings')),
@@ -114,6 +116,15 @@ class SettingsScreen extends ConsumerWidget {
               onTap: () => context.push(Routes.limitsPath),
             ),
             const SizedBox(height: AppSpacing.sm),
+            ActionRow(
+              icon: Icons.flight_takeoff_rounded,
+              title: 'Outings',
+              subtitle: outingsCount == 0
+                  ? 'A temporary budget for a trip or a weekend'
+                  : '${outingsCount == 1 ? '1 outing' : '$outingsCount outings'}',
+              onTap: () => context.push(Routes.outingsPath),
+            ),
+            const SizedBox(height: AppSpacing.sm,),
             ActionRow(
               icon: Icons.notifications_outlined,
               title: 'Banner',

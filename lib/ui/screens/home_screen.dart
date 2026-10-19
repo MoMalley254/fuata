@@ -124,6 +124,10 @@ class HomeContent extends StatelessWidget {
         ],
         const SizedBox(height: AppSpacing.lg),
         HeroSection(state: state, headline: settings.homeHeadline),
+        if (state.activeOuting != null) ...[
+          const SizedBox(height: AppSpacing.sm),
+          _OutingBadge(state: state),
+        ],
         if (showUnits) ...[
           const SizedBox(height: AppSpacing.lg),
           Text(
@@ -336,6 +340,19 @@ class HeroSection extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final outing = state.activeOuting;
+    if (outing != null && outing.bannerEnabled && headline == HomeHeadline.leftToday) {
+      return StatusRingCard(
+        remaining: Money(state.effectiveRemaining, outing.currencyCode).majorValue,
+        spent: Money(state.outingSpent, outing.currencyCode).majorValue,
+        limit: Money(outing.amountMinor, outing.currencyCode).majorValue,
+        status: state.outingStatus,
+        caption: state.outingCaption ?? 'ends soon',
+        currencySymbol: currencySymbol(outing.currencyCode),
+        onTap: () => context.push(Routes.outingsPath),
+      );
+    }
+
     final limit = state.dailyLimit;
     final currency = state.units.isNotEmpty
         ? state.units.first.currencyCode
@@ -598,6 +615,43 @@ class EmptyHome extends StatelessWidget {
               'in Settings.',
               textAlign: TextAlign.center,
               style: AppTypography.bodySm.copyWith(color: c.onSurfaceVariant),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _OutingBadge extends StatelessWidget {
+  const _OutingBadge({required this.state});
+  final HomeState state;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    final outing = state.activeOuting!;
+    return InkWell(
+      onTap: () => context.push(Routes.outingsPath),
+      borderRadius: BorderRadius.circular(AppSpacing.pill),
+      child: Container(
+        padding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.md,
+          vertical: AppSpacing.sm,
+        ),
+        decoration: BoxDecoration(
+          color: c.primary.withValues(alpha: 0.10),
+          borderRadius: BorderRadius.circular(AppSpacing.pill),
+          border: Border.all(color: c.primary.withValues(alpha: 0.35)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('🏝️', style: TextStyle(fontSize: 14)),
+            const SizedBox(width: 6),
+            Text(
+              '${outing.name} · ${state.outingCaption ?? 'active'}',
+              style: AppTypography.labelMd.copyWith(color: c.primary),
             ),
           ],
         ),

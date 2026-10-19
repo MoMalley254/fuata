@@ -161,6 +161,31 @@ class AlertFirings extends Table {
   Set<Column> get primaryKey => {limitId, periodKey, level};
 }
 
+/// design.md's outings (issue #30). Separate from LimitRules because
+/// the window is explicit (startAt..endAt) rather than a rolling period,
+/// and there can be several at different times. Only one is active at
+/// once — `Outings.activeFrom` picks the most recently created.
+///
+/// `unitIds` is stored as comma-separated ids (empty = every unit).
+/// The alternative (a join table) is more correct but adds a third table
+/// and three join queries for a list that is almost always empty.
+@DataClassName('OutingRow')
+class Outings extends Table {
+  TextColumn get id => text()();
+  TextColumn get name => text()();
+  IntColumn get amountMinor => integer()();
+  TextColumn get currency => text()();
+  DateTimeColumn get startAt => dateTime()();
+  DateTimeColumn get endAt => dateTime()();
+  TextColumn get unitIds => text().withDefault(const Constant(''))();
+  BoolColumn get bannerEnabled => boolean().withDefault(const Constant(true))();
+  BoolColumn get enabled => boolean().withDefault(const Constant(true))();
+  DateTimeColumn get createdAt => dateTime()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
 /// design.md's "supporting tables (not drawn)": unparsed_capture, kept
 /// only long enough for the review inbox's "Couldn't read these" list
 /// before being auto-purged (US-11, requirements.md).

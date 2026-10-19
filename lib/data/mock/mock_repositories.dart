@@ -7,6 +7,7 @@ import '../../domain/models/capture_source.dart';
 import '../../domain/models/category.dart';
 import '../../domain/models/limit_alert.dart';
 import '../../domain/models/limit_rule.dart';
+import '../../domain/models/outing.dart';
 import '../../domain/models/settings.dart';
 import '../../domain/models/template.dart';
 import '../../domain/models/transaction.dart';
@@ -436,5 +437,31 @@ class MockCategoryRepository implements CategoryRepository {
   @override
   Future<void> unarchiveCategory(String categoryId) async {
     _store.update((c) => c.id == categoryId, (c) => c.copyWith(archived: false));
+  }
+}
+
+class MockOutingRepository implements OutingRepository {
+  final _store = _Store<Outing>([]);
+
+  @override
+  Stream<List<Outing>> watchOutings() {
+    return _store.watch().map((list) =>
+    [...list]..sort((a, b) => b.startAt.compareTo(a.startAt)));
+  }
+
+  @override
+  Future<void> saveOuting(Outing outing) async =>
+      _store.upsert((o) => o.id == outing.id, outing);
+
+  @override
+  Future<void> deleteOuting(String outingId) async =>
+      _store.removeWhere((o) => o.id == outingId);
+
+  @override
+  Future<void> endOutingNow(String outingId) async {
+    _store.update(
+          (o) => o.id == outingId,
+          (o) => o.copyWith(enabled: false, endAt: DateTime.now()),
+    );
   }
 }

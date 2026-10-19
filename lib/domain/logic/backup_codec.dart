@@ -31,6 +31,7 @@ import 'dart:ui' show Color;
 import '../models/backup_snapshot.dart';
 import '../models/capture_source.dart';
 import '../models/limit_rule.dart';
+import '../models/outing.dart';
 import '../models/settings.dart';
 import '../models/template.dart';
 import '../models/transaction.dart';
@@ -106,6 +107,7 @@ class BackupCodec {
         'limits': [for (final l in snapshot.limits) limitToJson(l)],
         if (snapshot.settings != null)
           'settings': settingsToJson(snapshot.settings!),
+        'outings': [for (final o in snapshot.outings) outingToJson(o)],
       },
     };
     return const JsonEncoder.withIndent('  ').convert(doc);
@@ -221,6 +223,19 @@ class BackupCodec {
     'scheduledExportMinute': s.scheduledExportMinute,
     'scheduledExportWeekday': s.scheduledExportWeekday,
     'scheduledExportIncludeRawText': s.scheduledExportIncludeRawText,
+  };
+
+  static Map<String, dynamic> outingToJson(Outing o) => {
+    'id': o.id,
+    'name': o.name,
+    'amountMinor': o.amountMinor,
+    'currency': o.currencyCode,
+    'startAt': _iso(o.startAt),
+    'endAt': _iso(o.endAt),
+    'unitIds': (o.unitIds.toList()..sort()),
+    'bannerEnabled': o.bannerEnabled,
+    'enabled': o.enabled,
+    'createdAt': _iso(o.createdAt),
   };
 
   // ---------------------------------------------------------------- decode
@@ -360,6 +375,25 @@ class BackupCodec {
       (l) => l.id,
     );
 
+    final outings = _table<Outing>(
+      data,
+      'outings',
+      ctx,
+          (r) => Outing(
+        id: r.nonEmpty('id'),
+        name: r.nonEmpty('name'),
+        amountMinor: r.integer('amountMinor'),
+        currencyCode: r.nonEmpty('currency'),
+        startAt: r.dateLocal('startAt'),
+        endAt: r.dateLocal('endAt'),
+        unitIds: r.strList('unitIds').toSet(),
+        bannerEnabled: r.boolean('bannerEnabled', orElse: true),
+        enabled: r.boolean('enabled', orElse: true),
+        createdAt: r.dateLocal('createdAt'),
+      ),
+          (o) => o.id,
+    );
+
     AppSettings? settings;
     final rawSettings = data['settings'];
     if (rawSettings != null) {
@@ -393,6 +427,7 @@ class BackupCodec {
         transactions: transactions,
         limits: limits,
         settings: settings,
+        outings: outings,
       ),
       errors: const [],
       warnings: ctx.warnings,
@@ -813,4 +848,19 @@ class _Rec {
     ctx.error('$path.$key: unknown value "$v".');
     return orElse ?? values.first;
   }
+
+  List<String> strList(String key) {
+    final v = map[key];
+    if (v == null) return const [];
+    if (v is List) {
+      return [
+        for (final e in v)
+          if (e is String) e,
+      ];
+    }
+    _bad(key, 'a list of strings');
+    return const [];
+  }
+
+  DateTime dateLocal(String key) => date(key).toLocal();
 }

@@ -17,6 +17,7 @@ Future<void> fireDueAlerts({
   required UnitRepository units,
   required TransactionRepository transactions,
   required LimitRepository limits,
+  required OutingRepository outings,
   required SettingsRepository settings,
   required AlertLogRepository log,
 }) async {
@@ -24,6 +25,7 @@ Future<void> fireDueAlerts({
     units: units,
     transactions: transactions,
     limits: limits,
+    outings: outings,
     settings: settings,
     log: log,
   );

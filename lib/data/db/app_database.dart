@@ -33,6 +33,7 @@ part 'app_database.g.dart';
     UnparsedCaptures,
     SettingsEntries,
     AlertFirings,
+    Outings, //#30
   ],
 )
 class AppDatabase extends _$AppDatabase {

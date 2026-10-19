@@ -62,12 +62,18 @@ class LimitAlert {
   /// Name of the unit for a per-unit limit; null for an overall limit.
   final String? unitName;
 
+  /// Overrides the default "today's" / "this week's" / "this month's"
+  /// phrase in [AlertText.build]. Set by the outing engine to
+  /// "this trip's".
+  final String? periodLabel;
+
   const LimitAlert({
     required this.limit,
     required this.level,
     required this.periodKey,
     required this.spentMinor,
     this.unitName,
+    this.periodLabel,
   });
 
   AlertKey get key => AlertKey(limit.id, periodKey, level);

@@ -3,6 +3,7 @@ import '../models/capture_source.dart';
 import '../models/category.dart';
 import '../models/limit_alert.dart';
 import '../models/limit_rule.dart';
+import '../models/outing.dart';
 import '../models/settings.dart';
 import '../models/template.dart';
 import '../models/transaction.dart';
@@ -159,4 +160,21 @@ abstract class CategoryRepository {
   Future<void> saveCategory(Category category);
   Future<void> archiveCategory(String categoryId);
   Future<void> unarchiveCategory(String categoryId);
+}
+
+/// Outings (issue #30): named temporary budgets with their own window.
+/// Separate from LimitRule on purpose — the window is explicit rather
+/// than derived, and there can be several (only one active at a time).
+abstract class OutingRepository {
+  /// All outings ordered by start descending — upcoming and active first,
+  /// past ones below.
+  Stream<List<Outing>> watchOutings();
+
+  Future<void> saveOuting(Outing outing);
+  Future<void> deleteOuting(String outingId);
+
+  /// Ends [outingId] early: sets `enabled = false` and `endAt = now`, so
+  /// the history stays but the outing stops being active. Distinct from
+  /// delete because the person said "I'm back", not "I never went".
+  Future<void> endOutingNow(String outingId);
 }

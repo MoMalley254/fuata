@@ -50,6 +50,10 @@ class DriftBackupRepository implements BackupRepository {
     final limits = await (_db.select(
       _db.limitRules,
     )..orderBy([(l) => OrderingTerm(expression: l.id)])).get();
+    final outings = await (_db.select(_db.outings)
+      ..orderBy([(o) => OrderingTerm(expression: o.startAt),
+            (o) => OrderingTerm(expression: o.id)]))
+        .get();
     // Empty table (fresh install) yields AppSettings.defaults, which is
     // exactly what "the phone's current settings" means there.
     final settings = await DriftSettingsRepository(_db).watchSettings().first;
@@ -71,6 +75,7 @@ class DriftBackupRepository implements BackupRepository {
       templates: templates.map(templateFromRow).toList(),
       transactions: transactions.map(transactionFromRow).toList(),
       limits: limits.map(limitRuleFromRow).toList(),
+      outings: outings.map(outingFromRow).toList(),
       settings: settings,
     );
   }
@@ -129,6 +134,13 @@ class DriftBackupRepository implements BackupRepository {
         }
       });
 
+      if (records.outings.isNotEmpty) {
+        await _db.batch((b) => b.insertAllOnConflictUpdate(
+          _db.outings,
+          records.outings.map(outingToCompanion).toList(),
+        ));
+      }
+
       // Limits go through the repository so a changed amount clears the
       // alerts already shown for the old one, exactly as editing does
       // (#63). Nested transactions become savepoints, so this stays part
@@ -165,6 +177,7 @@ class DriftBackupRepository implements BackupRepository {
       await _db.delete(_db.templates).go();
       await _db.delete(_db.limitRules).go();
       await _db.delete(_db.alertFirings).go();
+      await _db.delete(_db.outings).go();
       await _db.delete(_db.units).go();
       await _db.delete(_db.categories).go();
       await _db.delete(_db.captureSources).go();

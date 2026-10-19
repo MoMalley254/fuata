@@ -364,6 +364,7 @@ void main() {
           final txs = DriftTransactionRepository(db);
           final limits = DriftLimitRepository(db);
           final settings = DriftSettingsRepository(db);
+          final outings = DriftOutingRepository(db);
           final log = DriftAlertLogRepository(db);
 
           await units.addUnit(MoneyUnit(
@@ -392,6 +393,7 @@ void main() {
             transactions: txs,
             limits: limits,
             settings: settings,
+            outings: outings,
             log: log,
             now: () => at,
           );
@@ -411,6 +413,7 @@ void main() {
       final txs = DriftTransactionRepository(db);
       final limits = DriftLimitRepository(db);
       final settings = DriftSettingsRepository(db);
+      final outings = DriftOutingRepository(db);
       final log = DriftAlertLogRepository(db);
 
       await settings.updateSettings(
@@ -442,6 +445,7 @@ void main() {
         transactions: txs,
         limits: limits,
         settings: settings,
+        outings: outings,
         log: log,
         now: () => at,
       );
@@ -472,6 +476,7 @@ void main() {
       final txs = DriftTransactionRepository(db);
       final limits = DriftLimitRepository(db);
       final settings = DriftSettingsRepository(db);
+      final outings = DriftOutingRepository(db);
       final log = DriftAlertLogRepository(db);
       final lateNight = DateTime(2026, 9, 30, 23, 15);
 
@@ -504,6 +509,7 @@ void main() {
         transactions: txs,
         limits: limits,
         settings: settings,
+        outings: outings,
         log: log,
         now: () => lateNight,
       );
