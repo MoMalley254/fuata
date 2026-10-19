@@ -176,14 +176,25 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
       return;
     }
 
-    // The settings write has committed, so onboarded is now true and the
-    // redirect will allow any destination. Wait one frame for the
-    // redirect's own navigation to settle, then push Auto-catch on top of
-    // it. `router.push` is context-free, so no `context.mounted` check is
-    // needed — and none would help, since the redirect will have unmounted
-    // this screen by then.
+    // Reset busy: on the happy path the router's redirect is about to
+    // unmount us, but if anything brings the user back here (e.g. the
+    // "Show me how" → Auto-catch → back flow), the buttons must not stay
+    // stuck greyed out. The catch branch above already resets it on
+    // failure; this is the success path's missing reset.
+    if (mounted) setState(() => _finishing = false);
+
     if (openAutoCatch) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
+        // The settings write above flipped `onboardingComplete`, so the
+        // router's redirect is supposed to move us off /onboarding on its
+        // own. But that redirect doesn't re-fire on pop, and it may not
+        // have fired yet when this callback runs — either way, the base
+        // of the stack can end up being /onboarding.
+        //
+        // Force the base to Home first, then push Auto-catch on top. From
+        // here, popping Auto-catch lands on Home, never on a finished
+        // onboarding screen with nothing to do.
+        router.go(Routes.homePath);
         router.push(Routes.autoCatchPath);
       });
     }
