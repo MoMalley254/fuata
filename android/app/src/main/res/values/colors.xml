@@ -8,10 +8,13 @@
     <color name="widget_on_surface_variant">#FF3E4948</color>
     <color name="widget_outline">#FFBDC9C7</color>
     <color name="widget_accent">#FF006762</color>
-
     <!-- Status colours, same in both themes (matching AppColors). -->
     <color name="status_safe">#FF2E9E6B</color>
     <color name="status_warning">#FFE8A317</color>
     <color name="status_danger">#FFE5533D</color>
     <color name="status_overdraft">#FFB3123F</color>
+    <color name="ic_launcher_background">#FBF8F3</color>
+    <color name="splash_background">#FBF8F3</color>
+    <color name="splash_status_bar">#FBF8F3</color>
+    <color name="splash_navigation_bar">#FBF8F3</color>
 </resources>

@@ -1,0 +1,65 @@
+flutter_adaptive_studio:
+  # Global fallback: used by Android icon, splash, and iOS when no
+  # per-feature override is given.
+  source: assets/fuata_icon.svg
+
+  android:
+    icon:
+      adaptive:
+        foreground: assets/fuata_icon.svg
+        background: "#FBF8F3"           # matches AppColors.light.background
+        monochrome: assets/fuata_icon_mono.svg
+        safe_zone: fit                  # 15% inset, fixes the crop bug
+        round: true                     # ic_launcher_round for older launchers
+
+      legacy: true                      # safety net for non-adaptive launchers
+      play_store: true                  # 512² PNG for Google Play (required)
+      image_format: png                 # png (default) is fine; webp saves bytes
+
+    splash:
+      # ---- Background ----
+      background: "#FBF8F3"             # AppColors.light.background
+      background_dark: "#14161A"        # AppColors.dark.background
+
+      # ---- Centre logo ----
+      image: assets/fuata_icon.svg      # coin + trail, on the splash background
+      image_fit: auto                   # trims padding, fills the safe circle
+
+      # ---- Icon circle behind the logo (Android 12+) ----
+      # Same as background so the icon floats on the splash rather than
+      # sitting in a visibly different circle.
+      icon_background: "#FBF8F3"
+      icon_background_dark: "#14161A"
+
+      # ---- Wordmark at the bottom ----
+      branding_text: "Fuata"
+      branding_text_color: "#006762"    # brand teal, light
+      branding_text_color_dark: "#57F1DB"  # AppColors.dark.primary
+      branding_mode: bottom
+
+      # ---- System bars (status + navigation) during the splash ----
+      status_bar_color: "#FBF8F3"
+      status_bar_color_dark: "#14161A"
+      status_bar_icon_brightness: dark
+      status_bar_icon_brightness_dark: light
+      navigation_bar_color: "#FBF8F3"
+      navigation_bar_color_dark: "#14161A"
+      navigation_bar_icon_brightness: dark
+      navigation_bar_icon_brightness_dark: light
+
+      # ---- In-app splash (Android <12 only) ----
+      # On Android 12+ the native SplashScreen API is used instead.
+      flutter_splash_all_versions: false
+      flutter_splash_duration: 1200     # ms the Flutter splash holds
+
+  # ios:
+  #   icon:
+  #     image: assets/fuata_icon.svg
+  #     background: "#FBF8F3"
+  #     dark: assets/fuata_icon.svg
+  #     background_dark: "#14161A"
+  #   splash:
+  #     background: "#FBF8F3"
+  #     background_dark: "#14161A"
+  #     image: assets/fuata_icon.svg
+  #     logo_size: 192
