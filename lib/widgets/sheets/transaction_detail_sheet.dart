@@ -47,7 +47,6 @@ class _TransactionDetailSheetState extends ConsumerState<TransactionDetailSheet>
     final t = widget.transaction;
     final unit = widget.unit;
     final currency = unit?.currencyCode ?? 'KES';
-    final amount = Money(t.amountMinor.abs(), currency);
     final isInflow = t.amountMinor >=0;
     final hidden = ref.watch(currentSettingsProvider).amountsHidden;
 
@@ -143,7 +142,6 @@ class _TransactionDetailSheetState extends ConsumerState<TransactionDetailSheet>
     final t = widget.transaction;
     final unit = widget.unit;
     final rows = <MapEntry<String, String>>[];
-    final isInflow = t.type == TxType.got;
 
     // Simple: nothing extra — title/time/amount above is already the
     // whole story.

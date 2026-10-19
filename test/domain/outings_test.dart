@@ -1,10 +1,8 @@
-import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fuata/domain/logic/outings.dart';
 import 'package:fuata/domain/models/limit_rule.dart';
 import 'package:fuata/domain/models/outing.dart';
 import 'package:fuata/domain/models/transaction.dart';
-import 'package:fuata/domain/models/unit.dart';
 
 void main() {
   // Fri 17 Oct 2026, 10:00.

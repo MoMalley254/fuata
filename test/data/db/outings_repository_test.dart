@@ -65,10 +65,10 @@ void main() {
     // wall-clock precision on any host.
     final tolerance = const Duration(seconds: 2);
     expect(o.endAt.isAfter(before.subtract(tolerance)), isTrue,
-        reason: 'endAt ($before) is earlier than "${before}" minus the '
+        reason: 'endAt ($before) is earlier than "$before" minus the '
             'tolerance — endOutingNow did not use a recent timestamp');
     expect(o.endAt.isBefore(after.add(tolerance)), isTrue,
-        reason: 'endAt is later than "${after}" plus the tolerance — '
+        reason: 'endAt is later than "$after" plus the tolerance — '
             'endOutingNow wrote a value from the future');
 
     // Belt-and-braces: whatever the truncation did, the new endAt is

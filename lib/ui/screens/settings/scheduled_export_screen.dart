@@ -3,7 +3,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
 import '../../../domain/logic/backup_crypto.dart';
-import '../../../domain/logic/backup_service.dart';
 import '../../../domain/logic/scheduled_export.dart';
 import '../../../domain/models/settings.dart';
 import '../../../platform/backup_passphrase_store.dart';

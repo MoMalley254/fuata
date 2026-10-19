@@ -26,7 +26,6 @@ import '../data/db/drift_repositories.dart';
 import '../domain/logic/backup_crypto.dart';
 import '../domain/logic/backup_service.dart';
 import '../domain/logic/scheduled_export.dart';
-import '../domain/models/settings.dart';
 import 'backup_passphrase_store.dart';
 
 const _channel = MethodChannel(scheduledExportMethodName);
@@ -191,7 +190,7 @@ void scheduledExportDispatcher() {
     try {
       await ch.invokeMethod('reportResult', {
         'success': outcome == null,
-        if (outcome != null) 'error': outcome,
+        'error': ?outcome,
       });
     } on MissingPluginException {
       // no native side
