@@ -209,6 +209,7 @@ Future<bool> _captureOne(String packageName, String text) async {
           units: DriftUnitRepository(db),
           transactions: DriftTransactionRepository(db),
           limits: DriftLimitRepository(db),
+          outings: DriftOutingRepository(db),
           settings: DriftSettingsRepository(db),
           log: DriftAlertLogRepository(db),
         );
@@ -241,6 +242,7 @@ Future<void> _refreshBanner(AppDatabase db) async {
     units: DriftUnitRepository(db),
     transactions: DriftTransactionRepository(db),
     limits: DriftLimitRepository(db),
+    outings: DriftOutingRepository(db),
     settings: DriftSettingsRepository(db),
   );
   if (content == null) {

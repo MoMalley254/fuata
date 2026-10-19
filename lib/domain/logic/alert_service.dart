@@ -15,6 +15,7 @@
 import '../models/limit_alert.dart';
 import '../repositories/repositories.dart';
 import 'alert_engine.dart';
+import 'outings_alert_engine.dart';
 
 class AlertBatch {
   /// Alerts this caller has claimed and must now show.
@@ -47,6 +48,7 @@ Future<AlertBatch> claimDueAlerts({
   required UnitRepository units,
   required TransactionRepository transactions,
   required LimitRepository limits,
+  required OutingRepository outings,   // <- new
   required SettingsRepository settings,
   required AlertLogRepository log,
   DateTime Function()? now,
@@ -56,27 +58,38 @@ Future<AlertBatch> claimDueAlerts({
   if (!s.alertsEnabled) return AlertBatch.none;
 
   final at = clock();
-  final due = AlertEngine.due(
+  final unitList = await units.watchUnits(includeArchived: true).first;
+  final txList = await transactions.watchTransactions().first;
+  final fired = await log.firedKeys();
+
+  final limitAlerts = AlertEngine.due(
     limits: await limits.watchLimits().first,
-    units: await units.watchUnits().first,
-    transactions: await transactions.watchTransactions().first,
-    fired: await log.firedKeys(),
+    units: unitList,
+    transactions: txList,
+    fired: fired,
     now: at,
   );
+  final outingAlerts = OutingAlertEngine.due(
+    outings: await outings.watchOutings().first,
+    units: unitList,
+    transactions: txList,
+    fired: fired,
+    now: at,
+  );
+  final due = [...limitAlerts, ...outingAlerts];
   if (due.isEmpty) return AlertBatch.none;
 
   final claimed = <LimitAlert>[];
   for (final alert in due) {
-    // Claim every level this alert uses up, top level last: the top one
-    // decides whether *we* won. Lower levels are recorded so a nudge
-    // can't turn up after an "over" for the same limit and period.
     for (final key in alert.consumedKeys.where((k) => k != alert.key)) {
       await log.claim(key, at);
     }
     if (await log.claim(alert.key, at)) claimed.add(alert);
   }
 
-  if (claimed.isNotEmpty) await log.purgeBefore(at.subtract(alertLogRetention));
+  if (claimed.isNotEmpty) {
+    await log.purgeBefore(at.subtract(alertLogRetention));
+  }
 
   return AlertBatch(
     alerts: claimed,

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fuata/domain/logic/banner_content.dart';
 import 'package:fuata/domain/models/limit_rule.dart';
+import 'package:fuata/domain/models/outing.dart';
 import 'package:fuata/domain/models/settings.dart';
 import 'package:fuata/domain/models/unit.dart';
 
@@ -142,5 +143,36 @@ void main() {
         );
       }
     });
+  });
+
+  test('an active outing overrides the banner headline (#30)', () {
+    final outing = Outing(
+      id: 'o1',
+      name: 'Mombasa',
+      amountMinor: 200000,
+      currencyCode: 'KES',
+      startAt: DateTime(2026, 9, 29),
+      endAt: DateTime(2026, 10, 2),
+      createdAt: now,
+    );
+    final b = BannerContent.build(
+      status: SpendStatus.safe,
+      spentToday: 50000,
+      dailyLimit: limit,
+      units: [cash, mpesa],
+      balanceByUnit: const {'cash': 76000, 'mpesa': 345000},
+      headline: BannerHeadline.leftToday,
+      unitsMode: BannerUnitsMode.all,
+      selectedUnitIds: const {},
+      showProgress: true,
+      showQuickAdd: true,
+      redacted: false,
+      activeOuting: outing,
+      outingSpentMinor: 120000,
+      outingStatus: SpendStatus.warning,
+    );
+    expect(b.title, contains('Mombasa'));
+    expect(b.title, contains('800.00'));  // 2000 - 1200 left
+    expect(b.status, SpendStatus.warning);
   });
 }

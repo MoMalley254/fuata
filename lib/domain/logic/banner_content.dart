@@ -9,6 +9,7 @@
 
 import '../models/limit_rule.dart';
 import '../models/money.dart';
+import '../models/outing.dart';
 import '../models/settings.dart';
 import '../models/unit.dart';
 
@@ -51,13 +52,21 @@ class BannerContent {
     required bool showQuickAdd,
     required bool redacted,
 
-}) {
+    /// #30: when an outing is active, the banner answers "how is the
+    /// trip going?" instead of "how is today going". Overrides the
+    /// headline number; the units split and the spent line stay the same
+    /// (they answer "what do I have" and "what did I spend", which don't
+    /// change during an outing).
+    Outing? activeOuting,
+    int outingSpentMinor = 0,
+    SpendStatus? outingStatus,
+  }) {
     final active = units.where((u) => !u.archived).toList();
     // The units whose balance *lines* appear in the expanded body.
     final linesFor = switch (unitsMode) {
       BannerUnitsMode.all => active,
       BannerUnitsMode.selected =>
-          active.where((u) => selectedUnitIds.contains(u.id)).toList(),
+        active.where((u) => selectedUnitIds.contains(u.id)).toList(),
       BannerUnitsMode.none => const <MoneyUnit>[],
     };
 
@@ -67,46 +76,71 @@ class BannerContent {
     // person would see in My money.
     final unitsForTotal = unitsMode == BannerUnitsMode.none ? active : linesFor;
 
-    final code = dailyLimit?.currencyCode ??
-        (active.isEmpty ? 'KES' : active.first.currencyCode);
+    // Effective status and limit: outing wins when active.
+    final SpendStatus effectiveStatus = activeOuting != null
+        ? (outingStatus ?? SpendStatus.safe)
+        : status;
+    final LimitRule? effectiveLimit = activeOuting != null
+        ? activeOuting.asLimit()
+        : dailyLimit;
+    final int effectiveSpent = activeOuting != null
+        ? outingSpentMinor
+        : spentToday;
+
+    final code = activeOuting != null
+        ? activeOuting.currencyCode
+        : (effectiveLimit?.currencyCode ??
+              (active.isEmpty ? 'KES' : active.first.currencyCode));
     String fmt(int minor) => Money(minor, code).format();
 
-    final emoji = status.emoji;
-    final left = dailyLimit == null ? null : dailyLimit.amountMinor - spentToday;
+    final emoji = effectiveStatus.emoji;
+    final left = effectiveLimit == null
+        ? null
+        : effectiveLimit.amountMinor - effectiveSpent;
 
     final String title;
     if (redacted) {
-// Lock-screen version: words only, never an amount.
-      title = '$emoji ${status.label}';
+      title = '$emoji ${effectiveStatus.label}';
+    } else if (activeOuting != null) {
+      // "Mombasa trip" is the noun; "left" / "over" is the verb.
+      final name = activeOuting.name;
+      if (left == null || left >= 0) {
+        title = '$emoji ${fmt(left ?? 0)} left for $name';
+      } else {
+        title = '$emoji Over by ${fmt(-left)} for $name';
+      }
     } else {
-switch(headline) {
-  case BannerHeadline.leftToday:
-    if (left == null) {
-      title = '$emoji Spent ${fmt(spentToday)} today';
-    } else if (left < 0) {
-      title = '$emoji Over by ${fmt(-left)}';
-    } else if (left == 0) {
-      title = '$emoji Nothing left today';
-    } else {
-      title = '$emoji ${fmt(left)} left today';
-    }
-  case BannerHeadline.spentToday:
-    title = '$emoji Spent ${fmt(spentToday)} today';
-  case BannerHeadline.totalIHave:
-    final total = unitsForTotal
-        .where((u) => u.currencyCode == code)
-        .fold<int>(0, (sum, u) => sum + (balanceByUnit[u.id] ?? 0));
-    title = '$emoji ${fmt(total)} in total';
-}
+      switch (headline) {
+        case BannerHeadline.leftToday:
+          if (left == null) {
+            title = '$emoji Spent ${fmt(spentToday)} today';
+          } else if (left < 0) {
+            title = '$emoji Over by ${fmt(-left)}';
+          } else if (left == 0) {
+            title = '$emoji Nothing left today';
+          } else {
+            title = '$emoji ${fmt(left)} left today';
+          }
+        case BannerHeadline.spentToday:
+          title = '$emoji Spent ${fmt(spentToday)} today';
+        case BannerHeadline.totalIHave:
+          final total = unitsForTotal
+              .where((u) => u.currencyCode == code)
+              .fold<int>(0, (sum, u) => sum + (balanceByUnit[u.id] ?? 0));
+          title = '$emoji ${fmt(total)} in total';
+      }
     }
 
+    // Progress: use effective limit.
     double? progress;
-    if (showProgress && dailyLimit != null && dailyLimit.amountMinor > 0) {
-      progress = (spentToday / dailyLimit.amountMinor).clamp(0.0, 1.0);
+    if (showProgress &&
+        effectiveLimit != null &&
+        effectiveLimit.amountMinor > 0) {
+      progress = (effectiveSpent / effectiveLimit.amountMinor).clamp(0.0, 1.0);
     }
 
     return BannerContent(
-      status: status,
+      status: effectiveStatus,
       title: title,
       progress: progress,
       unitLines: redacted
@@ -116,7 +150,12 @@ switch(headline) {
           '${u.name} '
               '${Money(balanceByUnit[u.id] ?? 0, u.currencyCode).format()}',
       ],
-      spentLine: redacted ? null : 'Spent today ${fmt(spentToday)}',
+      spentLine: redacted
+          ? null
+          : (activeOuting != null
+          ? 'Spent ${fmt(outingSpentMinor)} of '
+          '${fmt(activeOuting.amountMinor)}'
+          : 'Spent today ${fmt(effectiveSpent)}'),
       showQuickAdd: showQuickAdd,
     );
   }
