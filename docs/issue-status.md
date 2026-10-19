@@ -1,4 +1,4 @@
-# Issue status (generated 2026-10-17T07:22Z)
+# Issue status (generated 2026-10-19T11:11Z)
 
 Source of truth: GitHub. Regenerate with `scripts/refresh-issue-status.sh`.
 
@@ -8,7 +8,7 @@ Source of truth: GitHub. Regenerate with `scripts/refresh-issue-status.sh`.
 | #117 | CLOSED | v1.1 Backlog | feat(units): reorder units on Home and My money |
 | #116 | CLOSED | v1.1 Backlog | feat(ui): Empty Home needs a call to action |
 | #115 | CLOSED | v1.1 Backlog | fix(ui): every provider error is a bare text message |
-| #114 | OPEN | v1.1 Backlog | feat(settings): a single, app-wide currency |
+| #114 | CLOSED | v1.1 Backlog | feat(settings): a single, app-wide currency |
 | #113 | CLOSED | v1.1 Backlog | feat(widget): surface and configure the home widget from Banner setup |
 | #112 | CLOSED | v0.1 MVP | fix(ui): Home shows "See my summaries" twice |
 | #111 | CLOSED | v0.1 MVP | fix(onboarding): "Show me how" doesn't open Auto-catch |
@@ -44,12 +44,12 @@ Source of truth: GitHub. Regenerate with `scripts/refresh-issue-status.sh`.
 | #38 | OPEN | v1.1 Backlog | feat: iOS manual/share-sheet edition |
 | #37 | OPEN | v1.1 Backlog | feat: Opt-in redacted diagnostics copy button |
 | #36 | OPEN | v1.1 Backlog | feat: Listener-inactive detection and manufacturer keep-alive guides |
-| #35 | OPEN | v1.1 Backlog | feat: Scheduled encrypted export to a user-chosen folder |
-| #34 | OPEN | v1.1 Backlog | feat: Template packs: export/import/share by file or QR, bundled presets |
+| #35 | CLOSED | v1.1 Backlog | feat: Scheduled encrypted export to a user-chosen folder |
+| #34 | CLOSED | v1.1 Backlog | feat: Template packs: export/import/share by file or QR, bundled presets |
 | #33 | OPEN | v1.1 Backlog | feat: Recurring bills and expected income |
 | #32 | OPEN | v1.1 Backlog | feat: Recipient to category rules |
 | #31 | CLOSED | v1.1 Backlog | feat: Scheduled daily/weekly/monthly summary notifications |
-| #30 | OPEN | v1.1 Backlog | feat: Outing mode (temporary budget with its own banner) |
+| #30 | CLOSED | v1.1 Backlog | feat: Outing mode (temporary budget with its own banner) |
 | #29 | CLOSED | v1.1 Backlog | feat: Home screen widget |
 | #28 | CLOSED | v1.1 Backlog | feat: SQLCipher encryption with Android Keystore and app lock |
 | #27 | OPEN | v0.1 MVP | chore(release): v0.1.0 |
