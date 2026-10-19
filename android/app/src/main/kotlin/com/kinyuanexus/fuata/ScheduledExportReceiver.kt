@@ -1,4 +1,4 @@
-package com.kinyuanexus.fuata.fuata
+package com.kinyuanexus.fuata
 
 import android.content.BroadcastReceiver
 import android.content.Context

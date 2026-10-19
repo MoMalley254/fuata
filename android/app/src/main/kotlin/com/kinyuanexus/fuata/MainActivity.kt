@@ -1,4 +1,4 @@
-package com.kinyuanexus.fuata.fuata
+package com.kinyuanexus.fuata
 
 import android.content.Intent
 // Issue #28: FlutterFragmentActivity, not FlutterActivity — local_auth
