@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:fuata/domain/logic/backup_codec.dart';
 import 'package:fuata/domain/models/backup_snapshot.dart';
 import 'package:fuata/domain/models/limit_rule.dart';
+import 'package:fuata/domain/models/outing.dart';
 import 'package:fuata/domain/models/settings.dart';
 
 import 'backup_test_data.dart';
@@ -514,5 +515,38 @@ void main() {
     expect(s.summaryMonthlyEnabled, d.summaryMonthlyEnabled);
     expect(s.summaryMonthlyDay, d.summaryMonthlyDay);
     expect(s.summaryMonthlyMinute, d.summaryMonthlyMinute);
+  });
+
+  test('an outing round-trips through the codec (#30)', () {
+    final outing = Outing(
+      id: 'o1',
+      name: 'Mombasa',
+      amountMinor: 1500000,
+      currencyCode: 'KES',
+      startAt: DateTime(2026, 10, 15),
+      endAt: DateTime(2026, 10, 20),
+      unitIds: {'cash', 'mpesa'},
+      createdAt: DateTime(2026, 10, 1),
+    );
+    final json = BackupCodec.encode(
+      BackupSnapshot(outings: [outing]),
+      exportedAt: exportedAt,
+    );
+    final decoded = BackupCodec.decode(json);
+    expect(decoded.errors, isEmpty);
+    final got = decoded.snapshot!.outings.single;
+    expect(got.id, 'o1');
+    expect(got.name, 'Mombasa');
+    expect(got.unitIds, {'cash', 'mpesa'});
+    expect(got.startAt, DateTime(2026, 10, 15));
+  });
+
+  test('a backup made before #30 has no outings, and imports fine', () {
+    // JSON without an 'outings' key — the shape a pre-#30 file would have.
+    final root = jsonDecode(encodeFull()) as Map<String, dynamic>;
+    (root['data'] as Map<String, dynamic>).remove('outings');
+    final decoded = BackupCodec.decode(jsonEncode(root));
+    expect(decoded.ok, isTrue);
+    expect(decoded.snapshot!.outings, isEmpty);
   });
 }

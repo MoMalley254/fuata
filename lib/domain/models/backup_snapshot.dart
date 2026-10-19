@@ -22,6 +22,7 @@ import 'package:fuata/domain/models/unit.dart';
 
 import 'capture_source.dart';
 import 'limit_rule.dart';
+import 'outing.dart';
 
 /// A row of the `categories` table (issue #83). Was previously a raw
 /// shape with no domain model — now that categories are user-editable,
@@ -57,6 +58,11 @@ class BackupSnapshot {
   /// separately from the records above on import.
   final AppSettings? settings;
 
+  /// Outings (issue #30). No FKs to units — an outing's `unitIds` is a
+  /// soft set, and a missing id at import just means that unit wasn't
+  /// restored. The outing itself always imports.
+  final List<Outing> outings;
+
   const BackupSnapshot({
     this.categories = const [],
     this.units = const [],
@@ -65,6 +71,7 @@ class BackupSnapshot {
     this.transactions = const [],
     this.limits = const [],
     this.settings,
+    this.outings = const [],
   });
 
   static const empty = BackupSnapshot();
@@ -76,7 +83,8 @@ class BackupSnapshot {
       captureSources.length +
       templates.length +
       transactions.length +
-      limits.length;
+      limits.length +
+      outings.length;
 
   bool get isEmpty => recordCount == 0;
 }
