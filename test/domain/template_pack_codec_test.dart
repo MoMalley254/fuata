@@ -3,8 +3,6 @@ import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fuata/data/constants/preset_template_packs.dart';
 import 'package:fuata/domain/logic/template_pack_codec.dart';
-import 'package:fuata/domain/models/template.dart';
-import 'package:fuata/domain/models/template_pack.dart';
 
 void main() {
   final mpesa = presetTemplatePacks.firstWhere((p) => p.id == 'mpesa_ke');

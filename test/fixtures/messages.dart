@@ -72,7 +72,7 @@ final messageFixtures = <MessageFixture>[
     id: 'coop',
     name: 'Co-op transfer',
     direction: TemplateDirection.spent,
-    sample: coopWarning + 'Ref:AC4368F03026: Dear MORRIS, MPESA transfer of KES 500 to MORRIS KINYUA NJUGUNA-0743230001 at 28-09-2026 11:03 PM was successful.MPESA Ref:UIS9P8GJV5.',
+    sample: '${coopWarning}Ref:AC4368F03026: Dear MORRIS, MPESA transfer of KES 500 to MORRIS KINYUA NJUGUNA-0743230001 at 28-09-2026 11:03 PM was successful.MPESA Ref:UIS9P8GJV5.',
     labels: [
       (TemplateFieldType.code, 'Ref:AC4368F03026'),
       (TemplateFieldType.amount, 'KES 500'),
@@ -80,7 +80,7 @@ final messageFixtures = <MessageFixture>[
       (TemplateFieldType.date, '28-09-2026 11:03 PM'),
     ],
     expectedForSample: Expected(type: TxType.spent, amountMinor: 50000, person: 'MORRIS KINYUA NJUGUNA-0743230001', code: 'Ref:AC4368F03026', date: DateTime(2026, 9, 28, 23, 3)),
-    second: coopWarning + 'Ref:ZX9911223344: Dear MORRIS, MPESA transfer of KES 1,250 to JANE WANJIKU MWANGI-0711000222 at 05-10-2026 09:15 AM was successful.MPESA Ref:QWE1R2T3Y4.',
+    second: '${coopWarning}Ref:ZX9911223344: Dear MORRIS, MPESA transfer of KES 1,250 to JANE WANJIKU MWANGI-0711000222 at 05-10-2026 09:15 AM was successful.MPESA Ref:QWE1R2T3Y4.',
     expectedForSecond: Expected(type: TxType.spent, amountMinor: 125000, person: 'JANE WANJIKU MWANGI-0711000222', code: 'Ref:ZX9911223344', date: DateTime(2026, 10, 5, 9, 15)),
   ),
   MessageFixture(

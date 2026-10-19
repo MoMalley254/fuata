@@ -7,7 +7,6 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
 import '../../domain/models/limit_rule.dart';
-import '../../domain/models/money.dart';
 import '../../domain/models/unit.dart';
 import '../../routing/routes.dart';
 import '../../widgets/activity/empty_activity.dart';

@@ -15,7 +15,6 @@
 import '../models/limit_rule.dart';
 import '../models/money.dart';
 import '../models/settings.dart';
-import '../models/transaction.dart';
 import '../models/unit.dart';
 import '../repositories/repositories.dart';
 import 'ledger.dart';

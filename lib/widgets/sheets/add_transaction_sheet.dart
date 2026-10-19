@@ -7,7 +7,6 @@ import 'package:fuata/widgets/provider_error_card.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
-import '../../domain/models/category.dart';
 import '../../domain/models/money.dart';
 import '../../domain/models/transaction.dart';
 import '../../routing/routes.dart';

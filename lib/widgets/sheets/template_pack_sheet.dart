@@ -97,7 +97,6 @@ class _TemplatePackSheetState extends ConsumerState<TemplatePackSheet> {
         _error = 'Saving took too long. Nothing was written — please try again.';
       });
     } catch (e) {
-      print('Unable to save $e');
       if (!mounted) return;
       setState(() {
         _importing = false;

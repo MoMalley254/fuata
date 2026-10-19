@@ -138,7 +138,7 @@ final currentSettingsProvider = Provider<AppSettings>((ref) {
 /// day is it" — Home, the banner, the alerts, the widget, Summary — rolls
 /// over without the person doing anything (issue #107).
 ///
-/// A Notifier rather than a StreamProvider<void>: a stream yielding `null`
+/// A Notifier rather than a StreamProvider: a stream yielding `null`
 /// emits an equal `AsyncData<void>` every time, and Riverpod's default
 /// `==` comparison means only the first tick would notify watchers. An
 /// incrementing int is always a new value.

@@ -121,7 +121,7 @@ class SettingsScreen extends ConsumerWidget {
               title: 'Outings',
               subtitle: outingsCount == 0
                   ? 'A temporary budget for a trip or a weekend'
-                  : '${outingsCount == 1 ? '1 outing' : '$outingsCount outings'}',
+                  : outingsCount == 1 ? '1 outing' : '$outingsCount outings',
               onTap: () => context.push(Routes.outingsPath),
             ),
             const SizedBox(height: AppSpacing.sm,),

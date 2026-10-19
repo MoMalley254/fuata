@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 
-import '../../domain/logic/onboarding.dart';
 import '../../domain/models/money.dart';
 import '../../domain/models/unit.dart';
 import '../../ui/theme/app_colors.dart';

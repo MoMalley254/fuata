@@ -92,8 +92,6 @@ class _BannerSetupScreenState extends ConsumerState<BannerSetupScreen> {
       redacted: s.amountsHidden || (_lockScreen && s.redactedLockScreenBanner),
     );
 
-    final allUnits = s.bannerUnitIds.isEmpty;
-
     return Scaffold(
       appBar: AppBar(title: const Text('Banner')),
       body: SafeArea(

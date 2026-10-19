@@ -12,7 +12,6 @@ import '../../routing/routes.dart';
 import '../../widgets/activity/grouped_list.dart';
 import '../../widgets/amount_text.dart';
 import '../../widgets/home/week_peek.dart';
-import '../../widgets/personalization/amount_visibility_toggle.dart';
 import '../../widgets/provider_error_card.dart';
 import '../../widgets/sheets/add_transaction_sheet.dart';
 import '../../widgets/sheets/edit_unit_sheet.dart';
@@ -209,20 +208,6 @@ class HomeContent extends StatelessWidget {
       ],
     );
   }
-
-  String _friendlyTime(DateTime t) {
-    final now = DateTime.now();
-    final isToday =
-        t.year == now.year && t.month == now.month && t.day == now.day;
-    if (isToday) return DateFormat('h:mm a').format(t);
-    final yesterday = now.subtract(const Duration(days: 1));
-    final isYesterday =
-        t.year == yesterday.year &&
-        t.month == yesterday.month &&
-        t.day == yesterday.day;
-    if (isYesterday) return 'yesterday';
-    return DateFormat('EEE, d MMM').format(t);
-  }
 }
 
 /// design.md's status field rule: Home shows "N waiting to confirm" when
@@ -341,9 +326,14 @@ class HeroSection extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final outing = state.activeOuting;
-    if (outing != null && outing.bannerEnabled && headline == HomeHeadline.leftToday) {
+    if (outing != null &&
+        outing.bannerEnabled &&
+        headline == HomeHeadline.leftToday) {
       return StatusRingCard(
-        remaining: Money(state.effectiveRemaining, outing.currencyCode).majorValue,
+        remaining: Money(
+          state.effectiveRemaining,
+          outing.currencyCode,
+        ).majorValue,
         spent: Money(state.outingSpent, outing.currencyCode).majorValue,
         limit: Money(outing.amountMinor, outing.currencyCode).majorValue,
         status: state.outingStatus,
@@ -531,7 +521,7 @@ class _UnitRowState extends State<UnitRow> {
         buildDefaultDragHandles: false,
         itemCount: _units.length,
         onReorderStart: (_) => HapticFeedback.mediumImpact(),
-        onReorder: _onReorder,
+        onReorderItem: _onReorder,
         // A transparent Material can't cast a shadow, so the lifted card is
         // just nudged larger.
         proxyDecorator: (child, _, _) => Transform.scale(

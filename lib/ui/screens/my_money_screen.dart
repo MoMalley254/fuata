@@ -118,7 +118,7 @@ class _MyMoneyScreenState extends ConsumerState<MyMoneyScreen> {
               // a desktop drag handle for the same corner of the row.
               buildDefaultDragHandles: false,
               onReorderStart: (_) => HapticFeedback.mediumImpact(),
-              onReorder: _onReorder,
+              onReorderItem: _onReorder,
               proxyDecorator: (child, _, _) => Transform.scale(
                 scale: 1.02,
                 child: Material(color: Colors.transparent, child: child),
