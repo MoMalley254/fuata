@@ -7,8 +7,10 @@ import '../../data/db/backup_repository.dart';
 import '../../data/db/drift_repositories.dart';
 import '../../domain/logic/backup_service.dart';
 import '../../domain/logic/ledger.dart';
+import '../../domain/logic/outings.dart';
 import '../../domain/models/category.dart';
 import '../../domain/models/limit_rule.dart';
+import '../../domain/models/outing.dart';
 import '../../domain/models/settings.dart';
 import '../../domain/models/template.dart';
 import '../../domain/models/transaction.dart';
@@ -194,6 +196,15 @@ class HomeState {
   /// the summary it opens read from the same rule (Ledger.spentByDay).
   final List<int> spentByDay;
 
+  /// #30: the outing that's active right now, or null.
+  final Outing? activeOuting;
+  /// Spending in the outing's window, in minor units.
+  final int outingSpent;
+  /// Outing status, or the daily status when no outing is active.
+  final SpendStatus outingStatus;
+  /// The outing's caption ("ends Fri 20:00"), or null when no outing.
+  final String? outingCaption;
+
   const HomeState({
     required this.units,
     required this.balanceByUnit,
@@ -202,6 +213,10 @@ class HomeState {
     required this.status,
     required this.lately,
     this.spentByDay = const [0, 0, 0, 0, 0, 0, 0],
+    this.activeOuting,
+    this.outingSpent = 0,
+    this.outingStatus = SpendStatus.safe,
+    this.outingCaption,
   });
 
   static const empty = HomeState(
@@ -213,6 +228,22 @@ class HomeState {
     lately: [],
   );
 
+  // Effective values: the outing wins when active.
+  SpendStatus get effectiveStatus =>
+      activeOuting != null ? outingStatus : status;
+
+  LimitRule? get effectiveLimit =>
+      activeOuting != null ? activeOuting!.asLimit() : dailyLimit;
+
+  int get effectiveSpent =>
+      activeOuting != null ? outingSpent : spentToday;
+
+  int get effectiveRemaining {
+    if (activeOuting != null) return activeOuting!.amountMinor - outingSpent;
+    if (dailyLimit == null) return 0;
+    return dailyLimit!.amountMinor - spentToday;
+  }
+
   int get leftToday =>
       dailyLimit == null ? 0 : dailyLimit!.amountMinor - spentToday;
 }
@@ -223,24 +254,35 @@ final homeStateProvider = Provider<AsyncValue<HomeState>>((ref) {
   // something else changes (issue #107).
   ref.watch(midnightTickProvider);
   final unitsAsync = ref.watch(unitsProvider);
+  final allUnitsAsync = ref.watch(allUnitsProvider);
   final txAsync = ref.watch(transactionsProvider);
   final limitsAsync = ref.watch(limitsProvider);
+  final outingAsync = ref.watch(outingsProvider);
 
-  if (unitsAsync.isLoading || txAsync.isLoading || limitsAsync.isLoading) {
+  if (unitsAsync.isLoading ||
+      allUnitsAsync.isLoading ||
+      txAsync.isLoading ||
+      limitsAsync.isLoading) {
     return const AsyncValue.loading();
   }
-  final error = unitsAsync.error ?? txAsync.error ?? limitsAsync.error;
+  final error = unitsAsync.error ??
+      allUnitsAsync.error ??
+      txAsync.error ??
+      limitsAsync.error;
   if (error != null) return AsyncValue.error(error, StackTrace.current);
 
   final units = unitsAsync.value ?? [];
+  final allUnits = allUnitsAsync.value ?? [];
   final transactions = txAsync.value ?? [];
   final limits = limitsAsync.value ?? [];
+  final outings = outingAsync.value ?? const <Outing>[];
+
+  final now = DateTime.now();
 
   final balances = {
     for (final u in units) u.id: Ledger.balanceOf(u, transactions),
   };
 
-  final now = DateTime.now();
   final (start, end) = Ledger.todayRange(now);
   final spentToday = Ledger.spentInPeriod(transactions, start, end);
   final spentByDay = Ledger.spentByDay(transactions, now: now);
@@ -259,6 +301,32 @@ final homeStateProvider = Provider<AsyncValue<HomeState>>((ref) {
   final lately = List<MoneyTransaction>.from(transactions)
     ..sort((a, b) => b.occurredAt.compareTo(a.occurredAt));
 
+  // #30: active outing (banner-gated? no — Home hero shows the outing
+  // even if its banner is off; the banner flag only affects the
+  // notification).
+  final activeOuting = Outings.activeFrom(outings, now: now);
+  int outingSpent = 0;
+  SpendStatus outingStatus = SpendStatus.safe;
+  String? outingCaption;
+  if (activeOuting != null) {
+    final currencyByUnit = {
+      for (final u in allUnits) u.id: u.currencyCode,
+    };
+    outingSpent = Outings.spentIn(
+      activeOuting,
+      transactions,
+      currencyByUnit: currencyByUnit,
+    );
+    outingStatus = Outings.statusFor(activeOuting, outingSpent);
+    outingCaption = OutingState(
+      outing: activeOuting,
+      spentMinor: outingSpent,
+      remainingMinor: activeOuting.amountMinor - outingSpent,
+      status: outingStatus,
+      isActive: true,
+    ).caption(now);
+  }
+
   return AsyncValue.data(
     HomeState(
       units: units,
@@ -267,7 +335,11 @@ final homeStateProvider = Provider<AsyncValue<HomeState>>((ref) {
       dailyLimit: dailyLimit,
       status: status,
       lately: lately.take(3).toList(),
-      spentByDay: spentByDay
+      spentByDay: spentByDay,
+      activeOuting: activeOuting,
+      outingSpent: outingSpent,
+      outingStatus: outingStatus,
+      outingCaption: outingCaption,
     ),
   );
 });
@@ -285,6 +357,23 @@ final categoriesProvider = StreamProvider<List<Category>>((ref) {
 /// Same, plus archived — the settings screen.
 final allCategoriesProvider = StreamProvider<List<Category>>((ref) {
   return ref.watch(categoryRepositoryProvider).watchCategoriesIncludingArchived();
+});
+
+final outingRepositoryProvider = Provider<OutingRepository>((ref) {
+  return DriftOutingRepository(ref.watch(appDatabaseProvider));
+});
+
+final outingsProvider = StreamProvider<List<Outing>>((ref) {
+  return ref.watch(outingRepositoryProvider).watchOutings();
+});
+
+/// The outing that's active right now, or null. Recomputed on each
+/// midnight tick so an outing that ends at 23:59 disappears exactly at
+/// midnight without needing a settings write to trigger a rebuild.
+final activeOutingProvider = Provider<Outing?>((ref) {
+  ref.watch(midnightTickProvider);
+  final outings = ref.watch(outingsProvider).value ?? const <Outing>[];
+  return Outings.activeFrom(outings, now: DateTime.now());
 });
 
 extension _FirstOrNull<T> on Iterable<T> {

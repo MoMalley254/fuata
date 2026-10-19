@@ -31,6 +31,13 @@ final bannerSyncProvider = Provider<void>((ref) {
     return;
   }
 
+  // #30: the outing drives the banner only when its own `bannerEnabled`
+  // is true. `bannerEnabled` on the outing is a *per-outing* toggle,
+  // distinct from the app-wide `AppSettings.bannerEnabled` above — the
+  // app-wide switch is a hard gate, the outing switch is a soft one.
+  final outing = home.activeOuting;
+  final useOuting = outing != null && outing.bannerEnabled;
+
   final content = BannerContent.build(
     status: home.status,
     spentToday: home.spentToday,
@@ -42,7 +49,10 @@ final bannerSyncProvider = Provider<void>((ref) {
     selectedUnitIds: settings.bannerUnitIds,
     showProgress: settings.bannerShowProgress,
     showQuickAdd: settings.bannerShowQuickAdd,
-    redacted: false, // see BannerPlatform.show — Android redacts, not us
+    redacted: false,
+    activeOuting: useOuting ? outing : null,
+    outingSpentMinor: useOuting ? home.outingSpent : 0,
+    outingStatus: useOuting ? home.outingStatus : null,
   );
 
   BannerPlatform.instance.show(
