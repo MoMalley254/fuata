@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Privacy Policy · Fuata</title>
+<meta name="description" content="Fuata's privacy policy. What is stored on your phone, what is never touched, and how notification access works.">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header class="site-header">
+  <a class="brand" href="./">Fuata</a>
+  <nav>
+    <a href="./">About</a>
+    <a href="https://github.com/MoMalley254/fuata">Source</a>
+  </nav>
+</header>
+
+<main>
+  <p class="tagline">Privacy policy</p>
+  <h1>Fuata keeps your money private.</h1>
+  <p class="lede">
+    Fuata is a local-first Android money tracker. It has no account, no
+    server, and no internet permission in the version distributed on
+    Google Play. Nothing you type, capture or save in Fuata is sent
+    anywhere by the app.
+  </p>
+
+  <p><strong>Effective date:</strong> 21 October 2026<br>
+     <strong>Last updated:</strong> 21 October 2026</p>
+
+  <h2>Summary for Google Play</h2>
+  <table class="summary">
+    <tr><th>Data collected by the developer</th><td>None. There is no server to send it to.</td></tr>
+    <tr><th>Data shared with third parties</th><td>None.</td></tr>
+    <tr><th>Data stored on your device</th><td>Yes — units, transactions, limits, rules and settings, in a local database inside the app's private storage.</td></tr>
+    <tr><th>Data encrypted</th><td>Yes. Fuata uses SQLCipher for the local database and stores the key in Android Keystore. Scheduled backup files can be passphrase-encrypted.</td></tr>
+    <tr><th>Users can delete their data</th><td>Yes, via Settings &rarr; Privacy &amp; data &rarr; Erase everything. There is nothing to request from us.</td></tr>
+  </table>
+
+  <h2>1. Who we are</h2>
+  <p>
+    Fuata is an independent Android app built by Kinyua Nexus. Questions
+    about this policy should go to
+    <strong><a href="mailto:kinyuanexus@gmail.com">kinyuanexus@gmail.com</a></strong>.
+     <!-- or as an issue on -->
+    <!-- <a href="https://github.com/MoMalley254/fuata/issues">GitHub</a>. -->
+  </p>
+
+  <h2>2. What Fuata does not collect</h2>
+  <ul>
+    <li>No account, email address, or phone number to sign in with.</li>
+    <li>No analytics, crash reports, or telemetry of any kind.</li>
+    <li>No advertising and no third-party SDKs.</li>
+    <li>No access to the network from the release build. The version
+        distributed on Google Play does not request the
+        <code>INTERNET</code> permission.</li>
+  </ul>
+
+  <h2>3. What Fuata stores on your phone</h2>
+  <p>
+    Fuata keeps its own data in a local database inside the app's private
+    storage on your phone. This is:
+  </p>
+  <ul>
+    <li>Units (cash, mobile money, banks, cards) with balances.</li>
+    <li>Transactions (spent, got, moved), including who they were with and when.</li>
+    <li>Limits and alert settings.</li>
+    <li>Categories.</li>
+    <li>Message-reading rules (templates) you build.</li>
+    <li>Settings: your name, accent colour, theme, banner options.</li>
+    <li>Optionally, a short list of unreadable messages, kept only so you
+        can teach Fuata to read them. These are deleted after 14 days or
+        when you dismiss them, whichever comes first.</li>
+  </ul>
+  <p>
+    This data does not leave the phone unless you use one of the export
+    features described in section 5.
+  </p>
+
+  <h2>4. Notification access (optional, off by default)</h2>
+  <p>
+    Fuata can optionally read notifications from apps you pick, in order to
+    catch payments. This is one of Android's most sensitive permissions, so
+    here is exactly what happens:
+  </p>
+  <ul>
+    <li>You choose which apps Fuata may read. Nothing else is read —
+        notifications from any other app are dropped the moment they arrive,
+        before Fuata sees their text.</li>
+    <li>Fuata reads the notification text only from those apps.</li>
+    <li>If a notification looks like a payment, Fuata keeps it so you can
+        review it. If it doesn't, Fuata drops it immediately and does not
+        store it.</li>
+    <li>One-time codes (OTPs, PINs, verification codes) are always dropped,
+        even when the surrounding message also looks financial.</li>
+    <li>You can switch this off at any time in Fuata's settings, or revoke
+        notification access in Android's own Settings &rarr; Notification
+        access.</li>
+  </ul>
+
+  <h2>5. Backups</h2>
+  <p>
+    You can export everything as a single JSON file to a location you
+    choose — for example, Google Drive, a USB stick, or your Downloads
+    folder. Fuata does not send this file anywhere; it writes it to the
+    folder you picked using Android's own system file picker.
+  </p>
+  <p>
+    Scheduled backups encrypt the file before writing it, using a
+    passphrase you choose. Fuata does not store that passphrase — if you
+    lose it, the file cannot be opened.
+  </p>
+
+  <h2>6. App lock</h2>
+  <p>
+    If you turn on App lock, Fuata asks Android to unlock the device
+    before showing your money. It uses Android's own biometric and
+    screen-lock mechanisms; Fuata does not store, see, or transmit your
+    fingerprint, face data, or PIN.
+  </p>
+
+  <h2>7. Children's privacy</h2>
+  <p>
+    Fuata does not collect data from anyone, including children. It is
+    designed for adults managing their own money. It does not knowingly
+    handle any information about children.
+  </p>
+
+  <h2>8. Your rights</h2>
+  <p>
+    Because Fuata holds no data about you on any server, there is nothing
+    to request, export, or delete from us. Everything is on your phone and
+    under your control:
+  </p>
+  <ul>
+    <li>To see what is stored, open Fuata.</li>
+    <li>To take it with you, use Settings &rarr; Privacy &amp; data &rarr;
+        Back up &amp; restore.</li>
+    <li>To delete it, use Settings &rarr; Privacy &amp; data &rarr; Erase
+        everything. That wipes every unit, transaction, rule and setting
+        from the phone.</li>
+  </ul>
+
+  <h2>9. Changes to this policy</h2>
+  <p>
+    If Fuata changes how it handles data — for example, if a future
+    version adds an optional sync feature — this page will be updated
+    before that version is released, and the effective date will change.
+    The policy will keep describing the version of Fuata that is
+    currently on Google Play.
+  </p>
+
+  <h2>10. Contact</h2>
+  <p>
+    Questions about this policy? Email
+    <strong><a href="mailto:kinyuanexus@gmail.com">kinyuanexus@gmail.com</a></strong>, or open an issue at
+    <a href="https://github.com/MoMalley254/fuata/issues">github.com/MoMalley254/fuata/issues</a>.
+  </p>
+</main>
+
+<footer class="site-footer">
+  <p>
+    Fuata · <a href="./">About</a> ·
+    <a href="https://github.com/MoMalley254/fuata">Source</a>
+  </p>
+</footer>
+</body>
+</html>

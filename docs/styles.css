@@ -1,0 +1,184 @@
+/* Fuata site — a small static mirror of the app's visual language.
+ * Tokens copied from lib/ui/theme/app_colors.dart and app_spacing.dart;
+ * Plus Jakarta Sans loaded from Google Fonts, the same family the app
+ * bundles as an asset. No build step: edit, push, GitHub Pages serves it. */
+
+:root {
+  --fuata-bg:            #FBF8F3;
+  --fuata-surface:       #FFFFFF;
+  --fuata-container:     #F6F2EA;
+  --fuata-on-surface:    #1B1C1A;
+  --fuata-on-variant:    #3E4948;
+  --fuata-primary:       #006762;
+  --fuata-primary-soft:  rgba(0, 103, 98, 0.10);
+  --fuata-outline:       #BDC9C7;
+  --fuata-outline-soft:  rgba(189, 201, 199, 0.35);
+  --fuata-radius:        20px;
+  --fuata-max-width:     720px;
+  --fuata-gap:           1.25rem;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --fuata-bg:           #14161A;
+    --fuata-surface:      #1F2329;
+    --fuata-container:    #282C34;
+    --fuata-on-surface:   #F1F3F7;
+    --fuata-on-variant:   #9DA6B5;
+    --fuata-primary:      #57F1DB;
+    --fuata-primary-soft: rgba(87, 241, 219, 0.15);
+    --fuata-outline:      #3C4A46;
+    --fuata-outline-soft: rgba(60, 74, 70, 0.7);
+  }
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  padding: 2rem var(--fuata-gap);
+  font-family: 'Plus Jakarta Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  font-size: 16px;
+  line-height: 1.6;
+  color: var(--fuata-on-surface);
+  background: var(--fuata-bg);
+}
+
+main { max-width: var(--fuata-max-width); margin: 0 auto; }
+
+header.site-header {
+  max-width: var(--fuata-max-width);
+  margin: 0 auto 2.5rem;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+header.site-header .brand {
+  font-weight: 700;
+  font-size: 1.125rem;
+  color: var(--fuata-on-surface);
+  text-decoration: none;
+}
+
+header.site-header nav {
+  margin-left: auto;
+  display: flex;
+  gap: 1rem;
+  font-size: 0.875rem;
+}
+
+header.site-header nav a {
+  color: var(--fuata-on-variant);
+  text-decoration: none;
+}
+
+header.site-header nav a:hover,
+header.site-header nav a:focus {
+  color: var(--fuata-primary);
+  text-decoration: underline;
+}
+
+h1 {
+  font-size: 2rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin: 0 0 0.5rem;
+  line-height: 1.15;
+}
+
+h2 {
+  font-size: 1.25rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  margin: 2.5rem 0 0.75rem;
+}
+
+h3 {
+  font-size: 1rem;
+  font-weight: 600;
+  margin: 1.75rem 0 0.5rem;
+}
+
+p, ul, ol { margin: 0 0 1rem; }
+ul, ol { padding-left: 1.25rem; }
+li { margin: 0.35rem 0; }
+
+a {
+  color: var(--fuata-primary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+a:hover, a:focus { text-decoration: none; }
+
+.lede {
+  font-size: 1.125rem;
+  color: var(--fuata-on-variant);
+  margin: 0 0 1.5rem;
+}
+
+.card {
+  background: var(--fuata-surface);
+  border: 1px solid var(--fuata-outline-soft);
+  border-radius: var(--fuata-radius);
+  padding: 1.25rem;
+  margin: 1.25rem 0;
+}
+
+.card.note {
+  background: var(--fuata-primary-soft);
+  border-color: transparent;
+}
+
+.tagline {
+  display: inline-block;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--fuata-primary);
+  margin: 0 0 0.5rem;
+}
+
+table.summary {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1rem 0 1.5rem;
+  font-size: 0.9375rem;
+}
+
+table.summary th,
+table.summary td {
+  text-align: left;
+  padding: 0.6rem 0.75rem;
+  border-bottom: 1px solid var(--fuata-outline-soft);
+  vertical-align: top;
+}
+
+table.summary th {
+  font-weight: 600;
+  color: var(--fuata-on-surface);
+  width: 40%;
+}
+
+table.summary td { color: var(--fuata-on-variant); }
+
+footer.site-footer {
+  max-width: var(--fuata-max-width);
+  margin: 3rem auto 0;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--fuata-outline-soft);
+  font-size: 0.875rem;
+  color: var(--fuata-on-variant);
+}
+
+footer.site-footer a { color: var(--fuata-on-variant); }
+
+@media (max-width: 480px) {
+  body { padding: 1.25rem 1rem; }
+  h1 { font-size: 1.625rem; }
+  h2 { font-size: 1.125rem; }
+  table.summary th { width: 45%; }
+}
