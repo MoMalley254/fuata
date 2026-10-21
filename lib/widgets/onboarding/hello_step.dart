@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../ui/theme/app_colors.dart';
 import '../../ui/theme/app_spacing.dart';
 import '../../ui/theme/app_typography.dart';
+import '../contact_widget.dart';
 import 'step_frame.dart';
 
 /// Step 1 — welcome (F12). Nothing to fill in, nothing to decide: the
@@ -53,6 +54,8 @@ class HelloStep extends StatelessWidget {
             icon: Icons.tune_rounded,
             text: 'You can change it all later',
           ),
+          SizedBox(height: AppSpacing.md),
+          Contact(),
         ],
       ),
     );
@@ -79,3 +82,4 @@ class _LittleLine extends StatelessWidget {
     );
   }
 }
+
