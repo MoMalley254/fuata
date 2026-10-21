@@ -1,4 +1,4 @@
-# Issue status (generated 2026-10-19T11:11Z)
+# Issue status (generated 2026-10-21T11:10Z)
 
 Source of truth: GitHub. Regenerate with `scripts/refresh-issue-status.sh`.
 
