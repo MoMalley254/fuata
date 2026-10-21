@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:fuata/widgets/contact_widget.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../domain/models/limit_rule.dart';
@@ -191,6 +192,8 @@ class SettingsScreen extends ConsumerWidget {
               subtitle: 'Lock-screen redaction, back up & restore',
               onTap: () => context.push(Routes.settingsPrivacyPath),
             ),
+            const SizedBox(height: AppSpacing.md,),
+            Contact(),
           ],
         ),
       ),
