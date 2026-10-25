@@ -56,31 +56,41 @@ PackTemplate _build({
 // preset test. Kept private so callers don't reach for them by accident —
 // the *pack* is the public surface, not the sample.
 
+
+//Mpesa messages updated 25/10/26
+
 const _mpesaSent =
-    'UIS9P8GJV5 Confirmed. Ksh500.00 sent to JOHN DOE 0712345678 on '
-    '28/9/26 at 11:03 PM. New M-PESA balance is Ksh1,234.56. '
-    'Transaction cost, Ksh7.00.';
+    'UJM9PBCOXY Confirmed. Ksh50.00 sent to JOHN DOE 0712345678 on '
+    '22/10/26 at 7:34 PM. New M-PESA balance is Ksh0.00. Transaction '
+    'cost, Ksh0.00.  Amount you can transact within the day is 499,700.00. '
+    'See all your balances now https://saf.cx/iqIzU';
 
 const _mpesaReceived =
-    'UIS9P8GK01 Confirmed. You have received Ksh1,000.00 from JANE DOE '
-    '0722000000 on 28/9/26 at 9:15 AM. New M-PESA balance is Ksh2,234.56.';
+    'UJPEFB33DA Confirmed.You have received Ksh50.00 from JOHN DOE '
+    '0712345678 on 25/10/26 at 10:16 AM  New M-PESA balance is '
+    'Ksh50.00. Invest & earn daily interest with ZIIDI on '
+    'https://saf.cx/cF6ir';
 
 const _mpesaPaybill =
-    'UIS9P8GK02 Confirmed. Ksh1,200.00 sent to KPLC PREPAID for account '
-    '12345678 on 28/9/26 at 10:00 AM. New M-PESA balance is Ksh1,034.56. '
-    'Transaction cost, Ksh0.00.';
+    'UJO9PBMZKR Confirmed. Ksh50.00 sent to ZURI GENESIS CO LTD for '
+    'account 289 on 24/10/26 at 10:58 PM New M-PESA balance is Ksh0.00. '
+    'Transaction cost, Ksh0.00.Amount you can transact within the day is '
+    '499,850.00. See all your balances now https://saf.cx/kWQpy';
 
 const _mpesaTill =
-    'UIS9P8GK03 Confirmed. Ksh350.00 paid to SUPERMARKET LTD. on '
-    '28/9/26 at 1:12 PM. New M-PESA balance is Ksh684.56.';
+    'UJP69BDHKE Confirmed. Ksh80.00 paid to AHADI WIRELESS-KONNECT '
+    'INTERNET. on 25/10/26 at 1:44 AM.New M-PESA balance is Ksh186.24. '
+    'Transaction cost, Ksh0.00. Amount you can transact within the day is '
+    '499,920.00. See all your balances now https://saf.cx/kWQpy';
 
 const _mpesaAgent =
     'UIS9P8GK04 Confirmed. on 28/9/26 at 4:10 PM Withdraw Ksh2,000.00 '
     'from 123456 - AGENT NAME New M-PESA balance is Ksh500.00.';
 
 const _fuliza =
-    'UIS9P8GK05 Confirmed. Fuliza M-PESA amount is Ksh100.00. Interest '
-    'charged Ksh1.00. Total Fuliza balance is Ksh400.00.';
+    'UJP9PBNNZ3\n Confirmed. Ksh 50.00 from your M-PESA has been used to '
+    'partially pay your outstanding Fuliza M-PESA. Your available Fuliza '
+    'M-PESA limit is Ksh 66.22. Your M-PESA balance is 0.00.';
 
 const _airtel =
     'Txn ID XYZ123. You have sent KES 500 to PETER OTIENO 0733445566. '
@@ -116,12 +126,12 @@ final presetTemplatePacks = <TemplatePack>[
         direction: TemplateDirection.spent,
         sample: _mpesaSent,
         labels: const [
-          ('UIS9P8GJV5', TemplateFieldType.code),
-          ('Ksh500.00', TemplateFieldType.amount),
+          ('UJM9PBCOXY', TemplateFieldType.code),
+          ('Ksh50.00', TemplateFieldType.amount),
           ('JOHN DOE 0712345678', TemplateFieldType.person),
-          ('28/9/26 at 11:03 PM', TemplateFieldType.date),
-          ('Ksh1,234.56', TemplateFieldType.balance),
-          ('Ksh7.00', TemplateFieldType.fee),
+          ('22/10/26 at 7:34 PM', TemplateFieldType.date),
+          ('Ksh0.00', TemplateFieldType.balance),
+          ('Ksh0.00', TemplateFieldType.fee),
         ],
       ),
       _build(
@@ -129,11 +139,11 @@ final presetTemplatePacks = <TemplatePack>[
         direction: TemplateDirection.either,
         sample: _mpesaReceived,
         labels: const [
-          ('UIS9P8GK01', TemplateFieldType.code),
-          ('Ksh1,000.00', TemplateFieldType.amount),
-          ('JANE DOE 0722000000', TemplateFieldType.person),
-          ('28/9/26 at 9:15 AM', TemplateFieldType.date),
-          ('Ksh2,234.56', TemplateFieldType.balance),
+          ('UJPEFB33DA', TemplateFieldType.code),
+          ('Ksh50.00', TemplateFieldType.amount),
+          ('JOHN DOE 0712345678', TemplateFieldType.person),
+          ('25/10/26 at 10:16 AM', TemplateFieldType.date),
+          ('Ksh50.00', TemplateFieldType.balance),
         ],
       ),
       _build(
@@ -141,11 +151,11 @@ final presetTemplatePacks = <TemplatePack>[
         direction: TemplateDirection.spent,
         sample: _mpesaPaybill,
         labels: const [
-          ('UIS9P8GK02', TemplateFieldType.code),
-          ('Ksh1,200.00', TemplateFieldType.amount),
-          ('KPLC PREPAID', TemplateFieldType.person),
-          ('28/9/26 at 10:00 AM', TemplateFieldType.date),
-          ('Ksh1,034.56', TemplateFieldType.balance),
+          ('UJO9PBMZKR', TemplateFieldType.code),
+          ('Ksh50.00', TemplateFieldType.amount),
+          ('ZURI GENESIS CO LTD', TemplateFieldType.person),
+          ('24/10/26 at 10:58 PM', TemplateFieldType.date),
+          ('Ksh0.00', TemplateFieldType.balance),
           ('Ksh0.00', TemplateFieldType.fee),
         ],
       ),
@@ -154,11 +164,12 @@ final presetTemplatePacks = <TemplatePack>[
         direction: TemplateDirection.spent,
         sample: _mpesaTill,
         labels: const [
-          ('UIS9P8GK03', TemplateFieldType.code),
-          ('Ksh350.00', TemplateFieldType.amount),
-          ('SUPERMARKET LTD', TemplateFieldType.person),
-          ('28/9/26 at 1:12 PM', TemplateFieldType.date),
-          ('Ksh684.56', TemplateFieldType.balance),
+          ('UJP69BDHKE', TemplateFieldType.code),
+          ('Ksh80.00', TemplateFieldType.amount),
+          ('AHADI WIRELESS-KONNECT INTERNET', TemplateFieldType.person),
+          ('25/10/26 at 1:44 AM', TemplateFieldType.date),
+          ('Ksh186.24', TemplateFieldType.balance),
+          ('Ksh0.00', TemplateFieldType.fee),
         ],
       ),
       _build(
@@ -178,9 +189,9 @@ final presetTemplatePacks = <TemplatePack>[
         direction: TemplateDirection.spent,
         sample: _fuliza,
         labels: const [
-          ('UIS9P8GK05', TemplateFieldType.code),
-          ('Ksh100.00', TemplateFieldType.amount),
-          ('Ksh1.00', TemplateFieldType.fee),
+          ('UJP9PBNNZ3', TemplateFieldType.code),
+          ('Ksh 50.00', TemplateFieldType.amount),
+          ('0.00', TemplateFieldType.balance),
         ],
       ),
     ],
