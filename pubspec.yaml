@@ -1,8 +1,7 @@
 name: fuata
-description: "A new Flutter project."
-
+description: "Follow your money. A private, local-first money tracker for cash, mobile money, banks and cards. No account, no server, no internet permission — everything stays on your phone."
 publish_to: 'none'
-version: 1.0.0+1
+version: 1.0.0+2
 
 environment:
   sdk: ^3.13.2
