@@ -110,6 +110,160 @@ void main() {
     });
   });
 
+  // Issue #108. The range helpers must (a) read the *local* calendar day even
+  // when handed a UTC `now`, and (b) build their end with calendar arithmetic,
+  // not a fixed 24h/168h offset. The assertions are written to hold in any
+  // runner timezone; the UTC and DST cases only bite where the zone makes them
+  // bite, so also run:
+  //   TZ=Africa/Nairobi flutter test test/domain/ledger_test.dart
+  //   TZ=America/New_York flutter test test/domain/ledger_test.dart
+  //   TZ=Pacific/Auckland flutter test test/domain/ledger_test.dart
+  group('Ledger ranges (#108)', () {
+    int spentIn((DateTime, DateTime) r, List<MoneyTransaction> all) =>
+        Ledger.spentInPeriod(all, r.$1, r.$2);
+
+    test('R-01: a UTC now gives the same ranges as its local equivalent', () {
+      // 23:00 UTC on the 14th is 02:00 on the 15th in EAT.
+      final utc = DateTime.utc(2026, 10, 14, 23, 0);
+      expect(Ledger.todayRange(utc), Ledger.todayRange(utc.toLocal()));
+      expect(Ledger.weekRange(utc), Ledger.weekRange(utc.toLocal()));
+      expect(Ledger.monthRange(utc), Ledger.monthRange(utc.toLocal()));
+    });
+
+    test('R-02: todayRange starts at the local midnight of the local day', () {
+      final utc = DateTime.utc(2026, 10, 14, 23, 0);
+      final local = utc.toLocal();
+      final (start, end) = Ledger.todayRange(utc);
+      expect(start, DateTime(local.year, local.month, local.day));
+      expect(end, DateTime(local.year, local.month, local.day + 1));
+      expect(start.isUtc, isFalse);
+    });
+
+    test('R-03: yesterday evening does not count against today', () {
+      final at = DateTime(2026, 10, 15, 9, 0);
+      final all = [
+        tx(amountMinor: -111, occurredAt: DateTime(2026, 10, 14, 23, 59)),
+        tx(amountMinor: -222, occurredAt: DateTime(2026, 10, 15, 0, 0)),
+        tx(amountMinor: -333, occurredAt: DateTime(2026, 10, 15, 23, 59)),
+        tx(amountMinor: -444, occurredAt: DateTime(2026, 10, 16, 0, 0)),
+      ];
+      expect(spentIn(Ledger.todayRange(at), all), 222 + 333);
+    });
+
+    test('R-04: the same holds when now and occurredAt are both UTC', () {
+      // Build the instants from local wall-clock times, then hand them over
+      // as UTC — the shape a backup import or the parser produces. 02:00
+      // local is still the previous day in UTC for any zone east of it, which
+      // is exactly where the old code picked the wrong day.
+      final nowUtc = DateTime(2026, 10, 15, 2, 0).toUtc();
+      final all = [
+        tx(
+          amountMinor: -111,
+          occurredAt: DateTime(2026, 10, 14, 23, 59).toUtc(),
+        ),
+        tx(
+          amountMinor: -222,
+          occurredAt: DateTime(2026, 10, 15, 0, 0).toUtc(),
+        ),
+        tx(
+          amountMinor: -333,
+          occurredAt: DateTime(2026, 10, 16, 0, 0).toUtc(),
+        ),
+      ];
+      expect(spentIn(Ledger.todayRange(nowUtc), all), 222);
+    });
+
+    test('R-05: weekRange is Monday-start; Sunday night stays in its week', () {
+      // 2026-10-25 is a Sunday, 2026-10-26 a Monday.
+      final sunday = DateTime(2026, 10, 25, 23, 30);
+      final (s1, e1) = Ledger.weekRange(sunday);
+      expect(s1, DateTime(2026, 10, 19));
+      expect(e1, DateTime(2026, 10, 26));
+
+      final monday = DateTime(2026, 10, 26, 0, 0);
+      final (s2, e2) = Ledger.weekRange(monday);
+      expect(s2, DateTime(2026, 10, 26));
+      expect(e2, DateTime(2026, 11, 2));
+
+      final all = [
+        tx(amountMinor: -100, occurredAt: DateTime(2026, 10, 25, 23, 59)),
+        tx(amountMinor: -200, occurredAt: DateTime(2026, 10, 26, 0, 0)),
+      ];
+      expect(spentIn((s1, e1), all), 100);
+      expect(spentIn((s2, e2), all), 200);
+    });
+
+    test('R-06: a UTC now near a week boundary picks the local week', () {
+      // 22:00 UTC on Sunday the 25th is 01:00 Monday the 26th in EAT.
+      final utc = DateTime.utc(2026, 10, 25, 22, 0);
+      final local = utc.toLocal();
+      final (start, end) = Ledger.weekRange(utc);
+      expect(start.weekday, DateTime.monday);
+      expect(start.isAfter(local), isFalse);
+      expect(end.isAfter(local), isTrue);
+      expect(end.difference(start).inHours, inInclusiveRange(167, 169));
+    });
+
+    test('R-07: monthRange rolls over the year and is local-first', () {
+      final (s, e) = Ledger.monthRange(DateTime(2026, 12, 5, 12, 0));
+      expect(s, DateTime(2026, 12, 1));
+      expect(e, DateTime(2027, 1, 1));
+
+      // 22:00 UTC on 31 Oct is already 1 Nov in EAT.
+      final utc = DateTime.utc(2026, 10, 31, 22, 0);
+      expect(Ledger.monthRange(utc), Ledger.monthRange(utc.toLocal()));
+    });
+
+    test('R-08: month edges are half-open on local midnight', () {
+      final at = DateTime(2026, 10, 15, 9, 0);
+      final all = [
+        tx(amountMinor: -100, occurredAt: DateTime(2026, 9, 30, 23, 59)),
+        tx(amountMinor: -200, occurredAt: DateTime(2026, 10, 1, 0, 0)),
+        tx(amountMinor: -300, occurredAt: DateTime(2026, 10, 31, 23, 59)),
+        tx(amountMinor: -400, occurredAt: DateTime(2026, 11, 1, 0, 0)),
+      ];
+      expect(spentIn(Ledger.monthRange(at), all), 200 + 300);
+    });
+
+    // DST cases. They pass trivially in a zone without DST (Nairobi, UTC) and
+    // fail on the old `start + Duration(...)` code under TZ=America/New_York.
+    test('R-09: a 25-hour day (US fall-back) keeps its last hour', () {
+      final at = DateTime(2026, 11, 1, 12, 0);
+      final all = [tx(amountMinor: -500, occurredAt: DateTime(2026, 11, 1, 23, 30))];
+      expect(spentIn(Ledger.todayRange(at), all), 500);
+      expect(Ledger.todayRange(at).$2, DateTime(2026, 11, 2));
+    });
+
+    test('R-10: a 23-hour day (US spring-forward) does not leak into the next', () {
+      final at = DateTime(2026, 3, 8, 12, 0);
+      final all = [tx(amountMinor: -500, occurredAt: DateTime(2026, 3, 9, 0, 30))];
+      expect(spentIn(Ledger.todayRange(at), all), 0);
+      expect(Ledger.todayRange(at).$2, DateTime(2026, 3, 9));
+    });
+
+    test('R-11: weeks containing a DST change still end on Monday 00:00', () {
+      // Fall-back week: Mon 26 Oct – Sun 1 Nov 2026.
+      final fall = Ledger.weekRange(DateTime(2026, 10, 28, 12, 0));
+      expect(fall.$2, DateTime(2026, 11, 2));
+      expect(
+        spentIn(fall, [
+          tx(amountMinor: -700, occurredAt: DateTime(2026, 11, 1, 23, 30)),
+        ]),
+        700,
+      );
+
+      // Spring-forward week: Mon 2 Mar – Sun 8 Mar 2026.
+      final spring = Ledger.weekRange(DateTime(2026, 3, 4, 12, 0));
+      expect(spring.$2, DateTime(2026, 3, 9));
+      expect(
+        spentIn(spring, [
+          tx(amountMinor: -700, occurredAt: DateTime(2026, 3, 9, 0, 30)),
+        ]),
+        0,
+      );
+    });
+  });
+
   group('Ledger.spentByDay (#82)', () {
     test('S-20: seven days, oldest first, today last', () {
       final at = DateTime(2026, 9, 30, 15, 0); // Wed
