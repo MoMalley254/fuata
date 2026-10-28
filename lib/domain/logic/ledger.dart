@@ -53,22 +53,39 @@ class Ledger {
   }
 
   /// [start, end) for "today" in local time.
+  ///
+  /// Issue #108: [now] is normalised with `.toLocal()` before its calendar
+  /// fields are read. `DateTime(y, m, d)` always builds a *local* midnight,
+  /// so feeding it a UTC `now`'s `.year/.month/.day` picked the UTC calendar
+  /// day — in EAT (UTC+3) that is the wrong day between 00:00 and 03:00.
+  ///
+  /// [end] is built with the calendar constructor, not `start + 24h`: a
+  /// local day is 23 or 25 hours long across a DST change, and a fixed
+  /// 24-hour offset would clip the last hour or leak into the next day.
   static (DateTime, DateTime) todayRange(DateTime now) {
-    final start = DateTime(now.year, now.month, now.day);
-    return (start, start.add(const Duration(days: 1)));
+    final local = now.toLocal();
+    final start = DateTime(local.year, local.month, local.day);
+    return (start, DateTime(start.year, start.month, start.day + 1));
   }
 
   /// [start, end) for the current calendar week, Monday-start.
+  ///
+  /// Same local-day normalisation and calendar arithmetic as [todayRange]
+  /// (#108); a week containing a DST change is not exactly 168 hours.
   static (DateTime, DateTime) weekRange(DateTime now) {
-    final startOfDay = DateTime(now.year, now.month, now.day);
-    final start = startOfDay.subtract(Duration(days: startOfDay.weekday - 1));
-    return (start, start.add(const Duration(days: 7)));
+    final local = now.toLocal();
+    final start = DateTime(local.year, local.month, local.day - (local.weekday - 1));
+    return (start, DateTime(start.year, start.month, start.day + 7));
   }
 
   /// [start, end) for the current calendar month.
+  ///
+  /// [now] is normalised to local first (#108); the constructor already
+  /// rolls month 13 over into January of the next year.
   static (DateTime, DateTime) monthRange(DateTime now) {
-    final start = DateTime(now.year, now.month, 1);
-    final end = DateTime(now.year, now.month + 1, 1);
+    final local = now.toLocal();
+    final start = DateTime(local.year, local.month, 1);
+    final end = DateTime(local.year, local.month + 1, 1);
     return (start, end);
   }
 
