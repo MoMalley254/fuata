@@ -96,7 +96,6 @@ class AppDatabase extends _$AppDatabase {
       );
     }
   }
-
 }
 
 LazyDatabase _openConnection() {
@@ -113,14 +112,14 @@ LazyDatabase _openConnection() {
     final key = await DbKey.getOrCreate();
 
     return NativeDatabase.createInBackground(
-        file,
+      file,
       setup: (rawDb) {
         // `x'...'` tells SQLCipher this is a raw hex key, not a passphrase
         // to run through PBKDF2. Raw keys are faster and unambiguous.
         rawDb.execute("PRAGMA key = \"x'$key'\";");
         // Verify the key is correct now, rather than on the first query.
         rawDb.execute('SELECT count(*) FROM sqlite_master;');
-      }
+      },
     );
   });
 }

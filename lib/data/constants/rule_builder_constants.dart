@@ -19,7 +19,12 @@ String fieldName(TemplateFieldType type) => switch (type) {
   TemplateFieldType.person => 'Payee',
   TemplateFieldType.balance => 'Balance',
   TemplateFieldType.fee => 'Fee',
+  TemplateFieldType.custom => 'Custom',
 };
+
+String _spanLabel(LabeledSpan span) => span.type == TemplateFieldType.custom
+    ? (span.customName ?? 'Custom')
+    : fieldName(span.type);
 
 /// One whitespace-delimited run of the sample, with its offsets so a
 /// label span can be built from token indices.
@@ -50,7 +55,7 @@ String describePattern({
   for (final span in sorted) {
     if (span.start < cursor) continue; // defensive: overlapping span
     buffer.write(sampleText.substring(cursor, span.start));
-    buffer.write('xxxx(${fieldName(span.type)})');
+    buffer.write('xxxx(${_spanLabel(span)})');
     cursor = span.end;
   }
   return buffer.toString();

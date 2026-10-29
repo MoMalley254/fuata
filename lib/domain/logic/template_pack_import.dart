@@ -105,17 +105,20 @@ class TemplatePackImporter {
     var written = 0;
     for (final t in plan.toAdd) {
       final id = 'tpl_${clock().microsecondsSinceEpoch}_$written';
-      await repo.saveTemplate(CaptureTemplate(
-        id: id,
-        unitId: plan.targetUnitId,
-        captureSourceId: suggestedSourceId,
-        name: t.name,
-        direction: t.direction,
-        pattern: t.pattern,
-        fieldMap: t.fieldMap,
-        sampleText: t.sampleText,
-        enabled: t.enabled,
-      ));
+      await repo.saveTemplate(
+        CaptureTemplate(
+          id: id,
+          unitId: plan.targetUnitId,
+          captureSourceId: suggestedSourceId,
+          name: t.name,
+          direction: t.direction,
+          pattern: t.pattern,
+          fieldMap: t.fieldMap,
+          sampleText: t.sampleText,
+          enabled: t.enabled,
+          customFieldNames: t.customFieldNames,
+        ),
+      );
       written++;
     }
     return written;

@@ -85,11 +85,11 @@ class TemplatePackCodec {
           'name': t.name,
           'direction': t.direction.name,
           'pattern': t.pattern,
-          'fieldMap': {
-            for (final e in t.fieldMap.entries) e.key: e.value.name,
-          },
+          'fieldMap': {for (final e in t.fieldMap.entries) e.key: e.value.name},
           'sampleText': t.sampleText,
           'enabled': t.enabled,
+          if (t.customFieldNames.isNotEmpty)
+            'customFieldNames': t.customFieldNames,
         },
     ],
   };
@@ -103,7 +103,7 @@ class TemplatePackCodec {
     } on FormatException {
       return PackDecodeResult.failed(
         "This isn't readable JSON. It may be cut off, or it isn't a Fuata "
-            'pack.',
+        'pack.',
       );
     }
     if (root is! Map<String, dynamic>) {
@@ -116,7 +116,7 @@ class TemplatePackCodec {
       // and a person could easily pick the wrong one.
       return PackDecodeResult.failed(
         'This is a Fuata backup, not a template pack. Backups go to '
-            'Settings → Privacy & data → Back up & restore.',
+        'Settings → Privacy & data → Back up & restore.',
       );
     }
     if (format != formatName) {
@@ -132,7 +132,7 @@ class TemplatePackCodec {
     if (version > currentVersion) {
       return PackDecodeResult.failed(
         'This pack was made by a newer version of Fuata (format $version). '
-            'Update Fuata, then try again.',
+        'Update Fuata, then try again.',
       );
     }
 
@@ -146,8 +146,12 @@ class TemplatePackCodec {
       }
     }
 
-    String str(Map<String, dynamic> m, String key, String path,
-        {bool required = true}) {
+    String str(
+      Map<String, dynamic> m,
+      String key,
+      String path, {
+      bool required = true,
+    }) {
       final v = m[key];
       if (v is String) return v;
       if (!required && v == null) return '';
@@ -235,14 +239,39 @@ class TemplatePackCodec {
           error('$path.enabled: expected true or false.');
         }
 
-        parsed.add(PackTemplate(
-          name: name,
-          direction: direction,
-          pattern: pattern,
-          fieldMap: fieldMap,
-          sampleText: sample,
-          enabled: enabled is bool ? enabled : true,
-        ));
+        final customFieldNames = <String, String>{};
+        final rawCustomNames = entry['customFieldNames'];
+        if (rawCustomNames is Map<String, dynamic>) {
+          rawCustomNames.forEach((group, name) {
+            if (name is! String || name.trim().isEmpty) {
+              error('$path.customFieldNames.$group: expected a name.');
+            } else if (fieldMap[group] != TemplateFieldType.custom) {
+              error('$path.customFieldNames.$group: not a custom field.');
+            } else {
+              customFieldNames[group] = name.trim();
+            }
+          });
+        } else if (rawCustomNames != null) {
+          error('$path.customFieldNames: expected an object.');
+        }
+        for (final e in fieldMap.entries) {
+          if (e.value == TemplateFieldType.custom &&
+              !customFieldNames.containsKey(e.key)) {
+            error('$path: custom field "${e.key}" has no name.');
+          }
+        }
+
+        parsed.add(
+          PackTemplate(
+            name: name,
+            direction: direction,
+            pattern: pattern,
+            fieldMap: fieldMap,
+            sampleText: sample,
+            enabled: enabled is bool ? enabled : true,
+            customFieldNames: customFieldNames,
+          ),
+        );
       }
     }
 

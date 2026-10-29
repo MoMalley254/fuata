@@ -66,6 +66,7 @@ class _SharePackSheetState extends ConsumerState<_SharePackSheet> {
             fieldMap: t.fieldMap,
             sampleText: t.sampleText,
             enabled: t.enabled,
+            customFieldNames: t.customFieldNames,
           ),
       ],
     );
@@ -89,10 +90,12 @@ class _SharePackSheetState extends ConsumerState<_SharePackSheet> {
       final unitName = _unitName();
       final pack = _buildPack(unitName);
       final content = TemplatePackCodec.encode(pack);
-      final saved = await ref.read(backupFilesProvider).saveText(
-        suggestedName: _suggestedFileName(unitName),
-        content: content,
-      );
+      final saved = await ref
+          .read(backupFilesProvider)
+          .saveText(
+            suggestedName: _suggestedFileName(unitName),
+            content: content,
+          );
       SmartDialog.dismiss();
       if (saved) {
         messenger.showSnackBar(
@@ -125,7 +128,7 @@ class _SharePackSheetState extends ConsumerState<_SharePackSheet> {
       if (utf8Len > maxQrBytes) {
         _qrPayload = null;
         _qrError =
-        'This pack is $utf8Len bytes — more than a single QR can carry '
+            'This pack is $utf8Len bytes — more than a single QR can carry '
             'reliably. Share it as a file instead; the receiver imports it '
             'the same way.';
       } else {
@@ -208,9 +211,9 @@ class _SharePackSheetState extends ConsumerState<_SharePackSheet> {
       Text(
         n == 1
             ? 'One rule will be shared. The receiver adds it to a unit '
-            'of their own.'
+                  'of their own.'
             : '$n rules will be shared. The receiver adds them to a '
-            'unit of their own.',
+                  'unit of their own.',
         style: AppTypography.bodySm.copyWith(color: c.onSurfaceVariant),
       ),
       const SizedBox(height: AppSpacing.md),

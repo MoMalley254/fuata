@@ -15,6 +15,7 @@ class ParsedFields {
   final String? code;
   final DateTime? occurredAt;
   final String? counterparty;
+  final Map<String, String> custom;
 
   /// #72 (F11c): fields the person labelled but whose text couldn't be
   /// read as that kind of value (e.g. a date in a shape we don't know),
@@ -29,6 +30,7 @@ class ParsedFields {
     this.code,
     this.occurredAt,
     this.counterparty,
+    this.custom = const {},
     this.unreadable = const {},
   });
 
@@ -87,6 +89,7 @@ class Parser {
       DateTime? occurredAt;
       String? counterparty;
       final unreadable = <TemplateFieldType, String>{};
+      final custom = <String, String>{};
 
       for (final entry in template.fieldMap.entries) {
         final raw = match.namedGroup(entry.key);
@@ -116,6 +119,10 @@ class Parser {
           case TemplateFieldType.person:
             counterparty = raw.trim();
             break;
+          case TemplateFieldType.custom:
+            final name = template.customFieldNames[entry.key] ?? entry.key;
+            custom[name] = raw.trim();
+            break;
         }
       }
 
@@ -134,6 +141,7 @@ class Parser {
           occurredAt: occurredAt,
           counterparty: counterparty,
           unreadable: unreadable,
+          custom: custom,
         ),
       );
     }
@@ -214,10 +222,7 @@ class Parser {
       RegExp(r'(\d)\s*([AaPp])\.?[Mm]\.?(?![A-Za-z])'),
       (m) => '${m[1]} ${m[2]!.toUpperCase()}M',
     );
-    s = s.replaceAllMapped(
-      RegExp(r'(\d)[-.](?=\d)'),
-      (m) => '${m[1]}/',
-    );
+    s = s.replaceAllMapped(RegExp(r'(\d)[-.](?=\d)'), (m) => '${m[1]}/');
     return s.replaceAll(RegExp(r'\s+'), ' ').trim();
   }
 

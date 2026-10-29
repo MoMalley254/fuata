@@ -27,14 +27,27 @@ PackTemplate _build({
   required String sample,
   required List<(String, TemplateFieldType)> labels,
 }) {
-  final spans = [
-    for (final (text, type) in labels)
-      LabeledSpan(
-        start: sample.indexOf(text),
-        end: sample.indexOf(text) + text.length,
-        type: type,
-      ),
-  ];
+  // Labels are listed in message order, so a running cursor lets a later
+  // label with the *same* text (e.g. "Ksh0.00" for balance and again for
+  // fee) find its own occurrence instead of re-labelling the first one.
+  // Without this, presets whose samples contain a duplicated string
+  // produced two spans at the same offsets and blew up
+  // CaptureTemplate.fromLabeledSample's non-overlap assertion.
+  final spans = <LabeledSpan>[];
+  var cursor = 0;
+  for (final (text, type) in labels) {
+    final at = sample.indexOf(text, cursor);
+    if (at < 0) {
+      throw StateError(
+        'Preset "$name": label "$text" not found in its sample at or '
+        'after position $cursor.',
+      );
+    }
+    spans.add(LabeledSpan(start: at, end: at + text.length, type: type));
+    // Advance so the next label can never re-label this same text.
+    cursor = at + text.length;
+  }
+
   final built = CaptureTemplate.fromLabeledSample(
     id: 'unused',
     unitId: 'unused',
@@ -49,13 +62,13 @@ PackTemplate _build({
     pattern: built.pattern,
     fieldMap: built.fieldMap,
     sampleText: sample,
+    customFieldNames: built.customFieldNames,
   );
 }
 
 // The sample strings, checked against test/fixtures/messages.dart by the
 // preset test. Kept private so callers don't reach for them by accident —
 // the *pack* is the public surface, not the sample.
-
 
 //Mpesa messages updated 25/10/26
 
@@ -113,7 +126,7 @@ final presetTemplatePacks = <TemplatePack>[
     id: 'mpesa_ke',
     name: 'M-PESA Kenya',
     description:
-    'The most common M-PESA messages: money out, money in, paybill, '
+        'The most common M-PESA messages: money out, money in, paybill, '
         'till payments, agent withdrawals and Fuliza.',
     // The M-PESA app is `com.safaricom.mpesa` on newer installs; older
     // users only ever see M-PESA via SMS, which is caught through the
@@ -220,7 +233,7 @@ final presetTemplatePacks = <TemplatePack>[
     id: 'kenyan_banks',
     name: 'Kenyan banks',
     description:
-    'Generic bank debit, card and salary-credit messages. A starting '
+        'Generic bank debit, card and salary-credit messages. A starting '
         'point — most banks use slightly different wording, so expect to '
         'edit the pattern after the first message arrives.',
     isPreset: true,
