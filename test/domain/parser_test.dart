@@ -13,8 +13,11 @@ void main() {
 
   CaptureTemplate paidTemplate({String id = 't-paid'}) {
     int at(String needle) => paidSample.indexOf(needle);
-    LabeledSpan span(String needle, TemplateFieldType type) =>
-        LabeledSpan(start: at(needle), end: at(needle) + needle.length, type: type);
+    LabeledSpan span(String needle, TemplateFieldType type) => LabeledSpan(
+      start: at(needle),
+      end: at(needle) + needle.length,
+      type: type,
+    );
 
     return CaptureTemplate.fromLabeledSample(
       id: id,
@@ -39,8 +42,11 @@ void main() {
 
   CaptureTemplate receivedTemplate({String id = 't-received'}) {
     int at(String needle) => receivedSample.indexOf(needle);
-    LabeledSpan span(String needle, TemplateFieldType type) =>
-        LabeledSpan(start: at(needle), end: at(needle) + needle.length, type: type);
+    LabeledSpan span(String needle, TemplateFieldType type) => LabeledSpan(
+      start: at(needle),
+      end: at(needle) + needle.length,
+      type: type,
+    );
 
     return CaptureTemplate.fromLabeledSample(
       id: id,
@@ -64,8 +70,11 @@ void main() {
 
   CaptureTemplate withdrawTemplate({String id = 't-withdraw'}) {
     int at(String needle) => withdrawSample.indexOf(needle);
-    LabeledSpan span(String needle, TemplateFieldType type) =>
-        LabeledSpan(start: at(needle), end: at(needle) + needle.length, type: type);
+    LabeledSpan span(String needle, TemplateFieldType type) => LabeledSpan(
+      start: at(needle),
+      end: at(needle) + needle.length,
+      type: type,
+    );
 
     return CaptureTemplate.fromLabeledSample(
       id: id,
@@ -85,7 +94,9 @@ void main() {
 
   group('P-01 labeled sample -> all fields, correct types', () {
     test('extracts amount, code, date, person, fee, balance', () {
-      final result = Parser.parse(paidSample, [paidTemplate()], currencyCode: 'KES');
+      final result = Parser.parse(paidSample, [
+        paidTemplate(),
+      ], currencyCode: 'KES');
 
       expect(result.matched, isTrue);
       expect(result.type, TxType.spent);
@@ -126,13 +137,21 @@ void main() {
         direction: TemplateDirection.spent,
         sampleText: bare,
         labels: [
-          LabeledSpan(start: bare.indexOf('350'), end: bare.indexOf('350') + 3, type: TemplateFieldType.amount),
+          LabeledSpan(
+            start: bare.indexOf('350'),
+            end: bare.indexOf('350') + 3,
+            type: TemplateFieldType.amount,
+          ),
           LabeledSpan(
             start: bare.indexOf('PETER'),
             end: bare.indexOf('PETER') + 5,
             type: TemplateFieldType.person,
           ),
-          LabeledSpan(start: bare.indexOf('ZZ1'), end: bare.indexOf('ZZ1') + 3, type: TemplateFieldType.code),
+          LabeledSpan(
+            start: bare.indexOf('ZZ1'),
+            end: bare.indexOf('ZZ1') + 3,
+            type: TemplateFieldType.code,
+          ),
         ],
       );
       final r = Parser.parse(bare, [t], currencyCode: 'KES');
@@ -160,7 +179,9 @@ void main() {
     // (see paidSample: "(Nairobi)", "(VAT incl.)"). Building the template
     // and re-matching the exact sample must not throw and must match.
     expect(() => paidTemplate(), returnsNormally);
-    final result = Parser.parse(paidSample, [paidTemplate()], currencyCode: 'KES');
+    final result = Parser.parse(paidSample, [
+      paidTemplate(),
+    ], currencyCode: 'KES');
     expect(result.matched, isTrue);
 
     // A message with different literal punctuation in the same spots
@@ -168,17 +189,19 @@ void main() {
     const differentPunctuation =
         'Confirmed. Ksh350.00 paid to JAVA HOUSE [Nairobi] on 21/9/26 at 1:12 PM. '
         'Code QW12ABC3. Fee Ksh5.00 charged [VAT incl]. New balance is Ksh4,500.00.';
-    final noMatch = Parser.parse(differentPunctuation, [paidTemplate()], currencyCode: 'KES');
+    final noMatch = Parser.parse(differentPunctuation, [
+      paidTemplate(),
+    ], currencyCode: 'KES');
     expect(noMatch.matched, isFalse);
   });
 
   test('P-05 a message matching no template returns no match', () {
     const unrelated = 'Your OTP is 445566. Do not share it with anyone.';
-    final result = Parser.parse(
-      unrelated,
-      [paidTemplate(), receivedTemplate(), withdrawTemplate()],
-      currencyCode: 'KES',
-    );
+    final result = Parser.parse(unrelated, [
+      paidTemplate(),
+      receivedTemplate(),
+      withdrawTemplate(),
+    ], currencyCode: 'KES');
     expect(result.matched, isFalse);
     expect(result.template, isNull);
     expect(result.fields, isNull);
@@ -220,7 +243,10 @@ void main() {
     test('"21/9/26 at 1:12 PM" style', () {
       final r = Parser.parse(paidSample, [paidTemplate()], currencyCode: 'KES');
       final d = r.fields!.occurredAt!;
-      expect(DateTime(d.year, d.month, d.day, d.hour, d.minute), DateTime(2026, 9, 21, 13, 12));
+      expect(
+        DateTime(d.year, d.month, d.day, d.hour, d.minute),
+        DateTime(2026, 9, 21, 13, 12),
+      );
     });
 
     test('ISO 8601 style', () {
@@ -234,7 +260,9 @@ void main() {
         labels: [
           LabeledSpan(
             start: isoSample.indexOf('2026-09-21T13:12:00'),
-            end: isoSample.indexOf('2026-09-21T13:12:00') + '2026-09-21T13:12:00'.length,
+            end:
+                isoSample.indexOf('2026-09-21T13:12:00') +
+                '2026-09-21T13:12:00'.length,
             type: TemplateFieldType.date,
           ),
           LabeledSpan(
@@ -252,55 +280,113 @@ void main() {
       final r = Parser.parse(isoSample, [t], currencyCode: 'KES');
       expect(r.matched, isTrue);
       final d = r.fields!.occurredAt!;
-      expect(DateTime(d.year, d.month, d.day, d.hour, d.minute), DateTime(2026, 9, 21, 13, 12));
+      expect(
+        DateTime(d.year, d.month, d.day, d.hour, d.minute),
+        DateTime(2026, 9, 21, 13, 12),
+      );
     });
   });
 
-  test('P-10 balance quoted in the message is extracted for reconciliation', () {
-    // Comparing it against the computed balance and flagging the unit is
-    // ledger/reconciliation logic (design.md section 3), not the
-    // parser's job — the parser's contract is just to surface the value.
-    final r = Parser.parse(paidSample, [paidTemplate()], currencyCode: 'KES');
-    expect(r.fields!.balanceAfterMinor, 450000);
-  });
+  test(
+    'P-10 balance quoted in the message is extracted for reconciliation',
+    () {
+      // Comparing it against the computed balance and flagging the unit is
+      // ledger/reconciliation logic (design.md section 3), not the
+      // parser's job — the parser's contract is just to surface the value.
+      final r = Parser.parse(paidSample, [paidTemplate()], currencyCode: 'KES');
+      expect(r.fields!.balanceAfterMinor, 450000);
+    },
+  );
 
-  test('P-11 template round-trips through JSON with identical parse behaviour', () {
-    final original = paidTemplate();
-    final restored = CaptureTemplate.fromJson(original.toJson());
+  test(
+    'P-11 template round-trips through JSON with identical parse behaviour',
+    () {
+      final original = paidTemplate();
+      final restored = CaptureTemplate.fromJson(original.toJson());
 
-    expect(restored.pattern, original.pattern);
-    expect(restored.fieldMap, original.fieldMap);
-    expect(restored.direction, original.direction);
+      expect(restored.pattern, original.pattern);
+      expect(restored.fieldMap, original.fieldMap);
+      expect(restored.direction, original.direction);
 
-    final before = Parser.parse(paidSample, [original], currencyCode: 'KES');
-    final after = Parser.parse(paidSample, [restored], currencyCode: 'KES');
+      final before = Parser.parse(paidSample, [original], currencyCode: 'KES');
+      final after = Parser.parse(paidSample, [restored], currencyCode: 'KES');
 
-    expect(after.matched, before.matched);
-    expect(after.fields!.amountMinor, before.fields!.amountMinor);
-    expect(after.fields!.code, before.fields!.code);
-    expect(after.fields!.counterparty, before.fields!.counterparty);
-    expect(after.fields!.balanceAfterMinor, before.fields!.balanceAfterMinor);
-  });
+      expect(after.matched, before.matched);
+      expect(after.fields!.amountMinor, before.fields!.amountMinor);
+      expect(after.fields!.code, before.fields!.code);
+      expect(after.fields!.counterparty, before.fields!.counterparty);
+      expect(after.fields!.balanceAfterMinor, before.fields!.balanceAfterMinor);
+    },
+  );
 
   group('P-12 very long or empty message does not crash', () {
     final templates = [paidTemplate(), receivedTemplate(), withdrawTemplate()];
 
     test('empty message', () {
-      expect(() => Parser.parse('', templates, currencyCode: 'KES'), returnsNormally);
+      expect(
+        () => Parser.parse('', templates, currencyCode: 'KES'),
+        returnsNormally,
+      );
       expect(Parser.parse('', templates, currencyCode: 'KES').matched, isFalse);
     });
 
     test('very long message', () {
       final long = 'Random noise. ' * 5000;
-      expect(() => Parser.parse(long, templates, currencyCode: 'KES'), returnsNormally);
-      expect(Parser.parse(long, templates, currencyCode: 'KES').matched, isFalse);
+      expect(
+        () => Parser.parse(long, templates, currencyCode: 'KES'),
+        returnsNormally,
+      );
+      expect(
+        Parser.parse(long, templates, currencyCode: 'KES').matched,
+        isFalse,
+      );
     });
 
     test('very long message that still contains a real match', () {
-      final long = '${'Random noise. ' * 2000}$paidSample${' more noise' * 2000}';
+      final long =
+          '${'Random noise. ' * 2000}$paidSample${' more noise' * 2000}';
       final r = Parser.parse(long, templates, currencyCode: 'KES');
       expect(r.matched, isTrue);
       expect(r.fields!.amountMinor, 35000);
     });
+  });
+
+  test('custom fields are parsed under the name given in the rule', () {
+    const sample =
+        'Confirmed. Ksh350.00 paid to JAVA HOUSE. '
+        'Till 04. Cashier AMINA.';
+
+    final template = CaptureTemplate.fromLabeledSample(
+      id: 't-custom',
+      unitId: 'u1',
+      name: 'custom test',
+      direction: TemplateDirection.spent,
+      sampleText: sample,
+      labels: [
+        LabeledSpan(
+          start: sample.indexOf('Ksh350.00'),
+          end: sample.indexOf('Ksh350.00') + 'Ksh350.00'.length,
+          type: TemplateFieldType.amount,
+        ),
+        LabeledSpan(
+          start: sample.indexOf('04'),
+          end: sample.indexOf('04') + 2,
+          type: TemplateFieldType.custom,
+          customName: 'Till',
+        ),
+        LabeledSpan(
+          start: sample.indexOf('AMINA'),
+          end: sample.indexOf('AMINA') + 5,
+          type: TemplateFieldType.custom,
+          customName: 'Cashier',
+        ),
+      ],
+    );
+
+    final result = Parser.parse(sample, [template], currencyCode: 'KES');
+
+    expect(result.matched, isTrue);
+    expect(result.fields!.amountMinor, 35000);
+    expect(result.fields!.custom, {'Till': '04', 'Cashier': 'AMINA'});
   });
 }
