@@ -21,6 +21,7 @@ class PackTemplate {
   final Map<String, TemplateFieldType> fieldMap;
   final String sampleText;
   final bool enabled;
+  final Map<String, String> customFieldNames;
 
   const PackTemplate({
     required this.name,
@@ -29,6 +30,7 @@ class PackTemplate {
     required this.fieldMap,
     required this.sampleText,
     this.enabled = true,
+    this.customFieldNames = const {},
   });
 }
 

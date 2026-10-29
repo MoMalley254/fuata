@@ -26,7 +26,7 @@ import '../../domain/models/unparsed_capture.dart';
 import 'app_database.dart';
 
 UnitKind _unitKindFromText(String s) => UnitKind.values.firstWhere(
-      (e) => e.name == s,
+  (e) => e.name == s,
   orElse: () => UnitKind.other,
 );
 
@@ -34,22 +34,22 @@ TxType _txTypeFromText(String s) =>
     TxType.values.firstWhere((e) => e.name == s, orElse: () => TxType.spent);
 
 TxSource _txSourceFromText(String s) => TxSource.values.firstWhere(
-      (e) => e.name == s,
+  (e) => e.name == s,
   orElse: () => TxSource.manual,
 );
 
 TxStatus _txStatusFromText(String s) => TxStatus.values.firstWhere(
-      (e) => e.name == s,
+  (e) => e.name == s,
   orElse: () => TxStatus.confirmed,
 );
 
 LimitScope _limitScopeFromText(String s) => LimitScope.values.firstWhere(
-      (e) => e.name == s,
+  (e) => e.name == s,
   orElse: () => LimitScope.overall,
 );
 
 LimitPeriod _limitPeriodFromText(String s) => LimitPeriod.values.firstWhere(
-      (e) => e.name == s,
+  (e) => e.name == s,
   orElse: () => LimitPeriod.day,
 );
 
@@ -218,6 +218,7 @@ CaptureTemplate templateFromRow(TemplateRow row) {
     'sampleText': row.sampleText,
     'version': row.version,
     'enabled': row.enabled,
+    'customFieldNames': jsonDecode(row.customFieldNamesJson),
   });
 }
 
@@ -235,6 +236,7 @@ TemplatesCompanion templateToCompanion(CaptureTemplate t) {
     sampleText: t.sampleText,
     version: Value(t.version),
     enabled: Value(t.enabled),
+    customFieldNamesJson: Value(jsonEncode(t.customFieldNames)),
   );
 }
 

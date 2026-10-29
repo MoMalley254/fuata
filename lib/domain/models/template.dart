@@ -8,7 +8,7 @@ library;
 /// The kinds of field a user can label a span as (US-08). `ignore` isn't
 /// listed in requirements.md's label set but is kept internal-only, not
 /// exposed here, since v0.1's rule builder only offers the six above.
-enum TemplateFieldType { amount, code, date, person, balance, fee }
+enum TemplateFieldType { amount, code, date, person, balance, fee, custom }
 
 /// `direction` on a Template: which way the transaction goes. `either`
 /// lets the message decide at parse time (ui-design-brief.md 7.7 step 4)
@@ -24,10 +24,15 @@ class LabeledSpan {
   final int end;
   final TemplateFieldType type;
 
+  /// #56 Human-readable name for a [TemplateFieldType.custom] label.
+  /// Required when [type] is custom; null for built-in fields.
+  final String? customName;
+
   const LabeledSpan({
     required this.start,
     required this.end,
     required this.type,
+    this.customName,
   });
 }
 
@@ -48,6 +53,9 @@ class CaptureTemplate {
   final int version;
   final bool enabled;
 
+  ///#56
+  final Map<String, String> customFieldNames; // group name -> display name
+
   const CaptureTemplate({
     required this.id,
     required this.unitId,
@@ -59,6 +67,7 @@ class CaptureTemplate {
     this.captureSourceId,
     this.version = 1,
     this.enabled = true,
+    this.customFieldNames = const {},
   });
 
   /// Compiled on demand rather than cached, since a Template is an
@@ -104,28 +113,50 @@ class CaptureTemplate {
     final usedCounts = <TemplateFieldType, int>{};
     var cursor = 0;
 
+    final customFieldNames = <String, String>{};
+    var customCount = 0;
+
     for (var i = 0; i < sorted.length; i++) {
       final span = sorted[i];
       buffer.write(_escapeLiteral(sampleText.substring(cursor, span.start)));
-      final groupName = _nextGroupName(span.type, usedCounts);
+
+      final isCustom = span.type == TemplateFieldType.custom;
+
+      final groupName = isCustom
+          ? 'custom${++customCount}' //#56
+          : _nextGroupName(span.type, usedCounts);
+
+      if (isCustom) {
+        final label = span.customName?.trim();
+        if (label == null || label.isEmpty) {
+          throw ArgumentError('A custom field label needs a name.');
+        }
+        customFieldNames[groupName] = label;
+      }
+
+      final isFreeText = span.type == TemplateFieldType.person || isCustom;
+      final fieldPattern = isFreeText && i == sorted.length - 1
+          ? _lastFreeTextPattern(sampleText.substring(span.end))
+          : _fieldPattern(span.type);
+
       // #72 (F11b): a lazy person match with nothing after it stops at one
       // character, so the *last* label needs an explicit boundary.
-      final fieldPattern =
-          span.type == TemplateFieldType.person && i == sorted.length - 1
-          ? _lastPersonPattern(sampleText.substring(span.end))
-          : _fieldPattern(span.type);
+      // final fieldPattern =
+      //     span.type == TemplateFieldType.person && i == sorted.length - 1
+      //     ? _lastPersonPattern(sampleText.substring(span.end))
+      //     : _fieldPattern(span.type);
       buffer.write('(?<$groupName>$fieldPattern)');
       fieldMap[groupName] = span.type;
       cursor = span.end;
     }
 
     // #20 Intentionally no trailing literal: the pattern ends where the last
-// labeled field ends. Real messages have variable tails (URLs, "see all
-// your balances", counters, per-message limits) that we don't want to
-// require on every future message. Leading literals before the first
-// label are still kept — a header like "Confirmed." pins the rule to
-// the right kind of message.
-//     buffer.write(_escapeLiteral(sampleText.substring(cursor)));
+    // labeled field ends. Real messages have variable tails (URLs, "see all
+    // your balances", counters, per-message limits) that we don't want to
+    // require on every future message. Leading literals before the first
+    // label are still kept — a header like "Confirmed." pins the rule to
+    // the right kind of message.
+    //     buffer.write(_escapeLiteral(sampleText.substring(cursor)));
     return CaptureTemplate(
       id: id,
       unitId: unitId,
@@ -137,10 +168,16 @@ class CaptureTemplate {
       sampleText: sampleText,
       version: version,
       enabled: enabled,
+      customFieldNames: customFieldNames,
     );
   }
 
-  CaptureTemplate copyWith({bool? enabled, String? name, int? version}) {
+  CaptureTemplate copyWith({
+    bool? enabled,
+    String? name,
+    int? version,
+    Map<String, String>? customFieldNames,
+  }) {
     return CaptureTemplate(
       id: id,
       unitId: unitId,
@@ -152,6 +189,7 @@ class CaptureTemplate {
       sampleText: sampleText,
       version: version ?? this.version,
       enabled: enabled ?? this.enabled,
+      customFieldNames: customFieldNames ?? this.customFieldNames,
     );
   }
 
@@ -171,10 +209,22 @@ class CaptureTemplate {
     'sampleText': sampleText,
     'version': version,
     'enabled': enabled,
+    if (customFieldNames.isNotEmpty) 'customFieldNames': customFieldNames,
   };
 
   factory CaptureTemplate.fromJson(Map<String, dynamic> json) {
     final rawFieldMap = json['fieldMap'] as Map<String, dynamic>;
+
+    final rawCustom = json['customFieldNames'];
+    final customFieldNames = <String, String>{};
+    if (rawCustom is Map) {
+      rawCustom.forEach((key, value) {
+        if (key is String && value is String && value.trim().isNotEmpty) {
+          customFieldNames[key] = value.trim();
+        }
+      });
+    }
+
     return CaptureTemplate(
       id: json['id'] as String,
       unitId: json['unitId'] as String,
@@ -191,6 +241,7 @@ class CaptureTemplate {
       sampleText: json['sampleText'] as String,
       version: json['version'] as int? ?? 1,
       enabled: json['enabled'] as bool? ?? true,
+      customFieldNames: customFieldNames,
     );
   }
 
@@ -249,6 +300,11 @@ class CaptureTemplate {
         // rather than swallowing the rest of the message. Never crosses a
         // line break.
         return r'[^\n]+?';
+
+      case TemplateFieldType.custom:
+        // Same shape as a person: free text bounded by the surrounding
+        // literals, or by the end of the line when it is the last label.
+        return r'[^\n]+?';
     }
   }
 
@@ -257,7 +313,7 @@ class CaptureTemplate {
   /// the next few literal characters (a zero-width lookahead, so the
   /// variable tail of the message stays unconstrained). With nothing after
   /// it, take the rest of the line.
-  static String _lastPersonPattern(String rest) {
+  static String _lastFreeTextPattern(String rest) {
     final lineEnd = rest.indexOf('\n');
     final line = lineEnd < 0 ? rest : rest.substring(0, lineEnd);
     if (line.isEmpty) return r'[^\n]+';

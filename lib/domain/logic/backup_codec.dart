@@ -280,7 +280,7 @@ class BackupCodec {
       data,
       'categories',
       ctx,
-          (r) => BackupCategory(
+      (r) => BackupCategory(
         id: r.nonEmpty('id'),
         name: r.nonEmpty('name'),
         emoji: r.str('emoji'),
@@ -290,14 +290,14 @@ class BackupCodec {
         sortOrder: r.integer('sortOrder', orElse: 0),
         archived: r.boolean('archived', orElse: false),
       ),
-          (c) => c.id,
+      (c) => c.id,
     );
 
     final units = _table<MoneyUnit>(
       data,
       'units',
       ctx,
-          (r) => MoneyUnit(
+      (r) => MoneyUnit(
         id: r.nonEmpty('id'),
         name: r.nonEmpty('name'),
         kind: r.oneOf('kind', UnitKind.values),
@@ -379,7 +379,7 @@ class BackupCodec {
       data,
       'outings',
       ctx,
-          (r) => Outing(
+      (r) => Outing(
         id: r.nonEmpty('id'),
         name: r.nonEmpty('name'),
         amountMinor: r.integer('amountMinor'),
@@ -391,7 +391,7 @@ class BackupCodec {
         enabled: r.boolean('enabled', orElse: true),
         createdAt: r.dateLocal('createdAt'),
       ),
-          (o) => o.id,
+      (o) => o.id,
     );
 
     AppSettings? settings;
@@ -440,6 +440,7 @@ class BackupCodec {
 
   static CaptureTemplate _template(_Rec r, _Ctx ctx) {
     final fieldMap = <String, TemplateFieldType>{};
+
     final rawMap = r.map['fieldMap'];
     if (rawMap is Map<String, dynamic>) {
       rawMap.forEach((group, type) {
@@ -454,6 +455,30 @@ class BackupCodec {
       });
     } else {
       ctx.error('${r.path}.fieldMap: expected an object.');
+    }
+
+    // #56: custom-field names. Must come AFTER fieldMap is built, so the
+    // "is this group a custom field?" check has something to check against.
+    final customFieldNames = <String, String>{};
+    final rawCustomNames = r.map['customFieldNames'];
+    if (rawCustomNames is Map<String, dynamic>) {
+      rawCustomNames.forEach((group, name) {
+        if (name is! String || name.trim().isEmpty) {
+          ctx.error('${r.path}.customFieldNames.$group: expected a name.');
+        } else if (fieldMap[group] != TemplateFieldType.custom) {
+          ctx.error('${r.path}.customFieldNames.$group: not a custom field.');
+        } else {
+          customFieldNames[group] = name.trim();
+        }
+      });
+    } else if (rawCustomNames != null) {
+      ctx.error('${r.path}.customFieldNames: expected an object.');
+    }
+    for (final e in fieldMap.entries) {
+      if (e.value == TemplateFieldType.custom &&
+          !customFieldNames.containsKey(e.key)) {
+        ctx.error('${r.path}: custom field "${e.key}" has no name.');
+      }
     }
 
     final pattern = r.str('pattern');
@@ -479,6 +504,7 @@ class BackupCodec {
       sampleText: r.str('sampleText'),
       version: r.integer('version', orElse: 1),
       enabled: r.boolean('enabled', orElse: true),
+      customFieldNames: customFieldNames,
     );
   }
 
@@ -613,13 +639,9 @@ class BackupCodec {
       bannerUnitIds: names('bannerUnitIds').toSet(),
       bannerUnitsMode: m['bannerUnitsMode'] == null
           ? (names('bannerUnitIds').isNotEmpty
-          ? BannerUnitsMode.selected
-          : d.bannerUnitsMode)
-          : pick(
-        'bannerUnitsMode',
-        BannerUnitsMode.values,
-        d.bannerUnitsMode,
-      ),
+                ? BannerUnitsMode.selected
+                : d.bannerUnitsMode)
+          : pick('bannerUnitsMode', BannerUnitsMode.values, d.bannerUnitsMode),
       bannerShowProgress: flag('bannerShowProgress', d.bannerShowProgress),
       bannerShowQuickAdd: flag('bannerShowQuickAdd', d.bannerShowQuickAdd),
       summaryNotificationsEnabled: flag(
@@ -628,20 +650,31 @@ class BackupCodec {
       ),
       summaryDailyEnabled: flag('summaryDailyEnabled', d.summaryDailyEnabled),
       summaryDailyMinute: minute('summaryDailyMinute', d.summaryDailyMinute),
-      summaryWeeklyEnabled: flag('summaryWeeklyEnabled', d.summaryWeeklyEnabled),
-      summaryWeeklyWeekday: m['summaryWeeklyWeekday'] is int &&
-          (m['summaryWeeklyWeekday'] as int >= 1) &&
-          (m['summaryWeeklyWeekday'] as int <= 7)
+      summaryWeeklyEnabled: flag(
+        'summaryWeeklyEnabled',
+        d.summaryWeeklyEnabled,
+      ),
+      summaryWeeklyWeekday:
+          m['summaryWeeklyWeekday'] is int &&
+              (m['summaryWeeklyWeekday'] as int >= 1) &&
+              (m['summaryWeeklyWeekday'] as int <= 7)
           ? m['summaryWeeklyWeekday'] as int
           : d.summaryWeeklyWeekday,
       summaryWeeklyMinute: minute('summaryWeeklyMinute', d.summaryWeeklyMinute),
-      summaryMonthlyEnabled: flag('summaryMonthlyEnabled', d.summaryMonthlyEnabled),
-      summaryMonthlyDay: m['summaryMonthlyDay'] is int &&
-          (m['summaryMonthlyDay'] as int >= 1) &&
-          (m['summaryMonthlyDay'] as int <= 31)
+      summaryMonthlyEnabled: flag(
+        'summaryMonthlyEnabled',
+        d.summaryMonthlyEnabled,
+      ),
+      summaryMonthlyDay:
+          m['summaryMonthlyDay'] is int &&
+              (m['summaryMonthlyDay'] as int >= 1) &&
+              (m['summaryMonthlyDay'] as int <= 31)
           ? m['summaryMonthlyDay'] as int
           : d.summaryMonthlyDay,
-      summaryMonthlyMinute: minute('summaryMonthlyMinute', d.summaryMonthlyMinute),
+      summaryMonthlyMinute: minute(
+        'summaryMonthlyMinute',
+        d.summaryMonthlyMinute,
+      ),
 
       alertsEnabled: flag('alertsEnabled', d.alertsEnabled),
       quietHoursEnabled: flag('quietHoursEnabled', d.quietHoursEnabled),
@@ -670,20 +703,29 @@ class BackupCodec {
         d.widgetVariant,
       ),
       currencyCode: currencyCode,
-      scheduledExportEnabled: flag('scheduledExportEnabled', d.scheduledExportEnabled),
+      scheduledExportEnabled: flag(
+        'scheduledExportEnabled',
+        d.scheduledExportEnabled,
+      ),
       scheduledExportFrequency: pick(
         'scheduledExportFrequency',
         ScheduledExportFrequency.values,
         d.scheduledExportFrequency,
       ),
-      scheduledExportMinute: minute('scheduledExportMinute', d.scheduledExportMinute),
-      scheduledExportWeekday: m['scheduledExportWeekday'] is int &&
-          (m['scheduledExportWeekday'] as int >= 1) &&
-          (m['scheduledExportWeekday'] as int <= 7)
+      scheduledExportMinute: minute(
+        'scheduledExportMinute',
+        d.scheduledExportMinute,
+      ),
+      scheduledExportWeekday:
+          m['scheduledExportWeekday'] is int &&
+              (m['scheduledExportWeekday'] as int >= 1) &&
+              (m['scheduledExportWeekday'] as int <= 7)
           ? m['scheduledExportWeekday'] as int
           : d.scheduledExportWeekday,
       scheduledExportIncludeRawText: flag(
-          'scheduledExportIncludeRawText', d.scheduledExportIncludeRawText),
+        'scheduledExportIncludeRawText',
+        d.scheduledExportIncludeRawText,
+      ),
     );
   }
 

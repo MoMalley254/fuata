@@ -19,7 +19,6 @@
 // call site that you're holding a raw DB row, not a domain object.
 // ---------------------------------------------------------------------------
 
-
 import 'package:drift/drift.dart';
 
 /// design.md UNIT. `iconType`/`iconValue` are split out per the ER diagram
@@ -35,15 +34,16 @@ class Units extends Table {
   TextColumn get iconType => text().withDefault(const Constant('emoji'))();
   TextColumn get iconValue => text()();
   IntColumn get colorValue => integer()();
-  IntColumn get openingBalanceMinor => integer().withDefault(const Constant(0))();
+  IntColumn get openingBalanceMinor =>
+      integer().withDefault(const Constant(0))();
   IntColumn get sortOrder => integer().withDefault(const Constant(0))();
   DateTimeColumn get lastVerifiedAt => dateTime().nullable()();
   DateTimeColumn get createdAt => dateTime()();
 
   BoolColumn get archived => boolean().withDefault(const Constant(false))();
-// When the unit was archived, so the Archived screen can say "Archived
-// on 15 Oct". Nullable: an existing archived unit has no date, and an
-// unarchived one has no reason to carry a stale one.
+  // When the unit was archived, so the Archived screen can say "Archived
+  // on 15 Oct". Nullable: an existing archived unit has no date, and an
+  // unarchived one has no reason to carry a stale one.
   DateTimeColumn get archivedAt => dateTime().nullable()();
 
   @override
@@ -91,6 +91,8 @@ class Templates extends Table {
   TextColumn get sampleText => text()();
   IntColumn get version => integer().withDefault(const Constant(1))();
   BoolColumn get enabled => boolean().withDefault(const Constant(true))();
+  TextColumn get customFieldNamesJson =>
+      text().withDefault(const Constant('{}'))();
 
   @override
   Set<Column> get primaryKey => {id};
