@@ -19,11 +19,15 @@ import '../app_chips.dart';
 class FoundCard extends StatelessWidget {
   final ParsedFields fields;
   final String currencyCode;
-  const FoundCard({super.key, required this.fields, required this.currencyCode});
+  const FoundCard({
+    super.key,
+    required this.fields,
+    required this.currencyCode,
+  });
 
   @override
   Widget build(BuildContext context) {
-    final c= context.colors;
+    final c = context.colors;
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(AppSpacing.md),
@@ -35,10 +39,18 @@ class FoundCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _fieldRow(c, 'Amount', Money(fields.amountMinor!, currencyCode).format(),
-              WordLabelChip.fieldTint('Amount', c)),
-          _fieldRow(c, 'Payee', fields.counterparty,
-              WordLabelChip.fieldTint('Payee', c)),
+          _fieldRow(
+            c,
+            'Amount',
+            Money(fields.amountMinor!, currencyCode).format(),
+            WordLabelChip.fieldTint('Amount', c),
+          ),
+          _fieldRow(
+            c,
+            'Payee',
+            fields.counterparty,
+            WordLabelChip.fieldTint('Payee', c),
+          ),
           _fieldRow(
             c,
             'When',
@@ -52,7 +64,9 @@ class FoundCard extends StatelessWidget {
           _fieldRow(
             c,
             'Fee',
-            fields.feeMinor == null ? null : Money(fields.feeMinor!, currencyCode).format(),
+            fields.feeMinor == null
+                ? null
+                : Money(fields.feeMinor!, currencyCode).format(),
             WordLabelChip.fieldTint('Fee', c),
             unreadable: _couldntRead(TemplateFieldType.fee, 'an amount'),
           ),
@@ -65,6 +79,13 @@ class FoundCard extends StatelessWidget {
             WordLabelChip.fieldTint('Balance', c),
             unreadable: _couldntRead(TemplateFieldType.balance, 'an amount'),
           ),
+          for (final entry in fields.custom.entries)
+            _fieldRow(
+              c,
+              entry.key,
+              entry.value,
+              WordLabelChip.fieldTint(entry.key, c),
+            ),
         ],
       ),
     );
@@ -105,24 +126,27 @@ class FoundCard extends StatelessWidget {
                   )
                 : value == null
                 ? Container(
-              padding: const EdgeInsets.symmetric(
-                horizontal: AppSpacing.sm, vertical: 2,
-              ),
-              decoration: BoxDecoration(
-                border: Border.all(
-                  color: c.outlineVariant.withValues(alpha: 0.5),
-                ),
-                borderRadius: BorderRadius.circular(AppSpacing.sm),
-              ),
-              child: Text(
-                'not labeled',
-                style: AppTypography.bodySm.copyWith(color: c.onSurfaceTertiary),
-              ),
-            )
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: AppSpacing.sm,
+                      vertical: 2,
+                    ),
+                    decoration: BoxDecoration(
+                      border: Border.all(
+                        color: c.outlineVariant.withValues(alpha: 0.5),
+                      ),
+                      borderRadius: BorderRadius.circular(AppSpacing.sm),
+                    ),
+                    child: Text(
+                      'not labeled',
+                      style: AppTypography.bodySm.copyWith(
+                        color: c.onSurfaceTertiary,
+                      ),
+                    ),
+                  )
                 : Text(
-              value,
-              style: AppTypography.bodyMd.copyWith(color: c.onSurface),
-            ),
+                    value,
+                    style: AppTypography.bodyMd.copyWith(color: c.onSurface),
+                  ),
           ),
         ],
       ),

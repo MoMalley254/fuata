@@ -25,10 +25,10 @@ class TemplatePacksScreen extends ConsumerWidget {
   const TemplatePacksScreen({super.key});
 
   Future<void> _openPack(
-      BuildContext context,
-      WidgetRef ref,
-      TemplatePack pack,
-      ) async {
+    BuildContext context,
+    WidgetRef ref,
+    TemplatePack pack,
+  ) async {
     final allUnits = ref.read(unitsProvider).value ?? const <MoneyUnit>[];
     final units = allUnits.where((u) => !u.archived).toList();
     if (units.isEmpty) {
@@ -53,6 +53,7 @@ class TemplatePacksScreen extends ConsumerWidget {
     try {
       final text = await ref.read(backupFilesProvider).pickText();
       if (text == null) return;
+      if (!context.mounted) return;
       _handleIncoming(context, ref, text, 'file');
     } on BackupFileException catch (e) {
       if (!context.mounted) return;
@@ -62,20 +63,19 @@ class TemplatePacksScreen extends ConsumerWidget {
   }
 
   Future<void> _scanQr(BuildContext context, WidgetRef ref) async {
-    final text = await Navigator.of(context).push<String>(
-      MaterialPageRoute(builder: (_) => const QrScanScreen()),
-    );
+    final text = await Navigator.of(context)
+        .push<String>(MaterialPageRoute(builder: (_) => const QrScanScreen()));
     if (text == null) return;
     if (!context.mounted) return;
     _handleIncoming(context, ref, text, 'QR');
   }
 
   void _handleIncoming(
-      BuildContext context,
-      WidgetRef ref,
-      String text,
-      String source,
-      ) {
+    BuildContext context,
+    WidgetRef ref,
+    String text,
+    String source,
+  ) {
     final result = TemplatePackCodec.decode(text);
     if (!result.ok || result.pack == null) {
       final message = result.errors.isEmpty
@@ -140,11 +140,12 @@ class TemplatePacksScreen extends ConsumerWidget {
                   const SizedBox(height: AppSpacing.xs),
                   Text(
                     'A ready-made set of message reading rules — one rule per '
-                        'message shape. Add a pack to a unit and Fuata starts '
-                        'reading that provider\'s messages straight away. Nothing '
-                        'is caught until you confirm it.',
-                    style: AppTypography.bodySm
-                        .copyWith(color: c.onSurfaceVariant),
+                    'message shape. Add a pack to a unit and Fuata starts '
+                    'reading that provider\'s messages straight away. Nothing '
+                    'is caught until you confirm it.',
+                    style: AppTypography.bodySm.copyWith(
+                      color: c.onSurfaceVariant,
+                    ),
                   ),
                 ],
               ),
@@ -167,8 +168,8 @@ class TemplatePacksScreen extends ConsumerWidget {
             const SizedBox(height: AppSpacing.xs),
             Text(
               'A friend can share a pack with you as a file, or show you a '
-                  'QR. Use the icons above to import one — the rules land in a '
-                  'unit of your choosing, and their unit does not come with it.',
+              'QR. Use the icons above to import one — the rules land in a '
+              'unit of your choosing, and their unit does not come with it.',
               style: AppTypography.bodySm.copyWith(color: c.onSurfaceVariant),
             ),
           ],
@@ -229,15 +230,17 @@ class _PackTile extends StatelessWidget {
                       const SizedBox(height: 2),
                       Text(
                         pack.description!,
-                        style: AppTypography.bodySm
-                            .copyWith(color: c.onSurfaceVariant),
+                        style: AppTypography.bodySm.copyWith(
+                          color: c.onSurfaceVariant,
+                        ),
                       ),
                     ],
                     const SizedBox(height: AppSpacing.xs),
                     Text(
                       n == 1 ? '1 rule' : '$n rules',
-                      style: AppTypography.labelSm
-                          .copyWith(color: c.onSurfaceTertiary),
+                      style: AppTypography.labelSm.copyWith(
+                        color: c.onSurfaceTertiary,
+                      ),
                     ),
                   ],
                 ),

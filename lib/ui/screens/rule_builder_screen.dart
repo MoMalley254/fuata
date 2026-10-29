@@ -151,7 +151,16 @@ class _RuleBuilderScreenState extends ConsumerState<RuleBuilderScreen> {
         final at = t.sampleText.indexOf(value, cursor);
         if (at < 0) continue;
         final end = at + value.length;
-        spans.add(LabeledSpan(start: at, end: end, type: type));
+        spans.add(
+          LabeledSpan(
+            start: at,
+            end: end,
+            type: type,
+            customName: type == TemplateFieldType.custom
+                ? t.customFieldNames[name]
+                : null,
+          ),
+        );
         cursor = end;
       }
       spans.sort((a, b) => a.start.compareTo(b.start));
@@ -206,21 +215,37 @@ class _RuleBuilderScreenState extends ConsumerState<RuleBuilderScreen> {
     return a <= b ? (a, b) : (b, a);
   }
 
-  TemplateFieldType? _typeAt(int tokenIndex) {
+  LabeledSpan? _labelAt(int tokenIndex) {
     final t = _tokens[tokenIndex];
     for (final s in _labels) {
-      if (s.start <= t.start && t.end <= s.end) return s.type;
+      if (s.start <= t.start && t.end <= s.end) return s;
     }
     return null;
   }
 
-  void _labelRange(int first, int last, TemplateFieldType type) {
+  String? _fieldLabelAt(int tokenIndex) {
+    final span = _labelAt(tokenIndex);
+    if (span == null) return null;
+    return span.type == TemplateFieldType.custom
+        ? (span.customName ?? 'Custom')
+        : fieldName(span.type);
+  }
+
+  void _labelRange(int first, int last, FieldSelection selection) {
     final tokens = _tokens;
     final start = tokens[first].start;
     final end = tokens[last].end;
+
     setState(() {
       _labels.removeWhere((s) => s.start < end && s.end > start);
-      _labels.add(LabeledSpan(start: start, end: end, type: type));
+      _labels.add(
+        LabeledSpan(
+          start: start,
+          end: end,
+          type: selection.type,
+          customName: selection.customName,
+        ),
+      );
       _labels.sort((a, b) => a.start.compareTo(b.start));
       _rangeAnchor = null;
       _rangeFocus = null;
@@ -240,7 +265,7 @@ class _RuleBuilderScreenState extends ConsumerState<RuleBuilderScreen> {
       setState(() => _rangeFocus = i);
       return;
     }
-    final existing = _typeAt(i);
+    final existing = _labelAt(i);
     if (existing != null) {
       _removeAt(i);
     } else {
@@ -251,12 +276,32 @@ class _RuleBuilderScreenState extends ConsumerState<RuleBuilderScreen> {
   Future<void> _openPalette(int first, int last) async {
     final tokens = _tokens;
     final text = _sampleText.substring(tokens[first].start, tokens[last].end);
-    final type = await showModalBottomSheet<TemplateFieldType>(
+    final selection = await showModalBottomSheet<FieldSelection>(
       context: context,
       backgroundColor: Colors.transparent,
-      builder: (sheetContext) => FieldPalette(selectionText: text),
+      builder: (sheetContext) => FieldPalette(
+        selectionText: text,
+        existingCustomNames: _existingCustomNames(),
+      ),
     );
-    if (type != null) _labelRange(first, last, type);
+    if (selection != null) _labelRange(first, last, selection);
+  }
+
+  Set<String> _existingCustomNames() => {
+    for (final l in _labels)
+      if (l.type == TemplateFieldType.custom &&
+          (l.customName?.isNotEmpty ?? false))
+        l.customName!,
+  };
+
+  Future<void> _addCustomField(int first, int last) async {
+    final selection = await askForCustomFieldName(
+      context,
+      existingCustomNames: _existingCustomNames(),
+    );
+    if (selection != null && mounted) {
+      _labelRange(first, last, selection);
+    }
   }
 
   Future<void> _pasteSample() async {
@@ -475,7 +520,7 @@ class _RuleBuilderScreenState extends ConsumerState<RuleBuilderScreen> {
             WordLabelChip(
               key: ValueKey('tok_$i'),
               word: tokens[i].text,
-              assignedField: _typeAt(i) == null ? null : fieldName(_typeAt(i)!),
+              assignedField: _labelAt(i) == null ? null : _fieldLabelAt(i),
               highlighted:
                   selection != null && i >= selection.$1 && i <= selection.$2,
               onTap: () => _onWordTap(i),
@@ -522,9 +567,19 @@ class _RuleBuilderScreenState extends ConsumerState<RuleBuilderScreen> {
                 AppChoiceChip(
                   label: name,
                   selected: false,
-                  onTap: () => _labelRange(selection.$1, selection.$2, type),
+                  onTap: () => _labelRange(
+                    selection.$1,
+                    selection.$2,
+                    FieldSelection(type),
+                  ),
                 ),
             ],
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          AppChoiceChip(
+            label: '+ Add my own field',
+            selected: false,
+            onTap: () => _addCustomField(selection.$1, selection.$2),
           ),
           Align(
             alignment: Alignment.centerRight,
@@ -571,7 +626,8 @@ class _RuleBuilderScreenState extends ConsumerState<RuleBuilderScreen> {
     } catch (e) {
       return HintCard(
         c: c,
-        message: 'Could not build the preview. Try labeling a smaller part '
+        message:
+            'Could not build the preview. Try labeling a smaller part '
             'of the message.',
       );
     }
@@ -608,7 +664,8 @@ class _RuleBuilderScreenState extends ConsumerState<RuleBuilderScreen> {
         } catch (_) {
           return HintCard(
             c: c,
-            message: 'Could not build the preview. Try labeling a smaller part '
+            message:
+                'Could not build the preview. Try labeling a smaller part '
                 'of the message.',
           );
         }
