@@ -123,6 +123,10 @@ class Parser {
             final name = template.customFieldNames[entry.key] ?? entry.key;
             custom[name] = raw.trim();
             break;
+          case TemplateFieldType.wildcard:
+            // Never in fieldMap: wildcard spans are non-capturing and
+            // carry no data.
+            break;
         }
       }
 
