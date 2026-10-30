@@ -1,9 +1,10 @@
-# Issue status (generated 2026-10-21T11:10Z)
+# Issue status (generated 2026-10-30T07:36Z)
 
 Source of truth: GitHub. Regenerate with `scripts/refresh-issue-status.sh`.
 
 | # | State | Milestone | Title |
 |---|---|---|---|
+| #140 | CLOSED | v0.1 MVP | docs: publish app description and privacy policy site on GitHub Pages |
 | #118 | CLOSED | v1.1 Backlog | feat(settings): custom accent colour picker |
 | #117 | CLOSED | v1.1 Backlog | feat(units): reorder units on Home and My money |
 | #116 | CLOSED | v1.1 Backlog | feat(ui): Empty Home needs a call to action |
@@ -14,7 +15,7 @@ Source of truth: GitHub. Regenerate with `scripts/refresh-issue-status.sh`.
 | #111 | CLOSED | v0.1 MVP | fix(onboarding): "Show me how" doesn't open Auto-catch |
 | #110 | CLOSED | v0.1 MVP | fix(ui): Home hero number overflows for large amounts |
 | #109 | CLOSED | v0.1 MVP | fix(ledger): week-peek bars group by UTC day, not local day |
-| #108 | OPEN | v0.1 MVP | fix(ledger): day/week/month ranges seem to include the wrong days |
+| #108 | CLOSED | v0.1 MVP | fix(ledger): day/week/month ranges seem to include the wrong days |
 | #107 | CLOSED | v0.1 MVP | fix(ledger): day and limit numbers don't roll over at midnight |
 | #106 | CLOSED | v0.1 MVP | fix(ledger): day/week/month ranges seem to include the wrong days |
 | #105 | CLOSED | v0.1 MVP | fix(ledger): day and limit numbers don't roll over at midnight |
@@ -38,7 +39,7 @@ Source of truth: GitHub. Regenerate with `scripts/refresh-issue-status.sh`.
 | #70 | CLOSED | v0.1 MVP | fix(ui): make Home units and transactions tappable |
 | #69 | CLOSED | v0.1 MVP | fix(ui): Activity list doesn't scroll |
 | #63 | CLOSED | — | feat(limits): remaining 7.8 gaps — per-unit, alert levels, quiet hours, preview, firing alerts |
-| #56 | OPEN | v1.1 Backlog | feat(capture): user-defined custom fields in rule builder |
+| #56 | CLOSED | v1.1 Backlog | feat(capture): user-defined custom fields in rule builder |
 | #55 | OPEN | v1.1 Backlog | feat(capture): "This part changes" wildcard in rule builder |
 | #39 | CLOSED | v1.1 Backlog | feat: Open-source licence review and contribution guide |
 | #38 | OPEN | v1.1 Backlog | feat: iOS manual/share-sheet edition |
