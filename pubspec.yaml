@@ -39,6 +39,8 @@ dependencies:
 
   #Launch to mail
   url_launcher: ^6.3.3
+  #37 get version
+  package_info_plus: ^10.2.2
 
 dev_dependencies:
   flutter_test:
