@@ -1,4 +1,4 @@
-# Issue status (generated 2026-10-30T07:36Z)
+# Issue status (generated 2026-10-30T08:18Z)
 
 Source of truth: GitHub. Regenerate with `scripts/refresh-issue-status.sh`.
 
@@ -40,7 +40,7 @@ Source of truth: GitHub. Regenerate with `scripts/refresh-issue-status.sh`.
 | #69 | CLOSED | v0.1 MVP | fix(ui): Activity list doesn't scroll |
 | #63 | CLOSED | — | feat(limits): remaining 7.8 gaps — per-unit, alert levels, quiet hours, preview, firing alerts |
 | #56 | CLOSED | v1.1 Backlog | feat(capture): user-defined custom fields in rule builder |
-| #55 | OPEN | v1.1 Backlog | feat(capture): "This part changes" wildcard in rule builder |
+| #55 | CLOSED | v1.1 Backlog | feat(capture): "This part changes" wildcard in rule builder |
 | #39 | CLOSED | v1.1 Backlog | feat: Open-source licence review and contribution guide |
 | #38 | OPEN | v1.1 Backlog | feat: iOS manual/share-sheet edition |
 | #37 | OPEN | v1.1 Backlog | feat: Opt-in redacted diagnostics copy button |
