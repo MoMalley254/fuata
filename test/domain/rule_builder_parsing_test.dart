@@ -244,4 +244,98 @@ void main() {
       TxType.got,
     );
   });
+
+  group('wildcard spans (#55)', () {
+    const sample =
+        'Ref:AC4368F03026: Dear MORRIS, MPESA transfer of KES 500 to '
+        'JOHN DOE at 28-09-2026 11:03 PM was successful.';
+    const second =
+        'Ref:ZZ9911223344: Dear MORRIS, MPESA transfer of KES 1,250 to '
+        'JANE DOE at 05-10-2026 09:15 AM was successful.';
+
+    CaptureTemplate build() => CaptureTemplate.fromLabeledSample(
+      id: 't-wildcard',
+      unitId: 'u',
+      name: 'wildcard test',
+      direction: TemplateDirection.spent,
+      sampleText: sample,
+      labels: [
+        LabeledSpan(
+          start: sample.indexOf('AC4368F03026'),
+          end: sample.indexOf('AC4368F03026') + 'AC4368F03026'.length,
+          type: TemplateFieldType.wildcard,
+        ),
+        LabeledSpan(
+          start: sample.indexOf('KES 500'),
+          end: sample.indexOf('KES 500') + 'KES 500'.length,
+          type: TemplateFieldType.amount,
+        ),
+        LabeledSpan(
+          start: sample.indexOf('JOHN DOE'),
+          end: sample.indexOf('JOHN DOE') + 'JOHN DOE'.length,
+          type: TemplateFieldType.person,
+        ),
+        LabeledSpan(
+          start: sample.indexOf('28-09-2026 11:03 PM'),
+          end: sample.indexOf('28-09-2026 11:03 PM') +
+              '28-09-2026 11:03 PM'.length,
+          type: TemplateFieldType.date,
+        ),
+      ],
+    );
+
+    test('the wildcard is not a captured field', () {
+      final template = build();
+      expect(
+        template.fieldMap.values,
+        isNot(contains(TemplateFieldType.wildcard)),
+      );
+      expect(template.readsOwnSample, isTrue);
+    });
+
+    test('a different reference still matches', () {
+      final r = Parser.parse(second, [build()], currencyCode: 'KES');
+      expect(r.matched, isTrue);
+      expect(r.fields!.amountMinor, 125000);
+      expect(r.fields!.counterparty, 'JANE DOE');
+      expect(r.fields!.occurredAt, DateTime(2026, 10, 5, 9, 15));
+    });
+  });
+
+  test('a wildcard as the last label matches the rest of the line', () {
+    const sample = 'Paid KES 100 to JOHN at the market';
+    final template = CaptureTemplate.fromLabeledSample(
+      id: 't',
+      unitId: 'u',
+      name: 'trailing wildcard',
+      direction: TemplateDirection.spent,
+      sampleText: sample,
+      labels: [
+        LabeledSpan(
+          start: sample.indexOf('KES 100'),
+          end: sample.indexOf('KES 100') + 'KES 100'.length,
+          type: TemplateFieldType.amount,
+        ),
+        LabeledSpan(
+          start: sample.indexOf('JOHN'),
+          end: sample.indexOf('JOHN') + 'JOHN'.length,
+          type: TemplateFieldType.person,
+        ),
+        LabeledSpan(
+          start: sample.indexOf('the market'),
+          end: sample.length,
+          type: TemplateFieldType.wildcard,
+        ),
+      ],
+    );
+
+    final r = Parser.parse(
+      'Paid KES 250 to JANE at a different place',
+      [template],
+      currencyCode: 'KES',
+    );
+    expect(r.matched, isTrue);
+    expect(r.fields!.amountMinor, 25000);
+    expect(r.fields!.counterparty, 'JANE');
+  });
 }
