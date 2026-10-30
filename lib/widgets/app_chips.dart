@@ -22,7 +22,9 @@ class AppChoiceChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
-    final bg = selected ? c.primary.withValues(alpha: 0.15) : c.surfaceContainer;
+    final bg = selected
+        ? c.primary.withValues(alpha: 0.15)
+        : c.surfaceContainer;
     final fg = selected ? c.primary : c.onSurfaceVariant;
     final border = selected
         ? c.primary.withValues(alpha: 0.5)
@@ -155,6 +157,8 @@ class WordLabelChip extends StatelessWidget {
         return c.unitMobileMoney;
       case 'Balance':
         return c.secondary;
+      case 'This part changes':
+        return c.onSurfaceTertiary;
       default:
         return c.primary;
     }

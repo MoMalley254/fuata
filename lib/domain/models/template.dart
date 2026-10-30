@@ -8,7 +8,16 @@ library;
 /// The kinds of field a user can label a span as (US-08). `ignore` isn't
 /// listed in requirements.md's label set but is kept internal-only, not
 /// exposed here, since v0.1's rule builder only offers the six above.
-enum TemplateFieldType { amount, code, date, person, balance, fee, custom }
+enum TemplateFieldType {
+  amount,
+  code,
+  date,
+  person,
+  balance,
+  fee,
+  custom,
+  wildcard,
+}
 
 /// `direction` on a Template: which way the transaction goes. `either`
 /// lets the message decide at parse time (ui-design-brief.md 7.7 step 4)
@@ -119,6 +128,20 @@ class CaptureTemplate {
     for (var i = 0; i < sorted.length; i++) {
       final span = sorted[i];
       buffer.write(_escapeLiteral(sampleText.substring(cursor, span.start)));
+
+      // #55: a wildcard span is "this part changes between messages". It
+      // matches any text but is deliberately *not* a captured field — the
+      // parser has nothing to do with it, and it never reaches fieldMap.
+      //
+      // Non-greedy so it stops at the next literal/label. Greedy when it is
+      // the last label, so it takes the rest of the line instead of one
+      // character (the same trap as a trailing person label, #72/F11b).
+      if (span.type == TemplateFieldType.wildcard) {
+        final isLast = i == sorted.length - 1;
+        buffer.write(isLast ? r'(?:[\s\S]+)' : r'(?:[\s\S]+?)');
+        cursor = span.end;
+        continue;
+      }
 
       final isCustom = span.type == TemplateFieldType.custom;
 
@@ -305,6 +328,10 @@ class CaptureTemplate {
         // Same shape as a person: free text bounded by the surrounding
         // literals, or by the end of the line when it is the last label.
         return r'[^\n]+?';
+      case TemplateFieldType.wildcard:
+        // Handled separately in fromLabeledSample as a non-capturing
+        // group; this case exists only so the switch stays exhaustive.
+        return r'[\s\S]+?';
     }
   }
 

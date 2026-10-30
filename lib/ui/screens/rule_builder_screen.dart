@@ -32,11 +32,10 @@ import '../theme/app_typography.dart';
 /// [sampleText] (issue #21) seeds the sample box — the review inbox's
 /// "Teach me" opens this screen with the unreadable message pre-pasted.
 ///
-/// Deferred, flagged rather than silently dropped: "This part changes"
-/// wildcards (ui-design-brief.md 7.7's palette has it; the template model
-/// only turns *labeled* spans into capture groups today, so a varying
-/// word outside a label becomes fixed literal text and will break the
-/// rule — worth a model addition in a follow-up).
+/// #55: wildcard spans are non-capturing, so their offsets cannot be
+/// recovered from the pattern. If the rule uses one, the person has
+/// to re-label it when editing; the sample is still here, so the
+/// varying part is visible.
 
 class RuleBuilderScreen extends ConsumerStatefulWidget {
   final String? unitId;
