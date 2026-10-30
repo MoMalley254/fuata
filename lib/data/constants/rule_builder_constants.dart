@@ -10,6 +10,7 @@ const palette = [
   (TemplateFieldType.person, 'Payee', 'Who or where, to or from'),
   (TemplateFieldType.balance, 'Balance', 'New balance quoted'),
   (TemplateFieldType.fee, 'Fee', 'Any charge taken'),
+  (TemplateFieldType.wildcard, 'This part changes', 'Any words that vary'),
 ];
 
 String fieldName(TemplateFieldType type) => switch (type) {
@@ -20,6 +21,7 @@ String fieldName(TemplateFieldType type) => switch (type) {
   TemplateFieldType.balance => 'Balance',
   TemplateFieldType.fee => 'Fee',
   TemplateFieldType.custom => 'Custom',
+  TemplateFieldType.wildcard => 'This part changes',
 };
 
 String _spanLabel(LabeledSpan span) => span.type == TemplateFieldType.custom
