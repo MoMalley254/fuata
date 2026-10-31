@@ -1,4 +1,4 @@
-// Issue #117: long-press and drag reorders the My money row on Home.
+// test/domain/unit_reorder_test.dart
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -11,6 +11,7 @@ import 'package:fuata/domain/models/unit.dart';
 import 'package:fuata/ui/providers/app_providers.dart';
 import 'package:fuata/ui/screens/home_screen.dart';
 import 'package:fuata/ui/theme/app_theme.dart';
+import 'package:fuata/widgets/unit_card.dart';
 
 void main() {
   MoneyUnit unit(String id, String name, int sortOrder) => MoneyUnit(
@@ -35,17 +36,15 @@ void main() {
   );
 
   setUp(() {
-    // HapticFeedback goes through the platform channel, which has no
-    // handler under flutter_test.
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(SystemChannels.platform, (_) async => null);
   });
 
   Future<void> pumpRow(
-    WidgetTester tester,
-    HomeState state, {
-    ValueChanged<List<String>>? onReorder,
-  }) async {
+      WidgetTester tester,
+      HomeState state, {
+        ValueChanged<List<String>>? onReorder,
+      }) async {
     tester.view.physicalSize = const Size(1080, 2400); // 360 dp wide
     tester.view.devicePixelRatio = 3.0;
     addTearDown(tester.view.reset);
@@ -70,27 +69,35 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  testWidgets('long-press and drag a card reports the new order', (
-    tester,
-  ) async {
+  testWidgets('long-press and drag a card reports the new order', (tester) async {
     final state = stateOf([unit('a', 'Alpha', 1), unit('b', 'Bravo', 2)]);
     List<String>? reported;
     await pumpRow(tester, state, onReorder: (ids) => reported = ids);
 
-    final from = tester.getCenter(find.text('Alpha'));
-    final gesture = await tester.startGesture(from);
-    await tester.pump(kLongPressTimeout + const Duration(milliseconds: 50));
-    // Far enough to pass Bravo's midpoint.
-    await gesture.moveBy(const Offset(200, 0));
-    await tester.pump();
-    await gesture.moveBy(const Offset(100, 0));
-    await tester.pump();
+    final alphaCard = find.widgetWithText(UnitCard, 'Alpha');
+    final bravoCard = find.widgetWithText(UnitCard, 'Bravo');
+    final start = tester.getCenter(alphaCard);
+    final target = tester.getCenter(bravoCard);
+
+    // 1. Press and hold past the long-press delay (kLongPressTimeout = 500ms).
+    final gesture = await tester.startGesture(start);
+    await tester.pump(kLongPressTimeout + const Duration(milliseconds: 100));
+
+    // 2. Drag in small steps, pumping a frame each time, so the list
+    //    recomputes its insert index as the proxy crosses Bravo's midpoint.
+    final dx = (target.dx - start.dx) + 40; // a bit past Bravo's center
+    const steps = 20;
+    for (var i = 0; i < steps; i++) {
+      await gesture.moveBy(Offset(dx / steps, 0));
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    await tester.pump(const Duration(milliseconds: 100));
+
+    // 3. Drop.
     await gesture.up();
     await tester.pumpAndSettle();
 
     expect(reported, ['b', 'a']);
-    // The row shows the new order straight away, before any database
-    // round trip.
     expect(
       tester.getCenter(find.text('Bravo')).dx,
       lessThan(tester.getCenter(find.text('Alpha')).dx),
@@ -102,7 +109,9 @@ void main() {
     var calls = 0;
     await pumpRow(tester, state, onReorder: (_) => calls++);
 
-    await tester.drag(find.text('Alpha'), const Offset(-150, 0));
+    // A standard drag does NOT wait for kLongPressTimeout, so the
+    // ReorderableDelayedDragStartListener will not activate, preventing reorder.
+    await tester.drag(find.byType(UnitCard).first, const Offset(-150, 0));
     await tester.pumpAndSettle();
 
     expect(calls, 0);

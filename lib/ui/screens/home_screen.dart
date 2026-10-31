@@ -474,9 +474,8 @@ class _UnitRowState extends State<UnitRow> {
   }
 
   void _onReorder(int oldIndex, int newIndex) {
-    // ReorderableListView reports newIndex as if the dragged item were
-    // still in the list; moving later shifts everything down one.
-    if (newIndex > oldIndex) newIndex -= 1;
+    // onReorderItem already reports newIndex as the final position
+    // (after the dragged item is removed), so no adjustment is needed.
     if (newIndex == oldIndex) return;
     setState(() => _units.insert(newIndex, _units.removeAt(oldIndex)));
     widget.onReorder?.call([for (final u in _units) u.id]);

@@ -3,7 +3,7 @@
 //
 // Needs code generation first: dart run build_runner build
 
-import 'package:drift/drift.dart' show Value;
+import 'package:drift/drift.dart' show Value, driftRuntimeOptions;
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fuata/data/db/app_database.dart';
@@ -19,6 +19,8 @@ import 'package:fuata/domain/models/settings.dart';
 import '../../domain/backup_test_data.dart';
 
 void main() {
+  // Silence the multiple database warning for tests
+  driftRuntimeOptions.dontWarnAboutMultipleDatabases = true;
   late AppDatabase db;
   late DriftBackupRepository repo;
   late BackupService service;

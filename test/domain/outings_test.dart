@@ -47,12 +47,13 @@ void main() {
       expect(outing().isActive(now), isTrue);
     });
     test('before the window', () {
-      final o = outing(startAt: DateTime(2026, 10, 20));
+      final o = outing(startAt: DateTime(2030, 1, 1));
       expect(o.isActive(now), isFalse);
       expect(o.isUpcoming, isTrue);
     });
     test('after the window', () {
-      final o = outing(endAt: DateTime(2026, 10, 15));
+      // Use a date definitively in the past relative to `now` (Oct 17, 2026)
+      final o = outing(endAt: DateTime(2026, 10, 10));
       expect(o.isActive(now), isFalse);
       expect(o.isPast, isTrue);
     });
@@ -119,9 +120,6 @@ void main() {
     });
 
     test('excludes transactions outside the window', () {
-      // The 40000 and 50000 outside the window are already excluded by
-      // the previous test; this checks the shape works when the outing
-      // is narrower.
       expect(
         Outings.spentIn(
           outing(startAt: DateTime(2026, 10, 16), endAt: DateTime(2026, 10, 17)),

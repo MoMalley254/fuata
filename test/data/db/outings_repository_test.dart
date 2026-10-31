@@ -14,13 +14,13 @@ void main() {
   });
   tearDown(() => db.close());
 
-  Outing outing(String id, {String name = 'Trip'}) => Outing(
+  Outing outing(String id, {DateTime? endAt, String name = 'Trip'}) => Outing(
     id: id,
     name: name,
     amountMinor: 150000,
     currencyCode: 'KES',
     startAt: DateTime(2026, 10, 15),
-    endAt: DateTime(2026, 10, 20),
+    endAt: endAt ?? DateTime(2026, 10, 20),
     createdAt: DateTime(2026, 10, 1),
   );
 
@@ -39,24 +39,20 @@ void main() {
   });
 
   test('endOutingNow ends it early and stamps endAt', () async {
-    final original = outing('o1');   // endAt = 2026-10-20
+    // Give it an endAt in the future so DateTime.now() is guaranteed to be before it
+    final original = outing('o1', endAt: DateTime.now().add(const Duration(days: 10)));
     await repo.saveOuting(original);
-
     final before = DateTime.now();
     await repo.endOutingNow('o1');
     final after = DateTime.now();
-
     final o = (await repo.watchOutings().first).single;
-
     expect(o.enabled, isFalse,
         reason: 'endOutingNow must set enabled=false');
-
     // Meaningful assertion: endAt moved to something earlier than the
-    // original 2026-10-20. This is the one that catches the original bug
+    // original future date. This is the one that catches the original bug
     // (endAt never written at all).
     expect(o.endAt.isBefore(original.endAt), isTrue,
         reason: 'endAt must move back from ${original.endAt}');
-
     // Sanity belt: endAt is approximately "now", not some arbitrary past
     // value. Drift's dateTime() column stores Unix seconds, so the write
     // truncates sub-second precision — a `before = ...147ms` and a write
@@ -70,7 +66,6 @@ void main() {
     expect(o.endAt.isBefore(after.add(tolerance)), isTrue,
         reason: 'endAt is later than "$after" plus the tolerance — '
             'endOutingNow wrote a value from the future');
-
     // Belt-and-braces: whatever the truncation did, the new endAt is
     // within a couple of seconds of where `after` sat, so the person's
     // "I came home just now" experience is preserved.
