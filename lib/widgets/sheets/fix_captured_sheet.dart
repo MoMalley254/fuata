@@ -6,6 +6,7 @@ import 'package:intl/intl.dart';
 
 import '../../domain/models/money.dart';
 import '../../domain/models/transaction.dart';
+import '../../platform/banner.dart';
 import '../../ui/providers/app_providers.dart';
 import '../../ui/theme/app_colors.dart';
 import '../../ui/theme/app_spacing.dart';
@@ -153,6 +154,9 @@ class _FixCapturedSheetState extends ConsumerState<FixCapturedSheet> {
               rawText: t.rawText,
             ),
           );
+      // A caught-payment notification for this row would still show the
+      // old amount and Accept the unfixed version — take it down.
+      await BannerPlatform.instance.cancelCapture(t.id);
       if (mounted) Navigator.of(context).pop();
     } catch (error) {
       setState(() {

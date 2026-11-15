@@ -11,6 +11,7 @@ import '../../../domain/models/outing.dart';
 import '../../../domain/models/settings.dart';
 import '../../../routing/routes.dart';
 import '../../../widgets/personalization/action_row.dart';
+import '../../../widgets/personalization/toggle_row.dart';
 import '../../providers/app_providers.dart';
 import '../../providers/capture_providers.dart';
 import '../../theme/app_colors.dart';
@@ -132,6 +133,20 @@ class SettingsScreen extends ConsumerWidget {
 
             // ---- Notifications ---------------------------------------
             const _SectionHeader('Notifications'),
+            ToggleRow(
+              title: 'Caught-payment notifications',
+              subtitle: settings.captureNotificationsEnabled
+                  ? 'On — each catch shows its details, with Accept, Fix and '
+                        'Discard buttons'
+                  : 'Off — catches wait quietly in your inbox',
+              value: settings.captureNotificationsEnabled,
+              onChanged: (v) => ref
+                  .read(settingsRepositoryProvider)
+                  .updateSettings(
+                    settings.copyWith(captureNotificationsEnabled: v),
+                  ),
+            ),
+            const SizedBox(height: AppSpacing.sm),
             ActionRow(
               icon: Icons.notifications_outlined,
               title: 'Banner',

@@ -3,10 +3,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:fuata/ui/theme/app_colors.dart';
 import 'package:intl/intl.dart';
 
-import '../../domain/logic/ledger.dart';
+import '../../domain/logic/capture_review.dart';
 import '../../domain/models/money.dart';
 import '../../domain/models/transaction.dart';
 import '../../domain/models/unit.dart';
+import '../../platform/banner.dart';
 import '../../routing/app_keys.dart';
 import '../../ui/providers/app_providers.dart';
 import '../../ui/theme/app_spacing.dart';
@@ -22,38 +23,24 @@ class PendingCard extends ConsumerWidget {
   List<MoneyTransaction> _childRows(List<MoneyTransaction> all) =>
       all.where((x) => x.parentId == t.id).toList();
 
-  Future<void> _confirm(
-    BuildContext context,
-    WidgetRef ref,
-    List<MoneyTransaction> childRows,
-  ) async {
-    final repo = ref.read(transactionRepositoryProvider);
-    await repo.confirmTransaction(t.id);
-    for (final child in childRows) {
-      await repo.confirmTransaction(child.id);
-    }
+  CaptureReview _review(WidgetRef ref) => CaptureReview(
+    transactions: ref.read(transactionRepositoryProvider),
+    units: ref.read(unitRepositoryProvider),
+  );
+
+  Future<void> _confirm(BuildContext context, WidgetRef ref) async {
+    // The same code the capture notification's Accept button runs.
+    final result = await _review(ref).accept(t.id);
+    // The row is handled either way; its notification has nothing left to ask.
+    await BannerPlatform.instance.cancelCapture(t.id);
     if (!context.mounted) return;
     final messenger = ScaffoldMessenger.of(context);
-    final unit = this.unit;
-    if (t.balanceAfterMinor == null || unit == null) {
-      messenger.showSnackBar(
-        const SnackBar(content: Text('Added to your money.')),
-      );
-      return;
-    }
 
     // Reconcile (requirements.md section 5): if the balance the message
     // quoted disagrees with the ledger now that this row is in, flag it
     // and offer the adjustment entry immediately.
-    final all = ref.read(transactionsProvider).value ?? [];
-    final others = all.where(
-      (x) => x.isConfirmed && x.id != t.id && x.parentId != t.id,
-    );
-    final computed =
-        Ledger.balanceOf(unit, others) +
-        t.amountMinor +
-        childRows.fold<int>(0, (sum, x) => sum + x.amountMinor);
-    if (t.balanceAfterMinor == computed) {
+    final unit = result.unit;
+    if (!result.balanceMismatch || unit == null) {
       messenger.showSnackBar(
         const SnackBar(content: Text('Added to your money.')),
       );
@@ -64,13 +51,13 @@ class PendingCard extends ConsumerWidget {
     // immutables, so the closure below survives the PendingCard being
     // unmounted when confirmTransaction removes t from the pending list.
     final capturedUnit = unit;
-    final capturedComputed = computed;
+    final capturedComputed = result.ledgerBalanceMinor!;
 
     messenger.showSnackBar(
       SnackBar(
         content: Text(
-          "The message says ${Money(t.balanceAfterMinor!, unit.currencyCode).format()}, "
-          'but the ledger says ${Money(computed, unit.currencyCode).format()}.',
+          "The message says ${Money(result.quotedBalanceMinor!, unit.currencyCode).format()}, "
+          'but the ledger says ${Money(capturedComputed, unit.currencyCode).format()}.',
         ),
         action: SnackBarAction(
           label: 'Update balance',
@@ -87,16 +74,9 @@ class PendingCard extends ConsumerWidget {
     );
   }
 
-  Future<void> _delete(
-    BuildContext context,
-    WidgetRef ref,
-    List<MoneyTransaction> childRows,
-  ) async {
-    final repo = ref.read(transactionRepositoryProvider);
-    for (final child in childRows) {
-      await repo.deleteTransaction(child.id);
-    }
-    await repo.deleteTransaction(t.id);
+  Future<void> _delete(BuildContext context, WidgetRef ref) async {
+    await _review(ref).discard(t.id);
+    await BannerPlatform.instance.cancelCapture(t.id);
     if (context.mounted) {
       ScaffoldMessenger.of(context)
           .showSnackBar(const SnackBar(content: Text('Removed.')));
@@ -179,7 +159,7 @@ class PendingCard extends ConsumerWidget {
                 icon: Icons.check_rounded,
                 label: 'Looks right',
                 color: c.statusSafe,
-                onTap: () => _confirm(context, ref, childRows),
+                onTap: () => _confirm(context, ref),
               ),
               _action(
                 c: c,
@@ -193,7 +173,7 @@ class PendingCard extends ConsumerWidget {
                 icon: Icons.close_rounded,
                 label: 'Not mine',
                 color: c.onSurfaceVariant,
-                onTap: () => _delete(context, ref, childRows),
+                onTap: () => _delete(context, ref),
               ),
             ],
           ),

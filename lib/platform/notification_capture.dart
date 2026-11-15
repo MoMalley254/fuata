@@ -18,6 +18,7 @@
 // CaptureProcessor. It is never logged here, and nothing is stored unless
 // the package is an enabled capture source (US-10).
 // ---------------------------------------------------------------------------
+import 'dart:isolate';
 import 'dart:ui';
 
 import 'package:flutter/services.dart';
@@ -27,7 +28,9 @@ import 'package:fuata/platform/widget_bridge.dart';
 import '../data/constants/method_channels_constants.dart';
 import '../data/db/app_database.dart';
 import '../data/db/drift_repositories.dart';
+import '../domain/logic/alert_engine.dart';
 import '../domain/logic/banner_loader.dart';
+import '../domain/logic/capture_notification_content.dart';
 import '../domain/logic/capture_pipeline.dart';
 import '../domain/logic/serial_queue.dart';
 import '../domain/logic/widget_content.dart';
@@ -142,6 +145,33 @@ void listenForCaptureChanges(VoidCallback? onChanged) {
   });
 }
 
+// A second route into the UI isolate, for the capture notification's
+// Accept / Discard buttons. Those run in the *plugin's* background engine,
+// which has no `fuata/capture` channel to the UI, so the native ping above
+// can't carry them. Isolates in one process can find each other by name, so
+// the UI registers a port and the background handler pokes it.
+const _uiPingPortName = 'fuata/capture_action_ping';
+ReceivePort? _uiPingPort;
+
+/// UI isolate: [onChanged] runs whenever a capture notification's button
+/// changed the ledger from the background. Pass null to detach.
+void listenForCaptureActionPings(VoidCallback? onChanged) {
+  IsolateNameServer.removePortNameMapping(_uiPingPortName);
+  _uiPingPort?.close();
+  _uiPingPort = null;
+  if (onChanged == null) return;
+  final port = ReceivePort();
+  IsolateNameServer.registerPortWithName(port.sendPort, _uiPingPortName);
+  port.listen((_) => onChanged());
+  _uiPingPort = port;
+}
+
+/// Background isolate: tell a running UI to re-query. A no-op when the app
+/// isn't running — nobody has registered the port.
+void pingUiAfterCaptureAction() {
+  IsolateNameServer.lookupPortByName(_uiPingPortName)?.send(null);
+}
+
 // --- Background isolate -------------------------------------------------
 
 /// The background entry point. Runs in its own isolate, in its own
@@ -191,37 +221,19 @@ Future<bool> _captureOne(String packageName, String text) async {
     final outcome = await processor.captureNotification(packageName, text);
     final wrote = outcome is Captured || outcome is CaptureUnparsed;
     if (wrote) {
-      // Issue #16: the ongoing banner has to be re-posted from *here*
-      // too — this isolate is the only thing running when the app is
-      // closed, so the UI isolate's bannerSyncProvider can't see the
-      // write. A banner failure must never break the capture: the row is
-      // already saved, and the UI isolate re-posts on next open.
-      try {
-        await _refreshBanner(db);
-      } catch (e) {
-        debugPrint('[capture] banner re-post failed: ${e.runtimeType}');
-      }
-      // Issue #63: same reasoning for limit alerts — the UI isolate can't
-      // see this write when the app is closed. Independent try/catch: a
-      // banner failure must not swallow an alert, or the reverse.
-      try {
-        await fireDueAlerts(
-          units: DriftUnitRepository(db),
-          transactions: DriftTransactionRepository(db),
-          limits: DriftLimitRepository(db),
-          outings: DriftOutingRepository(db),
-          settings: DriftSettingsRepository(db),
-          log: DriftAlertLogRepository(db),
-        );
-      } catch (e) {
-        debugPrint('[capture] alert failed: ${e.runtimeType}');
-      }
+      await refreshDerivedState(db);
 
-      //Issue #29
-      try {
-        await _refreshWidget(db);
-      } catch (e) {
-        debugPrint('[capture] widget push failed: ${e.runtimeType}');
+      // The caught-payment notification: details plus Accept / Fix /
+      // Discard. Only for a capture that is waiting for a check — an
+      // auto-accepted one is already in the ledger. Its own try/catch for
+      // the same reason as the others: the row is saved, so a notification
+      // failure must never turn this capture into an error.
+      if (outcome is Captured && !outcome.autoAccepted) {
+        try {
+          await _announceCapture(db, outcome.transactionId);
+        } catch (e) {
+          debugPrint('[capture] notification failed: ${e.runtimeType}');
+        }
       }
     }
     return wrote;
@@ -232,6 +244,81 @@ Future<bool> _captureOne(String packageName, String text) async {
   } finally {
     await db.close();
   }
+}
+
+/// Everything that is derived from the ledger and shown outside the app:
+/// the ongoing banner, limit alerts and the home-screen widget. Run after
+/// *anything* in a background isolate changes the ledger — a capture
+/// arriving, or a capture being accepted or discarded from its notification
+/// — because the UI isolate can't see the write when the app is closed.
+///
+/// Each step has its own try/catch: a banner failure must not swallow an
+/// alert, or the reverse, and none of them may undo a write that is already
+/// saved. The UI isolate re-posts on next open.
+Future<void> refreshDerivedState(AppDatabase db) async {
+  // Issue #16: the ongoing banner has to be re-posted from *here* too —
+  // this isolate is the only thing running when the app is closed, so the
+  // UI isolate's bannerSyncProvider can't see the write.
+  try {
+    await _refreshBanner(db);
+  } catch (e) {
+    debugPrint('[capture] banner re-post failed: ${e.runtimeType}');
+  }
+  // Issue #63: same reasoning for limit alerts.
+  try {
+    await fireDueAlerts(
+      units: DriftUnitRepository(db),
+      transactions: DriftTransactionRepository(db),
+      limits: DriftLimitRepository(db),
+      outings: DriftOutingRepository(db),
+      settings: DriftSettingsRepository(db),
+      log: DriftAlertLogRepository(db),
+    );
+  } catch (e) {
+    debugPrint('[capture] alert failed: ${e.runtimeType}');
+  }
+  // Issue #29: the home-screen widget.
+  try {
+    await _refreshWidget(db);
+  } catch (e) {
+    debugPrint('[capture] widget push failed: ${e.runtimeType}');
+  }
+}
+
+/// Posts the "I caught this — Accept, Fix or Discard?" notification for a
+/// freshly captured, pending transaction. Honours the person's switch (off
+/// means nothing is posted), their hide-amounts and lock-screen choices and
+/// their quiet hours.
+Future<void> _announceCapture(AppDatabase db, String transactionId) async {
+  final settings = await DriftSettingsRepository(db).watchSettings().first;
+  if (!settings.captureNotificationsEnabled) return;
+
+  final all = await DriftTransactionRepository(db).watchTransactions().first;
+  final tx = all.where((t) => t.id == transactionId).firstOrNull;
+  if (tx == null) return;
+  final fees = all.where((t) => t.parentId == transactionId).toList();
+  final units = await DriftUnitRepository(db).watchUnits().first;
+  final unit = units.where((u) => u.id == tx.unitId).firstOrNull;
+
+  final content = CaptureNotificationText.build(
+    transaction: tx,
+    fees: fees,
+    unit: unit,
+    amountsHidden: settings.amountsHidden,
+    currencyCode: settings.currencyCode,
+  );
+  final quiet =
+      settings.quietHoursEnabled &&
+      QuietHours.contains(
+        startMinute: settings.quietStartMinute,
+        endMinute: settings.quietEndMinute,
+        at: DateTime.now(),
+      );
+  await BannerPlatform.instance.showCapture(
+    content,
+    quiet: quiet,
+    redactOnLockScreen: settings.redactedLockScreenBanner,
+  );
 }
 
 /// Rebuilds the banner from the same repositories the capture just wrote

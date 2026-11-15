@@ -4006,6 +4006,58 @@ final privacySyncProvider = Provider<void>((ref) {
 });
 </file>
 
+<file path="lib/ui/providers/summary_providers.dart">
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../../domain/logic/summary.dart';
+import 'app_providers.dart';
+
+/// Issue #23: the summary for one period, recomputed whenever units or
+/// transactions change.
+///
+/// The summary currency is the first unit's, the same rule Home uses for
+/// its hero card; transactions on a unit in another currency are left out
+/// instead of being added to it as if it were the same money (testing.md
+/// T-13).
+class SummaryData {
+  final PeriodSummary summary;
+  final String currencyCode;
+  const SummaryData({required this.summary, required this.currencyCode});
+}
+
+final summaryProvider =
+Provider.family<AsyncValue<SummaryData>, SummaryPeriod>((ref, period) {
+  // "Today" and "this week" change at midnight even when no transaction
+  // does (issue #107).
+  ref.watch(midnightTickProvider);
+  final unitsAsync = ref.watch(unitsProvider);
+  final txAsync = ref.watch(transactionsProvider);
+
+  if (unitsAsync.isLoading || txAsync.isLoading) {
+    return const AsyncValue.loading();
+  }
+  final error = unitsAsync.error ?? txAsync.error;
+  if (error != null) return AsyncValue.error(error, StackTrace.current);
+
+  final units = unitsAsync.value ?? [];
+  final currency = units.isNotEmpty ? units.first.currencyCode : 'KES';
+  final currencyByUnit = {for (final u in units) u.id: u.currencyCode};
+
+  final summary = PeriodSummary.build(
+    txAsync.value ?? [],
+    period,
+    DateTime.now(),
+    // A transaction on an archived unit has no entry here; it is still the
+    // person's money, so only a *known* different currency is excluded.
+    include: (t) {
+      final unitCurrency = currencyByUnit[t.unitId];
+      return unitCurrency == null || unitCurrency == currency;
+    },
+  );
+  return AsyncValue.data(SummaryData(summary: summary, currencyCode: currency));
+});
+</file>
+
 <file path="lib/ui/screens/settings/detail_level_screen.dart">
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -10080,397 +10132,6 @@ for t in \
 done
 
 echo "Done."
-</file>
-
-<file path="test/data/db/backup_repository_test.dart">
-// Issue #24: export and import against a real (in-memory) database — the
-// round trip, "never overwrites silently", and all-or-nothing writes.
-//
-// Needs code generation first: dart run build_runner build
-
-import 'package:drift/drift.dart' show Value, driftRuntimeOptions;
-import 'package:drift/native.dart';
-import 'package:flutter_test/flutter_test.dart';
-import 'package:fuata/data/db/app_database.dart';
-import 'package:fuata/data/db/backup_repository.dart';
-import 'package:fuata/data/db/drift_repositories.dart';
-import 'package:fuata/domain/logic/backup_codec.dart';
-import 'package:fuata/domain/logic/backup_import.dart';
-import 'package:fuata/domain/logic/backup_service.dart';
-import 'package:fuata/domain/models/backup_snapshot.dart';
-import 'package:fuata/domain/models/limit_alert.dart';
-import 'package:fuata/domain/models/settings.dart';
-
-import '../../domain/backup_test_data.dart';
-
-void main() {
-  // Silence the multiple database warning for tests
-  driftRuntimeOptions.dontWarnAboutMultipleDatabases = true;
-  late AppDatabase db;
-  late DriftBackupRepository repo;
-  late BackupService service;
-
-  setUp(() {
-    db = AppDatabase(NativeDatabase.memory());
-    repo = DriftBackupRepository(db);
-    service = BackupService(repo, clock: () => exportedAt);
-  });
-
-  tearDown(() => db.close());
-
-  /// Fill a database the way the app would, through its own repositories.
-  /// Wipes the seeded default categories first, so the fixture fully
-  /// controls what readAll() sees.
-  Future<void> seed(AppDatabase target) async {
-    final snap = fullSnapshot();
-
-    // A fresh AppDatabase seeds 9 default categories at create
-    // (issue #83, _seedDefaultCategories). The fixture carries its own
-    // set, so start from a clean table — otherwise every round-trip
-    // comparison sees 9 extra rows and "recordCount" no longer matches
-    // what "readAll()" returns.
-    await target.delete(target.categories).go();
-
-    for (final c in snap.categories) {
-      await target.into(target.categories).insert(
-        CategoriesCompanion.insert(
-          id: c.id,
-          name: c.name,
-          emoji: c.emoji,
-          colorValue: c.colorValue,
-          sortOrder: Value(c.sortOrder),
-          archived: Value(c.archived),
-        ),
-      );
-    }
-
-    final units = DriftUnitRepository(target);
-    for (final u in snap.units) {
-      await units.addUnit(u);
-    }
-    for (final s in snap.captureSources) {
-      await DriftCaptureSourceRepository(target).saveSource(s);
-    }
-    for (final t in snap.templates) {
-      await DriftTemplateRepository(target).saveTemplate(t);
-    }
-    final txs = DriftTransactionRepository(target);
-    for (final t in snap.transactions) {
-      await txs.addTransaction(t);
-    }
-    for (final l in snap.limits) {
-      await DriftLimitRepository(target).setLimit(l);
-    }
-    await DriftSettingsRepository(target).updateSettings(snap.settings!);
-  }
-
-  Future<String> exportOf(AppDatabase target) async =>
-      (await BackupService(DriftBackupRepository(target), clock: () => exportedAt)
-          .buildExport())
-          .json;
-
-  test('a fresh phone exports an empty, valid backup', () async {
-    final built = await service.buildExport();
-    final decoded = BackupCodec.decode(built.json);
-
-    expect(decoded.ok, isTrue);
-    expect(decoded.snapshot!.units, isEmpty);
-    expect(decoded.snapshot!.transactions, isEmpty);
-  });
-
-  test('export from one phone, import into another: identical data', () async {
-    await seed(db);
-    final json = await exportOf(db);
-
-    final other = AppDatabase(NativeDatabase.memory());
-    addTearDown(other.close);
-    // A fresh AppDatabase seeds the 9 default categories at create
-    // (issue #83). This test models an *empty* phone receiving the file,
-    // so wipe them — otherwise the import lands alongside them and the
-    // re-export has 9 rows the source didn't.
-    await other.delete(other.categories).go();
-    final otherService = BackupService(
-      DriftBackupRepository(other),
-      clock: () => exportedAt,
-    );
-
-    final preview = await otherService.preview(json);
-    expect(preview.canImport, isTrue);
-    expect(preview.phoneHasData, isFalse);
-    expect(preview.plan!.hasConflicts, isFalse);
-
-    final outcome = await otherService.apply(
-      preview,
-      policy: ConflictPolicy.keepMine,
-      restoreSettings: true,
-    );
-
-    expect(outcome.added, fullSnapshot().recordCount);
-    expect(outcome.settingsRestored, isTrue);
-    // The strongest check: exporting the second phone gives the same file.
-    expect(await exportOf(other), json);
-  });
-
-  test('importing the same file again changes nothing', () async {
-    await seed(db);
-    final json = await exportOf(db);
-
-    final preview = await service.preview(json);
-
-    expect(preview.plan!.changesNothing, isTrue);
-    expect(preview.plan!.identicalCount, fullSnapshot().recordCount);
-    expect(preview.plan!.hasConflicts, isFalse);
-  });
-
-  test('a file with a problem is refused and nothing is written', () async {
-    final preview = await service.preview('definitely not a backup');
-
-    expect(preview.canImport, isFalse);
-    expect(preview.plan, isNull);
-    await expectLater(
-          () => service.apply(
-        preview,
-        policy: ConflictPolicy.useFile,
-        restoreSettings: true,
-      ),
-      throwsStateError,
-    );
-    expect((await repo.readAll()).units, isEmpty);
-  });
-
-  test('a transaction for a unit that exists nowhere is refused', () async {
-    final json = BackupCodec.encode(
-      BackupSnapshot(transactions: [tx('t1', unitId: 'ghost')]),
-      exportedAt: exportedAt,
-    );
-
-    final preview = await service.preview(json);
-
-    expect(preview.canImport, isFalse);
-    expect(preview.blockers.single, contains('money unit'));
-  });
-
-  group('never overwrites silently', () {
-    Future<String> fileWithUnitNamed(String name) async => BackupCodec.encode(
-      BackupSnapshot(units: [unit('u1', name: name)]),
-      exportedAt: exportedAt,
-    );
-
-    test('the phone\'s version is kept by default', () async {
-      await DriftUnitRepository(db).addUnit(unit('u1', name: 'Wallet'));
-
-      final preview = await service.preview(await fileWithUnitNamed('Cash'));
-      expect(preview.plan!.units.conflicts, hasLength(1));
-
-      final outcome = await service.apply(
-        preview,
-        policy: ConflictPolicy.keepMine,
-        restoreSettings: false,
-      );
-
-      expect((await repo.readAll()).units.single.name, 'Wallet');
-      expect(outcome.skipped, 1);
-      expect(outcome.replaced, 0);
-    });
-
-    test('the file\'s version replaces it only when asked', () async {
-      await DriftUnitRepository(db).addUnit(unit('u1', name: 'Wallet'));
-
-      final preview = await service.preview(await fileWithUnitNamed('Cash'));
-      final outcome = await service.apply(
-        preview,
-        policy: ConflictPolicy.useFile,
-        restoreSettings: false,
-      );
-
-      expect((await repo.readAll()).units.single.name, 'Cash');
-      expect(outcome.replaced, 1);
-    });
-
-    test('new records are added alongside the phone\'s own', () async {
-      await DriftUnitRepository(db).addUnit(unit('u1', name: 'Wallet'));
-      final json = BackupCodec.encode(
-        BackupSnapshot(units: [unit('u2', name: 'M-Pesa', sortOrder: 1)]),
-        exportedAt: exportedAt,
-      );
-
-      final preview = await service.preview(json);
-      await service.apply(
-        preview,
-        policy: ConflictPolicy.keepMine,
-        restoreSettings: false,
-      );
-
-      expect((await repo.readAll()).units.map((u) => u.name), ['Wallet', 'M-Pesa']);
-    });
-
-    test('settings are left alone unless restoring them is chosen', () async {
-      await DriftSettingsRepository(db)
-          .updateSettings(AppSettings.defaults.copyWith(name: 'Mine'));
-      final json = BackupCodec.encode(
-        BackupSnapshot(units: [unit('u1')], settings: customSettings()),
-        exportedAt: exportedAt,
-      );
-
-      final preview = await service.preview(json);
-      await service.apply(
-        preview,
-        policy: ConflictPolicy.keepMine,
-        restoreSettings: false,
-      );
-      expect((await repo.readAll()).settings!.name, 'Mine');
-
-      await service.apply(
-        preview,
-        policy: ConflictPolicy.keepMine,
-        restoreSettings: true,
-      );
-      expect((await repo.readAll()).settings!.name, 'Wanjiru');
-    });
-  });
-
-  group('erase everything (#85, US-16)', () {
-    /// Fill every table a backup carries, then give the two tables
-    /// readAll() doesn't touch a row of their own — otherwise "every watch
-    /// stream is empty" would be a claim about a table that was never
-    /// written to.
-    Future<void> seedEverything() async {
-      await seed(db);
-      await DriftAlertLogRepository(db).claim(
-        const AlertKey('l_overall_day', '2026-09-30', AlertLevel.warning),
-        DateTime.utc(2026, 9, 30),
-      );
-      await db.into(db.unparsedCaptures).insert(
-        UnparsedCapturesCompanion.insert(
-          id: 'u_unread',
-          receivedAt: DateTime.utc(2026, 9, 30),
-          sourcePackage: 'shared',
-          rawText: 'a message nothing could read',
-        ),
-      );
-    }
-
-    test('leaves every table empty — the record tables readAll() covers', () async {
-      await seedEverything();
-      // Sanity: the seed actually filled things.
-      expect((await repo.readAll()).recordCount, fullSnapshot().recordCount);
-
-      await repo.eraseAll();
-
-      final after = await repo.readAll();
-      expect(after.units, isEmpty);
-      expect(after.categories, isEmpty);
-      expect(after.captureSources, isEmpty);
-      expect(after.templates, isEmpty);
-      expect(after.transactions, isEmpty);
-      expect(after.limits, isEmpty);
-    });
-
-    test('leaves nothing behind in the tables readAll() does not carry',
-            () async {
-          await seedEverything();
-
-          await repo.eraseAll();
-
-          expect(await db.select(db.unparsedCaptures).get(), isEmpty);
-          expect(await db.select(db.alertFirings).get(), isEmpty);
-          expect(await db.select(db.settingsEntries).get(), isEmpty);
-        });
-
-    test('settings read as a fresh install again', () async {
-      await seedEverything();
-      // Prove the flag was true before the erase, so a false after means
-      // the reset happened rather than the seed never setting it.
-      await DriftSettingsRepository(db).updateSettings(
-        AppSettings.defaults.copyWith(name: 'Wanjiru', onboardingComplete: true),
-      );
-
-      await repo.eraseAll();
-
-      final s = await DriftSettingsRepository(db).watchSettings().first;
-      expect(s.onboardingComplete, isFalse);
-      expect(s.name, AppSettings.defaults.name);
-      expect(s.bannerEnabled, AppSettings.defaults.bannerEnabled);
-      expect(s.accent, AppSettings.defaults.accent);
-    });
-
-    test('erasing an already-empty database is a no-op, not an error',
-            () async {
-          await repo.eraseAll();
-          final after = await repo.readAll();
-          expect(after.isEmpty, isTrue);
-          expect(after.settings, isNotNull); // still "the current defaults"
-        });
-
-    test('every stream a screen watches is empty afterwards', () async {
-      await seedEverything();
-
-      await repo.eraseAll();
-
-      // What Home, Activity, My money, Limits, the rule builder and the
-      // review inbox actually watch — the shape of the acceptance
-      // criterion in the issue.
-      expect(await DriftUnitRepository(db).watchUnits(includeArchived: true).first,
-          isEmpty);
-      expect(await DriftTransactionRepository(db).watchTransactions().first,
-          isEmpty);
-      expect(await DriftLimitRepository(db).watchLimits().first, isEmpty);
-      expect(await DriftTemplateRepository(db).watchTemplates().first, isEmpty);
-      expect(await DriftCaptureRepository(db).watchUnparsed().first, isEmpty);
-      expect(await DriftCaptureSourceRepository(db).watchSources().first,
-          isEmpty);
-      expect(await DriftAlertLogRepository(db).firedKeys(), isEmpty);
-      expect(
-        (await DriftSettingsRepository(db).watchSettings().first)
-            .onboardingComplete,
-        isFalse,
-      );
-    });
-  });
-
-  test('a write that fails half-way leaves the database untouched', () async {
-    // Bypasses the planner on purpose: this is the repository's own
-    // guarantee. The unit is valid, the transaction after it points at a
-    // unit that does not exist, so the foreign key rejects it — and the
-    // unit written just before must not survive.
-    final bad = BackupSnapshot(
-      units: [unit('u1')],
-      transactions: [tx('t1', unitId: 'ghost')],
-    );
-
-    await expectLater(repo.apply(bad), throwsA(anything));
-
-    final after = await repo.readAll();
-    expect(after.units, isEmpty);
-    expect(after.transactions, isEmpty);
-  });
-
-  test('raising a limit on import clears the alerts shown for the old amount', () async {
-    final limits = DriftLimitRepository(db);
-    await DriftUnitRepository(db).addUnit(unit('u1'));
-    await limits.setLimit(overallDayLimit(amount: 100000));
-    final alerts = DriftAlertLogRepository(db);
-    final key = AlertKey(
-      overallDayLimit().id,
-      '2026-09-30',
-      AlertLevel.warning,
-    );
-    expect(await alerts.claim(key, DateTime.utc(2026, 9, 30)), isTrue);
-
-    final json = BackupCodec.encode(
-      BackupSnapshot(limits: [overallDayLimit(amount: 500000)]),
-      exportedAt: exportedAt,
-    );
-    final preview = await service.preview(json);
-    await service.apply(
-      preview,
-      policy: ConflictPolicy.useFile,
-      restoreSettings: false,
-    );
-
-    expect(await alerts.firedKeys(), isEmpty);
-  });
-}
 </file>
 
 <file path="test/data/db/capture_source_repository_test.dart">
@@ -17308,6 +16969,71 @@ class SummaryNotificationScheduler {
 }
 </file>
 
+<file path="lib/ui/providers/alert_providers.dart">
+// ---------------------------------------------------------------------------
+// Firing limit alerts from the UI isolate (issue #63, US-06).
+//
+// Like bannerSyncProvider: watch the data, and act whenever it changes. What
+// it does *not* handle is a capture written by the notification listener
+// while the app is closed — that path fires from its own isolate
+// (platform/notification_capture.dart). Both go through [fireDueAlerts],
+// whose database claim makes "once per threshold per period" hold no matter
+// which of them notices first.
+// ---------------------------------------------------------------------------
+
+import 'package:flutter/foundation.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../../domain/logic/serial_queue.dart';
+import '../../platform/alerts.dart';
+import 'app_providers.dart';
+
+final _alertQueue = SerialQueue();
+
+/// Start once, from Fuata's build (watched, like bannerSyncProvider).
+final alertSyncProvider = Provider<void>((ref) {
+  // A new day/week/month is a new period, so re-evaluate on the tick.
+  ref.watch(midnightTickProvider);
+  final units = ref.watch(unitsProvider);
+  final transactions = ref.watch(transactionsProvider);
+  final limits = ref.watch(limitsProvider);
+  final settings = ref.watch(settingsProvider);
+
+  // Still loading: evaluating against half the data could announce a
+  // crossing that isn't real. Wait for everything.
+  if (units.value == null ||
+      transactions.value == null ||
+      limits.value == null ||
+      settings.value == null) {
+    return;
+  }
+
+  final unitRepo = ref.read(unitRepositoryProvider);
+  final txRepo = ref.read(transactionRepositoryProvider);
+  final limitRepo = ref.read(limitRepositoryProvider);
+  final settingsRepo = ref.read(settingsRepositoryProvider);
+  final log = ref.read(alertLogRepositoryProvider);
+  final outingsRepo = ref.read(outingRepositoryProvider);
+
+  // Serialised so two quick changes can't run two evaluations at once in
+  // this isolate. An alert failure must never surface to the person.
+  _alertQueue.run(() async {
+    try {
+      await fireDueAlerts(
+        units: unitRepo,
+        transactions: txRepo,
+        limits: limitRepo,
+        outings: outingsRepo,
+        settings: settingsRepo,
+        log: log,
+      );
+    } catch (e) {
+      debugPrint('[alerts] failed: ${e.runtimeType}');
+    }
+  });
+});
+</file>
+
 <file path="lib/ui/providers/banner_providers.dart">
 // ---------------------------------------------------------------------------
 // The ongoing banner's data-driven re-post (issue #16, US-05).
@@ -17496,58 +17222,6 @@ final summaryNotificationSyncProvider = Provider<void>((ref) {
     ),
     redactOnLockScreen: settings.redactedLockScreenBanner,
   );
-});
-</file>
-
-<file path="lib/ui/providers/summary_providers.dart">
-import 'package:flutter_riverpod/flutter_riverpod.dart';
-
-import '../../domain/logic/summary.dart';
-import 'app_providers.dart';
-
-/// Issue #23: the summary for one period, recomputed whenever units or
-/// transactions change.
-///
-/// The summary currency is the first unit's, the same rule Home uses for
-/// its hero card; transactions on a unit in another currency are left out
-/// instead of being added to it as if it were the same money (testing.md
-/// T-13).
-class SummaryData {
-  final PeriodSummary summary;
-  final String currencyCode;
-  const SummaryData({required this.summary, required this.currencyCode});
-}
-
-final summaryProvider =
-Provider.family<AsyncValue<SummaryData>, SummaryPeriod>((ref, period) {
-  // "Today" and "this week" change at midnight even when no transaction
-  // does (issue #107).
-  ref.watch(midnightTickProvider);
-  final unitsAsync = ref.watch(unitsProvider);
-  final txAsync = ref.watch(transactionsProvider);
-
-  if (unitsAsync.isLoading || txAsync.isLoading) {
-    return const AsyncValue.loading();
-  }
-  final error = unitsAsync.error ?? txAsync.error;
-  if (error != null) return AsyncValue.error(error, StackTrace.current);
-
-  final units = unitsAsync.value ?? [];
-  final currency = units.isNotEmpty ? units.first.currencyCode : 'KES';
-  final currencyByUnit = {for (final u in units) u.id: u.currencyCode};
-
-  final summary = PeriodSummary.build(
-    txAsync.value ?? [],
-    period,
-    DateTime.now(),
-    // A transaction on an archived unit has no entry here; it is still the
-    // person's money, so only a *known* different currency is excluded.
-    include: (t) {
-      final unitCurrency = currencyByUnit[t.unitId];
-      return unitCurrency == null || unitCurrency == currency;
-    },
-  );
-  return AsyncValue.data(SummaryData(summary: summary, currencyCode: currency));
 });
 </file>
 
@@ -24439,6 +24113,397 @@ void main() {
 }
 </file>
 
+<file path="test/data/db/backup_repository_test.dart">
+// Issue #24: export and import against a real (in-memory) database — the
+// round trip, "never overwrites silently", and all-or-nothing writes.
+//
+// Needs code generation first: dart run build_runner build
+
+import 'package:drift/drift.dart' show Value, driftRuntimeOptions;
+import 'package:drift/native.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:fuata/data/db/app_database.dart';
+import 'package:fuata/data/db/backup_repository.dart';
+import 'package:fuata/data/db/drift_repositories.dart';
+import 'package:fuata/domain/logic/backup_codec.dart';
+import 'package:fuata/domain/logic/backup_import.dart';
+import 'package:fuata/domain/logic/backup_service.dart';
+import 'package:fuata/domain/models/backup_snapshot.dart';
+import 'package:fuata/domain/models/limit_alert.dart';
+import 'package:fuata/domain/models/settings.dart';
+
+import '../../domain/backup_test_data.dart';
+
+void main() {
+  // Silence the multiple database warning for tests
+  driftRuntimeOptions.dontWarnAboutMultipleDatabases = true;
+  late AppDatabase db;
+  late DriftBackupRepository repo;
+  late BackupService service;
+
+  setUp(() {
+    db = AppDatabase(NativeDatabase.memory());
+    repo = DriftBackupRepository(db);
+    service = BackupService(repo, clock: () => exportedAt);
+  });
+
+  tearDown(() => db.close());
+
+  /// Fill a database the way the app would, through its own repositories.
+  /// Wipes the seeded default categories first, so the fixture fully
+  /// controls what readAll() sees.
+  Future<void> seed(AppDatabase target) async {
+    final snap = fullSnapshot();
+
+    // A fresh AppDatabase seeds 9 default categories at create
+    // (issue #83, _seedDefaultCategories). The fixture carries its own
+    // set, so start from a clean table — otherwise every round-trip
+    // comparison sees 9 extra rows and "recordCount" no longer matches
+    // what "readAll()" returns.
+    await target.delete(target.categories).go();
+
+    for (final c in snap.categories) {
+      await target.into(target.categories).insert(
+        CategoriesCompanion.insert(
+          id: c.id,
+          name: c.name,
+          emoji: c.emoji,
+          colorValue: c.colorValue,
+          sortOrder: Value(c.sortOrder),
+          archived: Value(c.archived),
+        ),
+      );
+    }
+
+    final units = DriftUnitRepository(target);
+    for (final u in snap.units) {
+      await units.addUnit(u);
+    }
+    for (final s in snap.captureSources) {
+      await DriftCaptureSourceRepository(target).saveSource(s);
+    }
+    for (final t in snap.templates) {
+      await DriftTemplateRepository(target).saveTemplate(t);
+    }
+    final txs = DriftTransactionRepository(target);
+    for (final t in snap.transactions) {
+      await txs.addTransaction(t);
+    }
+    for (final l in snap.limits) {
+      await DriftLimitRepository(target).setLimit(l);
+    }
+    await DriftSettingsRepository(target).updateSettings(snap.settings!);
+  }
+
+  Future<String> exportOf(AppDatabase target) async =>
+      (await BackupService(DriftBackupRepository(target), clock: () => exportedAt)
+          .buildExport())
+          .json;
+
+  test('a fresh phone exports an empty, valid backup', () async {
+    final built = await service.buildExport();
+    final decoded = BackupCodec.decode(built.json);
+
+    expect(decoded.ok, isTrue);
+    expect(decoded.snapshot!.units, isEmpty);
+    expect(decoded.snapshot!.transactions, isEmpty);
+  });
+
+  test('export from one phone, import into another: identical data', () async {
+    await seed(db);
+    final json = await exportOf(db);
+
+    final other = AppDatabase(NativeDatabase.memory());
+    addTearDown(other.close);
+    // A fresh AppDatabase seeds the 9 default categories at create
+    // (issue #83). This test models an *empty* phone receiving the file,
+    // so wipe them — otherwise the import lands alongside them and the
+    // re-export has 9 rows the source didn't.
+    await other.delete(other.categories).go();
+    final otherService = BackupService(
+      DriftBackupRepository(other),
+      clock: () => exportedAt,
+    );
+
+    final preview = await otherService.preview(json);
+    expect(preview.canImport, isTrue);
+    expect(preview.phoneHasData, isFalse);
+    expect(preview.plan!.hasConflicts, isFalse);
+
+    final outcome = await otherService.apply(
+      preview,
+      policy: ConflictPolicy.keepMine,
+      restoreSettings: true,
+    );
+
+    expect(outcome.added, fullSnapshot().recordCount);
+    expect(outcome.settingsRestored, isTrue);
+    // The strongest check: exporting the second phone gives the same file.
+    expect(await exportOf(other), json);
+  });
+
+  test('importing the same file again changes nothing', () async {
+    await seed(db);
+    final json = await exportOf(db);
+
+    final preview = await service.preview(json);
+
+    expect(preview.plan!.changesNothing, isTrue);
+    expect(preview.plan!.identicalCount, fullSnapshot().recordCount);
+    expect(preview.plan!.hasConflicts, isFalse);
+  });
+
+  test('a file with a problem is refused and nothing is written', () async {
+    final preview = await service.preview('definitely not a backup');
+
+    expect(preview.canImport, isFalse);
+    expect(preview.plan, isNull);
+    await expectLater(
+          () => service.apply(
+        preview,
+        policy: ConflictPolicy.useFile,
+        restoreSettings: true,
+      ),
+      throwsStateError,
+    );
+    expect((await repo.readAll()).units, isEmpty);
+  });
+
+  test('a transaction for a unit that exists nowhere is refused', () async {
+    final json = BackupCodec.encode(
+      BackupSnapshot(transactions: [tx('t1', unitId: 'ghost')]),
+      exportedAt: exportedAt,
+    );
+
+    final preview = await service.preview(json);
+
+    expect(preview.canImport, isFalse);
+    expect(preview.blockers.single, contains('money unit'));
+  });
+
+  group('never overwrites silently', () {
+    Future<String> fileWithUnitNamed(String name) async => BackupCodec.encode(
+      BackupSnapshot(units: [unit('u1', name: name)]),
+      exportedAt: exportedAt,
+    );
+
+    test('the phone\'s version is kept by default', () async {
+      await DriftUnitRepository(db).addUnit(unit('u1', name: 'Wallet'));
+
+      final preview = await service.preview(await fileWithUnitNamed('Cash'));
+      expect(preview.plan!.units.conflicts, hasLength(1));
+
+      final outcome = await service.apply(
+        preview,
+        policy: ConflictPolicy.keepMine,
+        restoreSettings: false,
+      );
+
+      expect((await repo.readAll()).units.single.name, 'Wallet');
+      expect(outcome.skipped, 1);
+      expect(outcome.replaced, 0);
+    });
+
+    test('the file\'s version replaces it only when asked', () async {
+      await DriftUnitRepository(db).addUnit(unit('u1', name: 'Wallet'));
+
+      final preview = await service.preview(await fileWithUnitNamed('Cash'));
+      final outcome = await service.apply(
+        preview,
+        policy: ConflictPolicy.useFile,
+        restoreSettings: false,
+      );
+
+      expect((await repo.readAll()).units.single.name, 'Cash');
+      expect(outcome.replaced, 1);
+    });
+
+    test('new records are added alongside the phone\'s own', () async {
+      await DriftUnitRepository(db).addUnit(unit('u1', name: 'Wallet'));
+      final json = BackupCodec.encode(
+        BackupSnapshot(units: [unit('u2', name: 'M-Pesa', sortOrder: 1)]),
+        exportedAt: exportedAt,
+      );
+
+      final preview = await service.preview(json);
+      await service.apply(
+        preview,
+        policy: ConflictPolicy.keepMine,
+        restoreSettings: false,
+      );
+
+      expect((await repo.readAll()).units.map((u) => u.name), ['Wallet', 'M-Pesa']);
+    });
+
+    test('settings are left alone unless restoring them is chosen', () async {
+      await DriftSettingsRepository(db)
+          .updateSettings(AppSettings.defaults.copyWith(name: 'Mine'));
+      final json = BackupCodec.encode(
+        BackupSnapshot(units: [unit('u1')], settings: customSettings()),
+        exportedAt: exportedAt,
+      );
+
+      final preview = await service.preview(json);
+      await service.apply(
+        preview,
+        policy: ConflictPolicy.keepMine,
+        restoreSettings: false,
+      );
+      expect((await repo.readAll()).settings!.name, 'Mine');
+
+      await service.apply(
+        preview,
+        policy: ConflictPolicy.keepMine,
+        restoreSettings: true,
+      );
+      expect((await repo.readAll()).settings!.name, 'Wanjiru');
+    });
+  });
+
+  group('erase everything (#85, US-16)', () {
+    /// Fill every table a backup carries, then give the two tables
+    /// readAll() doesn't touch a row of their own — otherwise "every watch
+    /// stream is empty" would be a claim about a table that was never
+    /// written to.
+    Future<void> seedEverything() async {
+      await seed(db);
+      await DriftAlertLogRepository(db).claim(
+        const AlertKey('l_overall_day', '2026-09-30', AlertLevel.warning),
+        DateTime.utc(2026, 9, 30),
+      );
+      await db.into(db.unparsedCaptures).insert(
+        UnparsedCapturesCompanion.insert(
+          id: 'u_unread',
+          receivedAt: DateTime.utc(2026, 9, 30),
+          sourcePackage: 'shared',
+          rawText: 'a message nothing could read',
+        ),
+      );
+    }
+
+    test('leaves every table empty — the record tables readAll() covers', () async {
+      await seedEverything();
+      // Sanity: the seed actually filled things.
+      expect((await repo.readAll()).recordCount, fullSnapshot().recordCount);
+
+      await repo.eraseAll();
+
+      final after = await repo.readAll();
+      expect(after.units, isEmpty);
+      expect(after.categories, isEmpty);
+      expect(after.captureSources, isEmpty);
+      expect(after.templates, isEmpty);
+      expect(after.transactions, isEmpty);
+      expect(after.limits, isEmpty);
+    });
+
+    test('leaves nothing behind in the tables readAll() does not carry',
+            () async {
+          await seedEverything();
+
+          await repo.eraseAll();
+
+          expect(await db.select(db.unparsedCaptures).get(), isEmpty);
+          expect(await db.select(db.alertFirings).get(), isEmpty);
+          expect(await db.select(db.settingsEntries).get(), isEmpty);
+        });
+
+    test('settings read as a fresh install again', () async {
+      await seedEverything();
+      // Prove the flag was true before the erase, so a false after means
+      // the reset happened rather than the seed never setting it.
+      await DriftSettingsRepository(db).updateSettings(
+        AppSettings.defaults.copyWith(name: 'Wanjiru', onboardingComplete: true),
+      );
+
+      await repo.eraseAll();
+
+      final s = await DriftSettingsRepository(db).watchSettings().first;
+      expect(s.onboardingComplete, isFalse);
+      expect(s.name, AppSettings.defaults.name);
+      expect(s.bannerEnabled, AppSettings.defaults.bannerEnabled);
+      expect(s.accent, AppSettings.defaults.accent);
+    });
+
+    test('erasing an already-empty database is a no-op, not an error',
+            () async {
+          await repo.eraseAll();
+          final after = await repo.readAll();
+          expect(after.isEmpty, isTrue);
+          expect(after.settings, isNotNull); // still "the current defaults"
+        });
+
+    test('every stream a screen watches is empty afterwards', () async {
+      await seedEverything();
+
+      await repo.eraseAll();
+
+      // What Home, Activity, My money, Limits, the rule builder and the
+      // review inbox actually watch — the shape of the acceptance
+      // criterion in the issue.
+      expect(await DriftUnitRepository(db).watchUnits(includeArchived: true).first,
+          isEmpty);
+      expect(await DriftTransactionRepository(db).watchTransactions().first,
+          isEmpty);
+      expect(await DriftLimitRepository(db).watchLimits().first, isEmpty);
+      expect(await DriftTemplateRepository(db).watchTemplates().first, isEmpty);
+      expect(await DriftCaptureRepository(db).watchUnparsed().first, isEmpty);
+      expect(await DriftCaptureSourceRepository(db).watchSources().first,
+          isEmpty);
+      expect(await DriftAlertLogRepository(db).firedKeys(), isEmpty);
+      expect(
+        (await DriftSettingsRepository(db).watchSettings().first)
+            .onboardingComplete,
+        isFalse,
+      );
+    });
+  });
+
+  test('a write that fails half-way leaves the database untouched', () async {
+    // Bypasses the planner on purpose: this is the repository's own
+    // guarantee. The unit is valid, the transaction after it points at a
+    // unit that does not exist, so the foreign key rejects it — and the
+    // unit written just before must not survive.
+    final bad = BackupSnapshot(
+      units: [unit('u1')],
+      transactions: [tx('t1', unitId: 'ghost')],
+    );
+
+    await expectLater(repo.apply(bad), throwsA(anything));
+
+    final after = await repo.readAll();
+    expect(after.units, isEmpty);
+    expect(after.transactions, isEmpty);
+  });
+
+  test('raising a limit on import clears the alerts shown for the old amount', () async {
+    final limits = DriftLimitRepository(db);
+    await DriftUnitRepository(db).addUnit(unit('u1'));
+    await limits.setLimit(overallDayLimit(amount: 100000));
+    final alerts = DriftAlertLogRepository(db);
+    final key = AlertKey(
+      overallDayLimit().id,
+      '2026-09-30',
+      AlertLevel.warning,
+    );
+    expect(await alerts.claim(key, DateTime.utc(2026, 9, 30)), isTrue);
+
+    final json = BackupCodec.encode(
+      BackupSnapshot(limits: [overallDayLimit(amount: 500000)]),
+      exportedAt: exportedAt,
+    );
+    final preview = await service.preview(json);
+    await service.apply(
+      preview,
+      policy: ConflictPolicy.useFile,
+      restoreSettings: false,
+    );
+
+    expect(await alerts.firedKeys(), isEmpty);
+  });
+}
+</file>
+
 <file path="test/domain/accent_presets_test.dart">
 // Issue #118: the picker offers eight presets and a custom swatch. The
 // swatch needs to know which of those it is, exactly — an approximate
@@ -24735,6 +24800,64 @@ void main() {
     expect(b.title, contains('Mombasa'));
     expect(b.title, contains('800.00'));  // 2000 - 1200 left
     expect(b.status, SpendStatus.warning);
+  });
+}
+</file>
+
+<file path="test/domain/midnight_refresh_test.dart">
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:fuata/data/mock/mock_repositories.dart';
+import 'package:fuata/ui/providers/app_providers.dart';
+
+void main() {
+  testWidgets('crossing a day boundary refreshes the derived state', (
+    tester,
+  ) async {
+    final container = ProviderContainer(
+      overrides: [
+        unitRepositoryProvider.overrideWithValue(MockUnitRepository()),
+        transactionRepositoryProvider.overrideWithValue(
+          MockTransactionRepository(),
+        ),
+        limitRepositoryProvider.overrideWithValue(MockLimitRepository()),
+        settingsRepositoryProvider.overrideWithValue(MockSettingsRepository()),
+      ],
+    );
+
+    var recomputes = 0;
+    container.listen<AsyncValue<HomeState>>(
+      homeStateProvider,
+      (_, _) => recomputes++,
+      fireImmediately: true,
+    );
+    await tester.pumpAndSettle();
+
+    final initial = recomputes;
+
+    // A day, a week, a month — no transaction added, no setting edited.
+    await tester.pump(const Duration(days: 40));
+
+    // Dispose inside the body, before the assertion. addTearDown runs
+    // *after* flutter_test checks for pending timers, so the ticker's
+    // armed Timer would be caught by that check first. Disposing here
+    // lets ref.onDispose cancel it while we're still in the fake-async
+    // zone, and then the assertion runs on a clean slate.
+    container.dispose();
+    // Let drift's stream-close timer fire. `StreamQueryStore.markAsClosed`
+    // schedules a zero-duration timer to release the query's listener map;
+    // without pumping, flutter_test's `_verifyInvariants` sees a pending
+    // timer and fails the test even though the assertion below passes.
+    await tester.pump(Duration.zero);
+
+    expect(
+      recomputes,
+      greaterThan(initial),
+      reason:
+          'issue #107: the app never recomputes its limits and totals '
+          'when the date moves. Nothing watches the clock — the derived '
+          'state only refreshes on user action.',
+    );
   });
 }
 </file>
@@ -26633,137 +26756,6 @@ void main() {
     final next = unitSortOrdersFor(units, ['b', 'nope', 'a', 'b']);
 
     expect(next, {'b': 1, 'a': 2});
-  });
-}
-</file>
-
-<file path="test/domain/unit_reorder_test.dart">
-// test/domain/unit_reorder_test.dart
-
-import 'package:flutter/gestures.dart';
-import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:flutter_test/flutter_test.dart';
-import 'package:fuata/data/mock/mock_repositories.dart';
-import 'package:fuata/domain/models/limit_rule.dart';
-import 'package:fuata/domain/models/unit.dart';
-import 'package:fuata/ui/providers/app_providers.dart';
-import 'package:fuata/ui/screens/home_screen.dart';
-import 'package:fuata/ui/theme/app_theme.dart';
-import 'package:fuata/widgets/unit_card.dart';
-
-void main() {
-  MoneyUnit unit(String id, String name, int sortOrder) => MoneyUnit(
-    id: id,
-    name: name,
-    kind: UnitKind.cash,
-    currencyCode: 'KES',
-    iconEmoji: '💵',
-    color: const Color(0xFF2E9E6B),
-    openingBalanceMinor: 0,
-    sortOrder: sortOrder,
-    createdAt: DateTime(2026, 1, 1),
-  );
-
-  HomeState stateOf(List<MoneyUnit> units) => HomeState(
-    units: units,
-    balanceByUnit: {for (final u in units) u.id: 1000},
-    spentToday: 0,
-    dailyLimit: null,
-    status: SpendStatus.safe,
-    lately: const [],
-  );
-
-  setUp(() {
-    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-        .setMockMethodCallHandler(SystemChannels.platform, (_) async => null);
-  });
-
-  Future<void> pumpRow(
-      WidgetTester tester,
-      HomeState state, {
-        ValueChanged<List<String>>? onReorder,
-      }) async {
-    tester.view.physicalSize = const Size(1080, 2400); // 360 dp wide
-    tester.view.devicePixelRatio = 3.0;
-    addTearDown(tester.view.reset);
-    await tester.pumpWidget(
-      ProviderScope(
-        overrides: [
-          settingsRepositoryProvider.overrideWithValue(
-            MockSettingsRepository(),
-          ),
-        ],
-        child: MaterialApp(
-          theme: AppTheme.light(),
-          home: Scaffold(
-            body: Padding(
-              padding: const EdgeInsets.all(20),
-              child: UnitRow(state: state, onReorder: onReorder),
-            ),
-          ),
-        ),
-      ),
-    );
-    await tester.pumpAndSettle();
-  }
-
-  testWidgets('long-press and drag a card reports the new order', (tester) async {
-    final state = stateOf([unit('a', 'Alpha', 1), unit('b', 'Bravo', 2)]);
-    List<String>? reported;
-    await pumpRow(tester, state, onReorder: (ids) => reported = ids);
-
-    final alphaCard = find.widgetWithText(UnitCard, 'Alpha');
-    final bravoCard = find.widgetWithText(UnitCard, 'Bravo');
-    final start = tester.getCenter(alphaCard);
-    final target = tester.getCenter(bravoCard);
-
-    // 1. Press and hold past the long-press delay (kLongPressTimeout = 500ms).
-    final gesture = await tester.startGesture(start);
-    await tester.pump(kLongPressTimeout + const Duration(milliseconds: 100));
-
-    // 2. Drag in small steps, pumping a frame each time, so the list
-    //    recomputes its insert index as the proxy crosses Bravo's midpoint.
-    final dx = (target.dx - start.dx) + 40; // a bit past Bravo's center
-    const steps = 20;
-    for (var i = 0; i < steps; i++) {
-      await gesture.moveBy(Offset(dx / steps, 0));
-      await tester.pump(const Duration(milliseconds: 16));
-    }
-    await tester.pump(const Duration(milliseconds: 100));
-
-    // 3. Drop.
-    await gesture.up();
-    await tester.pumpAndSettle();
-
-    expect(reported, ['b', 'a']);
-    expect(
-      tester.getCenter(find.text('Bravo')).dx,
-      lessThan(tester.getCenter(find.text('Alpha')).dx),
-    );
-  });
-
-  testWidgets('a quick drag scrolls instead of reordering', (tester) async {
-    final state = stateOf([unit('a', 'Alpha', 1), unit('b', 'Bravo', 2)]);
-    var calls = 0;
-    await pumpRow(tester, state, onReorder: (_) => calls++);
-
-    // A standard drag does NOT wait for kLongPressTimeout, so the
-    // ReorderableDelayedDragStartListener will not activate, preventing reorder.
-    await tester.drag(find.byType(UnitCard).first, const Offset(-150, 0));
-    await tester.pumpAndSettle();
-
-    expect(calls, 0);
-  });
-
-  testWidgets('without onReorder the row is the plain list', (tester) async {
-    final state = stateOf([unit('a', 'Alpha', 1), unit('b', 'Bravo', 2)]);
-    await pumpRow(tester, state);
-
-    expect(find.byType(ReorderableListView), findsNothing);
-    expect(find.text('Alpha'), findsOneWidget);
-    expect(find.text('Bravo'), findsOneWidget);
   });
 }
 </file>
@@ -30556,69 +30548,388 @@ Future<String?> _runExport() async {
 }
 </file>
 
-<file path="lib/ui/providers/alert_providers.dart">
-// ---------------------------------------------------------------------------
-// Firing limit alerts from the UI isolate (issue #63, US-06).
-//
-// Like bannerSyncProvider: watch the data, and act whenever it changes. What
-// it does *not* handle is a capture written by the notification listener
-// while the app is closed — that path fires from its own isolate
-// (platform/notification_capture.dart). Both go through [fireDueAlerts],
-// whose database claim makes "once per threshold per period" hold no matter
-// which of them notices first.
-// ---------------------------------------------------------------------------
+<file path="lib/ui/providers/app_providers.dart">
+import 'dart:async';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../domain/logic/serial_queue.dart';
-import '../../platform/alerts.dart';
-import 'app_providers.dart';
+import '../../data/db/app_database.dart';
+import '../../data/db/backup_repository.dart';
+import '../../data/db/drift_repositories.dart';
+import '../../domain/logic/backup_service.dart';
+import '../../domain/logic/ledger.dart';
+import '../../domain/logic/outings.dart';
+import '../../domain/models/category.dart';
+import '../../domain/models/limit_rule.dart';
+import '../../domain/models/outing.dart';
+import '../../domain/models/settings.dart';
+import '../../domain/models/template.dart';
+import '../../domain/models/transaction.dart';
+import '../../domain/models/unit.dart';
+import '../../domain/repositories/repositories.dart';
 
-final _alertQueue = SerialQueue();
+/// One database for the app's lifetime. Opening the file is deferred
+/// until the first query (AppDatabase wraps it in a LazyDatabase), so
+/// creating this provider eagerly at startup is cheap.
+final appDatabaseProvider = Provider<AppDatabase>((ref) {
+  final db = AppDatabase();
+  ref.onDispose(db.close);
+  return db;
+});
 
-/// Start once, from Fuata's build (watched, like bannerSyncProvider).
-final alertSyncProvider = Provider<void>((ref) {
-  // A new day/week/month is a new period, so re-evaluate on the tick.
-  ref.watch(midnightTickProvider);
-  final units = ref.watch(unitsProvider);
-  final transactions = ref.watch(transactionsProvider);
-  final limits = ref.watch(limitsProvider);
-  final settings = ref.watch(settingsProvider);
+/// Issue #13: these four now point at the real drift-backed repositories
+/// instead of data/mock/mock_repositories.dart. No screen below needed to
+/// change for the swap — they only ever depended on the interfaces in
+/// domain/repositories/repositories.dart (design.md, "UI-first approach").
+/// The mock repositories are kept around for widget tests/previews.
+final unitRepositoryProvider = Provider<UnitRepository>((ref) {
+  return DriftUnitRepository(ref.watch(appDatabaseProvider));
+});
 
-  // Still loading: evaluating against half the data could announce a
-  // crossing that isn't real. Wait for everything.
-  if (units.value == null ||
-      transactions.value == null ||
-      limits.value == null ||
-      settings.value == null) {
-    return;
+final transactionRepositoryProvider = Provider<TransactionRepository>((ref) {
+  return DriftTransactionRepository(ref.watch(appDatabaseProvider));
+});
+
+final limitRepositoryProvider = Provider<LimitRepository>((ref) {
+  return DriftLimitRepository(ref.watch(appDatabaseProvider));
+});
+
+/// Issue #63: which limit alerts have already been shown.
+final alertLogRepositoryProvider = Provider<AlertLogRepository>((ref) {
+  return DriftAlertLogRepository(ref.watch(appDatabaseProvider));
+});
+
+final settingsRepositoryProvider = Provider<SettingsRepository>((ref) {
+  return DriftSettingsRepository(ref.watch(appDatabaseProvider));
+});
+
+/// Issue #24: whole-database export/import, and the service the Back up &
+/// restore screen talks to. Not a stream — read once to export or plan,
+/// written once (in a transaction) when the person confirms.
+final backupRepositoryProvider = Provider<BackupRepository>((ref) {
+  return DriftBackupRepository(ref.watch(appDatabaseProvider));
+});
+
+final backupServiceProvider = Provider<BackupService>((ref) {
+  return BackupService(ref.watch(backupRepositoryProvider));
+});
+
+/// Issue #20: templates built by the rule builder, persisted in the
+/// Templates drift table that #13 created.
+final templateRepositoryProvider = Provider<TemplateRepository>((ref) {
+  return DriftTemplateRepository(ref.watch(appDatabaseProvider));
+});
+
+final templatesProvider = StreamProvider<List<CaptureTemplate>>((ref) {
+  return ref.watch(templateRepositoryProvider).watchTemplates();
+});
+
+/// Templates for one unit — used by the unit page to show how many
+/// reading rules a unit already has.
+final unitTemplatesProvider =
+    StreamProvider.family<List<CaptureTemplate>, String>((ref, unitId) {
+      return ref
+          .watch(templateRepositoryProvider)
+          .watchTemplates(unitId: unitId);
+    });
+
+final unitsProvider = StreamProvider<List<MoneyUnit>>((ref) {
+  return ref.watch(unitRepositoryProvider).watchUnits();
+});
+
+/// Every unit, archived ones included. History (Activity, transaction
+/// detail) watches this so a row whose unit has been put away reads
+/// "Cash (archived)" rather than "Unknown" (finding F9).
+final allUnitsProvider = StreamProvider<List<MoneyUnit>>((ref) {
+  return ref.watch(unitRepositoryProvider).watchUnits(includeArchived: true);
+});
+
+/// Just the archived ones, most recently archived first. Plain provider,
+/// not a stream — it's derived from [allUnitsProvider] and falls back to
+/// an empty list while the underlying stream is still loading, the same
+/// shape as [pendingTransactionsProvider] and [allowedPackagesProvider].
+///
+/// Sorted by `archivedAt` when both units have it; when one doesn't (an
+/// older backup, or a unit archived before the column existed), sortOrder
+/// is the tiebreak so the list still has a stable order.
+final archivedUnitsProvider = Provider<List<MoneyUnit>>((ref) {
+  final all = ref.watch(allUnitsProvider).value ?? const <MoneyUnit>[];
+  return all.where((u) => u.archived).toList()
+    ..sort((a, b) {
+      final ad = a.archivedAt;
+      final bd = b.archivedAt;
+      if (ad != null && bd != null) return bd.compareTo(ad);
+      if (ad != null) return -1;
+      if (bd != null) return 1;
+      return a.sortOrder.compareTo(b.sortOrder);
+    });
+});
+
+final transactionsProvider = StreamProvider<List<MoneyTransaction>>((ref) {
+  return ref.watch(transactionRepositoryProvider).watchTransactions();
+});
+
+final limitsProvider = StreamProvider<List<LimitRule>>((ref) {
+  return ref.watch(limitRepositoryProvider).watchLimits();
+});
+
+/// Settings, with a synchronous-feeling default: screens that just want
+/// "the current settings, or sensible defaults while loading" can read
+/// `ref.watch(currentSettingsProvider)` instead of unwrapping an
+/// AsyncValue every time (mirrors how HomeState hides its own loading).
+final settingsProvider = StreamProvider<AppSettings>((ref) {
+  return ref.watch(settingsRepositoryProvider).watchSettings();
+});
+
+final currentSettingsProvider = Provider<AppSettings>((ref) {
+  return ref.watch(settingsProvider).value ?? AppSettings.defaults;
+});
+
+/// Fires once at each local midnight so everything derived from "which
+/// day is it" — Home, the banner, the alerts, the widget, Summary — rolls
+/// over without the person doing anything (issue #107).
+///
+/// A Notifier rather than a StreamProvider: a stream yielding `null`
+/// emits an equal `AsyncData<void>` every time, and Riverpod's default
+/// `==` comparison means only the first tick would notify watchers. An
+/// incrementing int is always a new value.
+class MidnightTicker extends Notifier<int> {
+  Timer? _timer;
+
+  @override
+  int build() {
+    _schedule();
+    ref.onDispose(() => _timer?.cancel());
+    return 0;
   }
 
-  final unitRepo = ref.read(unitRepositoryProvider);
-  final txRepo = ref.read(transactionRepositoryProvider);
-  final limitRepo = ref.read(limitRepositoryProvider);
-  final settingsRepo = ref.read(settingsRepositoryProvider);
-  final log = ref.read(alertLogRepositoryProvider);
-  final outingsRepo = ref.read(outingRepositoryProvider);
+  /// Recompute now, then re-arm for the next boundary. Called on app
+  /// resume: a phone asleep across midnight never fired the timer, and
+  /// resume is the moment the person will actually look at the screen.
+  void refresh() {
+    state = state + 1;
+    _schedule();
+  }
 
-  // Serialised so two quick changes can't run two evaluations at once in
-  // this isolate. An alert failure must never surface to the person.
-  _alertQueue.run(() async {
-    try {
-      await fireDueAlerts(
-        units: unitRepo,
-        transactions: txRepo,
-        limits: limitRepo,
-        outings: outingsRepo,
-        settings: settingsRepo,
-        log: log,
-      );
-    } catch (e) {
-      debugPrint('[alerts] failed: ${e.runtimeType}');
-    }
+  void _schedule() {
+    final now = DateTime.now();
+    // DateTime normalises day overflow, so a month end and a year end are
+    // handled without special cases.
+    final nextMidnight = DateTime(now.year, now.month, now.day + 1);
+    var delay = nextMidnight.difference(now);
+    // A clock that hasn't moved (or was moved backwards) would give a
+    // non-positive delay, and Timer(<=0) spins the isolate. A one-second
+    // floor keeps the loop alive without hammering it.
+    if (delay <= Duration.zero) delay = const Duration(seconds: 1);
+    _timer?.cancel();
+    _timer = Timer(delay, () {
+      state = state + 1;
+      _schedule();
+    });
+  }
+}
+
+final midnightTickProvider =
+NotifierProvider<MidnightTicker, int>(MidnightTicker.new);
+
+/// Everything Home needs, recomputed whenever units/transactions/limits
+/// change. Kept as one bundle per the storage/perf note in the build
+/// notes: fewer moving parts for the UI to juggle.
+class HomeState {
+  final List<MoneyUnit> units;
+  final Map<String, int> balanceByUnit; // minor units
+  final int spentToday;
+  final LimitRule? dailyLimit;
+  final SpendStatus status;
+  final List<MoneyTransaction> lately;
+  /// Spending for the last seven days, oldest first, today last (issue #82).
+  /// Minor units. Computed here rather than in the widget so the strip and
+  /// the summary it opens read from the same rule (Ledger.spentByDay).
+  final List<int> spentByDay;
+
+  /// #30: the outing that's active right now, or null.
+  final Outing? activeOuting;
+  /// Spending in the outing's window, in minor units.
+  final int outingSpent;
+  /// Outing status, or the daily status when no outing is active.
+  final SpendStatus outingStatus;
+  /// The outing's caption ("ends Fri 20:00"), or null when no outing.
+  final String? outingCaption;
+
+  const HomeState({
+    required this.units,
+    required this.balanceByUnit,
+    required this.spentToday,
+    required this.dailyLimit,
+    required this.status,
+    required this.lately,
+    this.spentByDay = const [0, 0, 0, 0, 0, 0, 0],
+    this.activeOuting,
+    this.outingSpent = 0,
+    this.outingStatus = SpendStatus.safe,
+    this.outingCaption,
   });
+
+  static const empty = HomeState(
+    units: [],
+    balanceByUnit: {},
+    spentToday: 0,
+    dailyLimit: null,
+    status: SpendStatus.safe,
+    lately: [],
+  );
+
+  // Effective values: the outing wins when active.
+  SpendStatus get effectiveStatus =>
+      activeOuting != null ? outingStatus : status;
+
+  LimitRule? get effectiveLimit =>
+      activeOuting != null ? activeOuting!.asLimit() : dailyLimit;
+
+  int get effectiveSpent =>
+      activeOuting != null ? outingSpent : spentToday;
+
+  int get effectiveRemaining {
+    if (activeOuting != null) return activeOuting!.amountMinor - outingSpent;
+    if (dailyLimit == null) return 0;
+    return dailyLimit!.amountMinor - spentToday;
+  }
+
+  int get leftToday =>
+      dailyLimit == null ? 0 : dailyLimit!.amountMinor - spentToday;
+}
+
+final homeStateProvider = Provider<AsyncValue<HomeState>>((ref) {
+  // Re-run on each midnight tick: without this a Home screen left open
+  // across the boundary keeps showing yesterday's total and status until
+  // something else changes (issue #107).
+  ref.watch(midnightTickProvider);
+  final unitsAsync = ref.watch(unitsProvider);
+  final allUnitsAsync = ref.watch(allUnitsProvider);
+  final txAsync = ref.watch(transactionsProvider);
+  final limitsAsync = ref.watch(limitsProvider);
+  final outingAsync = ref.watch(outingsProvider);
+
+  if (unitsAsync.isLoading ||
+      allUnitsAsync.isLoading ||
+      txAsync.isLoading ||
+      limitsAsync.isLoading) {
+    return const AsyncValue.loading();
+  }
+  final error = unitsAsync.error ??
+      allUnitsAsync.error ??
+      txAsync.error ??
+      limitsAsync.error;
+  if (error != null) return AsyncValue.error(error, StackTrace.current);
+
+  final units = unitsAsync.value ?? [];
+  final allUnits = allUnitsAsync.value ?? [];
+  final transactions = txAsync.value ?? [];
+  final limits = limitsAsync.value ?? [];
+  final outings = outingAsync.value ?? const <Outing>[];
+
+  final now = DateTime.now();
+
+  final balances = {
+    for (final u in units) u.id: Ledger.balanceOf(u, transactions),
+  };
+
+  final (start, end) = Ledger.todayRange(now);
+  final spentToday = Ledger.spentInPeriod(transactions, start, end);
+  final spentByDay = Ledger.spentByDay(transactions, now: now);
+
+  final dailyLimit = limits
+      .where(
+        (l) =>
+            l.enabled &&
+            l.scope == LimitScope.overall &&
+            l.period == LimitPeriod.day,
+      )
+      .firstOrNull;
+
+  final status = Ledger.statusFor(dailyLimit, spentToday);
+
+  final lately = List<MoneyTransaction>.from(transactions)
+    ..sort((a, b) => b.occurredAt.compareTo(a.occurredAt));
+
+  // #30: active outing (banner-gated? no — Home hero shows the outing
+  // even if its banner is off; the banner flag only affects the
+  // notification).
+  final activeOuting = Outings.activeFrom(outings, now: now);
+  int outingSpent = 0;
+  SpendStatus outingStatus = SpendStatus.safe;
+  String? outingCaption;
+  if (activeOuting != null) {
+    final currencyByUnit = {
+      for (final u in allUnits) u.id: u.currencyCode,
+    };
+    outingSpent = Outings.spentIn(
+      activeOuting,
+      transactions,
+      currencyByUnit: currencyByUnit,
+    );
+    outingStatus = Outings.statusFor(activeOuting, outingSpent);
+    outingCaption = OutingState(
+      outing: activeOuting,
+      spentMinor: outingSpent,
+      remainingMinor: activeOuting.amountMinor - outingSpent,
+      status: outingStatus,
+      isActive: true,
+    ).caption(now);
+  }
+
+  return AsyncValue.data(
+    HomeState(
+      units: units,
+      balanceByUnit: balances,
+      spentToday: spentToday,
+      dailyLimit: dailyLimit,
+      status: status,
+      lately: lately.take(3).toList(),
+      spentByDay: spentByDay,
+      activeOuting: activeOuting,
+      outingSpent: outingSpent,
+      outingStatus: outingStatus,
+      outingCaption: outingCaption,
+    ),
+  );
 });
+
+final categoryRepositoryProvider = Provider<CategoryRepository>((ref) {
+  return DriftCategoryRepository(ref.watch(appDatabaseProvider));
+});
+
+/// Active categories, ordered. The picker in the add and fix sheets and
+/// the summary's per-category block both read this.
+final categoriesProvider = StreamProvider<List<Category>>((ref) {
+  return ref.watch(categoryRepositoryProvider).watchCategories();
+});
+
+/// Same, plus archived — the settings screen.
+final allCategoriesProvider = StreamProvider<List<Category>>((ref) {
+  return ref.watch(categoryRepositoryProvider).watchCategoriesIncludingArchived();
+});
+
+final outingRepositoryProvider = Provider<OutingRepository>((ref) {
+  return DriftOutingRepository(ref.watch(appDatabaseProvider));
+});
+
+final outingsProvider = StreamProvider<List<Outing>>((ref) {
+  return ref.watch(outingRepositoryProvider).watchOutings();
+});
+
+/// The outing that's active right now, or null. Recomputed on each
+/// midnight tick so an outing that ends at 23:59 disappears exactly at
+/// midnight without needing a settings write to trigger a rebuild.
+final activeOutingProvider = Provider<Outing?>((ref) {
+  ref.watch(midnightTickProvider);
+  final outings = ref.watch(outingsProvider).value ?? const <Outing>[];
+  return Outings.activeFrom(outings, now: DateTime.now());
+});
+
+extension _FirstOrNull<T> on Iterable<T> {
+  T? get firstOrNull => isEmpty ? null : first;
+}
 </file>
 
 <file path="lib/ui/screens/settings/privacy_data_screen.dart">
@@ -35521,97 +35832,166 @@ class _TemplateRow extends StatelessWidget {
 }
 </file>
 
-<file path="test/data/db/outings_repository_test.dart">
-import 'package:drift/native.dart';
-import 'package:flutter_test/flutter_test.dart';
-import 'package:fuata/data/db/app_database.dart';
-import 'package:fuata/data/db/drift_repositories.dart';
-import 'package:fuata/domain/models/outing.dart';
+<file path="lib/main.dart">
+import 'dart:async';
 
-void main() {
-  late AppDatabase db;
-  late DriftOutingRepository repo;
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
 
-  setUp(() {
-    db = AppDatabase(NativeDatabase.memory());
-    repo = DriftOutingRepository(db);
-  });
-  tearDown(() => db.close());
+import 'package:fuata/platform/banner.dart';
+import 'package:fuata/platform/notification_capture.dart';
+import 'package:fuata/platform/privacy.dart';
+import 'package:fuata/platform/scheduled_export.dart';
+import 'package:fuata/platform/share_intake.dart';
+import 'package:fuata/platform/summary_notifications.dart';
+import 'package:fuata/routing/app_router.dart';
+import 'package:fuata/routing/routes.dart';
+import 'package:fuata/ui/providers/alert_providers.dart';
+import 'package:fuata/ui/providers/app_providers.dart';
+import 'package:fuata/ui/providers/banner_providers.dart';
+import 'package:fuata/ui/providers/capture_providers.dart';
+import 'package:fuata/ui/providers/privacy_providers.dart';
+import 'package:fuata/ui/providers/scheduled_export_providers.dart';
+import 'package:fuata/ui/providers/summary_notifications_providers.dart';
+import 'package:fuata/ui/providers/widget_providers.dart';
+import 'package:fuata/ui/theme/app_theme.dart';
 
-  Outing outing(String id, {DateTime? endAt, String name = 'Trip'}) => Outing(
-    id: id,
-    name: name,
-    amountMinor: 150000,
-    currencyCode: 'KES',
-    startAt: DateTime(2026, 10, 15),
-    endAt: endAt ?? DateTime(2026, 10, 20),
-    createdAt: DateTime(2026, 10, 1),
+import 'domain/models/settings.dart';
+
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  // Issue #84: default to secure *before* the first frame, so the app
+  // switcher's initial snapshot is blank even before settings have been
+  // read. privacySyncProvider flips this to the person's real choice as
+  // soon as the settings stream emits.
+  await applySecure(true);
+
+  // Issue #31: load the timezone database before the first schedule, so
+  // "8pm" means 8pm local rather than 8pm UTC.
+  await SummaryNotificationScheduler.instance.init();
+
+  // Issue #22: register the background isolate entry point so Android can
+  // start it cold from a notification.
+  await registerCaptureCallback();
+
+  // Issue #35: register the scheduled-export background entry point so
+  // ScheduledExportReceiver can find it when the alarm fires.
+  await registerScheduledExportCallback();
+
+  // Issue #21: share-sheet intake.
+  await initShareIntake();
+
+  // Issue #16 / #73: read the launch action *before* the router is built
+  // so the router can pick the right initial location (—e.g. open /add
+  // straight from a banner + Add on a cold start).
+  final launchAction = await BannerPlatform.instance.initialActionFromLaunch();
+
+  runApp(
+    ProviderScope(
+      overrides: [initialBannerActionProvider.overrideWithValue(launchAction)],
+      child: const Fuata(),
+    ),
   );
+}
 
-  test('round-trips through the repository', () async {
-    await repo.saveOuting(outing('o1', name: 'Mombasa'));
-    final outings = await repo.watchOutings().first;
-    expect(outings.single.name, 'Mombasa');
-    expect(outings.single.amountMinor, 150000);
-    expect(outings.single.startAt, DateTime(2026, 10, 15));
-  });
+class Fuata extends ConsumerStatefulWidget {
+  const Fuata({super.key});
 
-  test('round-trips unitIds', () async {
-    await repo.saveOuting(outing('o1').copyWith(unitIds: {'cash', 'mpesa'}));
-    final outings = await repo.watchOutings().first;
-    expect(outings.single.unitIds, {'cash', 'mpesa'});
-  });
+  @override
+  ConsumerState<Fuata> createState() => _FuataState();
+}
 
-  test('endOutingNow ends it early and stamps endAt', () async {
-    // Give it an endAt in the future so DateTime.now() is guaranteed to be before it
-    final original = outing('o1', endAt: DateTime.now().add(const Duration(days: 10)));
-    await repo.saveOuting(original);
-    final before = DateTime.now();
-    await repo.endOutingNow('o1');
-    final after = DateTime.now();
-    final o = (await repo.watchOutings().first).single;
-    expect(o.enabled, isFalse,
-        reason: 'endOutingNow must set enabled=false');
-    // Meaningful assertion: endAt moved to something earlier than the
-    // original future date. This is the one that catches the original bug
-    // (endAt never written at all).
-    expect(o.endAt.isBefore(original.endAt), isTrue,
-        reason: 'endAt must move back from ${original.endAt}');
-    // Sanity belt: endAt is approximately "now", not some arbitrary past
-    // value. Drift's dateTime() column stores Unix seconds, so the write
-    // truncates sub-second precision — a `before = ...147ms` and a write
-    // at `...312ms` both land in the DB as `...000s`. Comparing against
-    // a ±2-second window is what makes this test immune to that, and to
-    // wall-clock precision on any host.
-    final tolerance = const Duration(seconds: 2);
-    expect(o.endAt.isAfter(before.subtract(tolerance)), isTrue,
-        reason: 'endAt ($before) is earlier than "$before" minus the '
-            'tolerance — endOutingNow did not use a recent timestamp');
-    expect(o.endAt.isBefore(after.add(tolerance)), isTrue,
-        reason: 'endAt is later than "$after" plus the tolerance — '
-            'endOutingNow wrote a value from the future');
-    // Belt-and-braces: whatever the truncation did, the new endAt is
-    // within a couple of seconds of where `after` sat, so the person's
-    // "I came home just now" experience is preserved.
-    final delta = after.difference(o.endAt).inSeconds.abs();
-    expect(delta <= 2, isTrue,
-        reason: 'endAt should be within 2 seconds of "now" — got '
-            '${o.endAt}, delta ${delta}s');
-  });
+class _FuataState extends ConsumerState<Fuata> with WidgetsBindingObserver {
+  StreamSubscription<BannerAction>? _bannerSub;
 
-  test('saveOuting upserts by id', () async {
-    await repo.saveOuting(outing('o1', name: 'A'));
-    await repo.saveOuting(outing('o1', name: 'B'));
-    final outings = await repo.watchOutings().first;
-    expect(outings, hasLength(1));
-    expect(outings.single.name, 'B');
-  });
+  @override
+  void initState() {
+    super.initState();
+    ref.read(shareIntakeListenerProvider);
+    ref.read(allowListSyncProvider);
+    ref.read(captureRefreshProvider);
+    _bannerSub = BannerPlatform.instance.actions.listen(_onBannerAction);
 
-  test('deleteOuting removes it', () async {
-    await repo.saveOuting(outing('o1'));
-    await repo.deleteOuting('o1');
-    expect(await repo.watchOutings().first, isEmpty);
-  });
+    // Cold start from a banner tap in the *warm* case (the app was
+    // running, but nobody was listening yet).
+    final pending = BannerPlatform.instance.consumePendingAction();
+    if (pending != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _onBannerAction(pending);
+      });
+    }
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    _bannerSub?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  /// Warm-start banner actions. The cold-start case is handled by the
+  /// router's `initialLocation`, so this only runs when the app is already
+  /// alive.
+  void _onBannerAction(BannerAction action) {
+    final router = ref.read(routerProvider);
+    switch (action) {
+      case BannerAction.open:
+        // The app is already coming to the front; land on Today.
+        router.go(Routes.homePath);
+      case BannerAction.quickAdd:
+        // The redirect bounces this to /onboarding while setup is
+        // unfinished; otherwise it opens the sheet.
+        router.push(Routes.addPath);
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      final db = ref.read(appDatabaseProvider);
+      db.markTablesUpdated([db.transactions, db.unparsedCaptures]);
+      // Issue #107: a phone that slept through midnight missed the timer
+      // entirely, and resume is the moment the person actually looks at
+      // the screen — so recompute now and re-arm for the next boundary.
+      ref.read(midnightTickProvider.notifier).refresh();
+    }
+
+    if (state == AppLifecycleState.paused) {
+      // The DB stays open — the listener's background isolate has no lock
+      // prompt and must keep capturing. This is a UI gate only.
+      if (ref.read(currentSettingsProvider).appLockEnabled) {
+        ref.read(unlockedThisSessionProvider.notifier).state = false;
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    ref.watch(bannerSyncProvider);
+    ref.watch(alertSyncProvider);
+    ref.watch(widgetSyncProvider); //Issue #29
+    ref.watch(privacySyncProvider); // issue #84
+    ref.watch(summaryNotificationSyncProvider); // Issue #31
+    ref.watch(scheduledExportSyncProvider);
+
+    final settings = ref.watch(currentSettingsProvider);
+    final router = ref.watch(routerProvider);
+
+    return MaterialApp.router(
+      debugShowCheckedModeBanner: false,
+      themeMode: settings.themeMode.flutterThemeMode,
+      theme: AppTheme.light(accent: settings.accent),
+      darkTheme: AppTheme.dark(accent: settings.accent),
+      routerConfig: router,
+      builder: FlutterSmartDialog.init(),
+      // rootNavigatorKey / rootScaffoldMessengerKey now come from the
+      // router's config; importing them from main.dart is no longer
+      // necessary anywhere else.
+    );
+  }
 }
 </file>
 
@@ -35984,64 +36364,6 @@ void main() {
 }
 </file>
 
-<file path="test/domain/midnight_refresh_test.dart">
-import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:flutter_test/flutter_test.dart';
-import 'package:fuata/data/mock/mock_repositories.dart';
-import 'package:fuata/ui/providers/app_providers.dart';
-
-void main() {
-  testWidgets('crossing a day boundary refreshes the derived state', (
-    tester,
-  ) async {
-    final container = ProviderContainer(
-      overrides: [
-        unitRepositoryProvider.overrideWithValue(MockUnitRepository()),
-        transactionRepositoryProvider.overrideWithValue(
-          MockTransactionRepository(),
-        ),
-        limitRepositoryProvider.overrideWithValue(MockLimitRepository()),
-        settingsRepositoryProvider.overrideWithValue(MockSettingsRepository()),
-      ],
-    );
-
-    var recomputes = 0;
-    container.listen<AsyncValue<HomeState>>(
-      homeStateProvider,
-      (_, _) => recomputes++,
-      fireImmediately: true,
-    );
-    await tester.pumpAndSettle();
-
-    final initial = recomputes;
-
-    // A day, a week, a month — no transaction added, no setting edited.
-    await tester.pump(const Duration(days: 40));
-
-    // Dispose inside the body, before the assertion. addTearDown runs
-    // *after* flutter_test checks for pending timers, so the ticker's
-    // armed Timer would be caught by that check first. Disposing here
-    // lets ref.onDispose cancel it while we're still in the fake-async
-    // zone, and then the assertion runs on a clean slate.
-    container.dispose();
-    // Let drift's stream-close timer fire. `StreamQueryStore.markAsClosed`
-    // schedules a zero-duration timer to release the query's listener map;
-    // without pumping, flutter_test's `_verifyInvariants` sees a pending
-    // timer and fails the test even though the assertion below passes.
-    await tester.pump(Duration.zero);
-
-    expect(
-      recomputes,
-      greaterThan(initial),
-      reason:
-          'issue #107: the app never recomputes its limits and totals '
-          'when the date moves. Nothing watches the clock — the derived '
-          'state only refreshes on user action.',
-    );
-  });
-}
-</file>
-
 <file path="test/domain/outings_alert_engine_test.dart">
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -36151,177 +36473,6 @@ void main() {
       now: now,
     );
     expect(alerts.single.periodLabel, "this trip's");
-  });
-}
-</file>
-
-<file path="test/domain/outings_test.dart">
-import 'package:flutter_test/flutter_test.dart';
-import 'package:fuata/domain/logic/outings.dart';
-import 'package:fuata/domain/models/limit_rule.dart';
-import 'package:fuata/domain/models/outing.dart';
-import 'package:fuata/domain/models/transaction.dart';
-
-void main() {
-  // Fri 17 Oct 2026, 10:00.
-  final now = DateTime(2026, 10, 17, 10);
-
-  Outing outing({
-    String id = 'o1',
-    DateTime? startAt,
-    DateTime? endAt,
-    Set<String> unitIds = const {},
-    bool enabled = true,
-    String currency = 'KES',
-    int amount = 1500000,  // 15,000.00
-    DateTime? createdAt,
-  }) => Outing(
-    id: id,
-    name: 'Mombasa trip',
-    amountMinor: amount,
-    currencyCode: currency,
-    startAt: startAt ?? DateTime(2026, 10, 15),
-    endAt: endAt ?? DateTime(2026, 10, 20),
-    unitIds: unitIds,
-    enabled: enabled,
-    createdAt: createdAt ?? DateTime(2026, 10, 1),
-  );
-
-  MoneyTransaction spend({
-    required int minor,
-    required String unitId,
-    DateTime? at,
-  }) => MoneyTransaction(
-    id: 't_${minor}_$unitId',
-    unitId: unitId,
-    type: TxType.spent,
-    amountMinor: -minor,
-    occurredAt: at ?? DateTime(2026, 10, 16),
-    createdAt: DateTime(2026, 10, 16),
-  );
-
-  group('isActive', () {
-    test('inside the window', () {
-      expect(outing().isActive(now), isTrue);
-    });
-    test('before the window', () {
-      final o = outing(startAt: DateTime(2030, 1, 1));
-      expect(o.isActive(now), isFalse);
-      expect(o.isUpcoming, isTrue);
-    });
-    test('after the window', () {
-      // Use a date definitively in the past relative to `now` (Oct 17, 2026)
-      final o = outing(endAt: DateTime(2026, 10, 10));
-      expect(o.isActive(now), isFalse);
-      expect(o.isPast, isTrue);
-    });
-    test('at the start, inclusive', () {
-      expect(outing(startAt: now).isActive(now), isTrue);
-    });
-    test('at the end, exclusive', () {
-      expect(outing(endAt: now).isActive(now), isFalse);
-    });
-    test('disabled is never active', () {
-      expect(outing(enabled: false).isActive(now), isFalse);
-    });
-  });
-
-  group('activeFrom', () {
-    test('returns the most recently created active outing', () {
-      final older = outing(id: 'old', createdAt: DateTime(2026, 9, 1));
-      final newer = outing(id: 'new', createdAt: DateTime(2026, 10, 1));
-      expect(
-        Outings.activeFrom([older, newer], now: now)?.id,
-        'new',
-      );
-    });
-    test('returns null when none are active', () {
-      final o = outing(startAt: DateTime(2027, 1, 1));
-      expect(Outings.activeFrom([o], now: now), isNull);
-    });
-  });
-
-  group('spentIn', () {
-    final currencyByUnit = {'cash': 'KES', 'mpesa': 'KES', 'usd': 'USD'};
-    final txs = [
-      spend(minor: 10000, unitId: 'cash'),
-      spend(minor: 20000, unitId: 'mpesa'),
-      spend(minor: 30000, unitId: 'usd'),   // USD — excluded
-      spend(
-        minor: 40000,
-        unitId: 'cash',
-        at: DateTime(2026, 10, 14),  // before the window
-      ),
-      spend(
-        minor: 50000,
-        unitId: 'cash',
-        at: DateTime(2026, 10, 21),  // after the window
-      ),
-    ];
-
-    test('all units: sums all in-window, in-currency spending', () {
-      expect(
-        Outings.spentIn(outing(), txs, currencyByUnit: currencyByUnit),
-        30000,  // 10000 + 20000
-      );
-    });
-
-    test('only selected units', () {
-      expect(
-        Outings.spentIn(
-          outing(unitIds: {'mpesa'}),
-          txs,
-          currencyByUnit: currencyByUnit,
-        ),
-        20000,
-      );
-    });
-
-    test('excludes transactions outside the window', () {
-      expect(
-        Outings.spentIn(
-          outing(startAt: DateTime(2026, 10, 16), endAt: DateTime(2026, 10, 17)),
-          [spend(minor: 8000, unitId: 'cash', at: DateTime(2026, 10, 16))],
-          currencyByUnit: currencyByUnit,
-        ),
-        8000,
-      );
-    });
-  });
-
-  group('statusFor', () {
-    test('safe/warning/danger/overdraft at 70/90/100', () {
-      final o = outing(amount: 100000);
-      expect(Outings.statusFor(o, 69999), SpendStatus.safe);
-      expect(Outings.statusFor(o, 70000), SpendStatus.warning);
-      expect(Outings.statusFor(o, 90000), SpendStatus.danger);
-      expect(Outings.statusFor(o, 100000), SpendStatus.overdraft);
-      expect(Outings.statusFor(o, 150000), SpendStatus.overdraft);
-    });
-    test('a status equals the same rule as the limit engine', () {
-      final o = outing(amount: 100000);
-      final l = o.asLimit();
-      for (final s in [0, 50000, 75000, 95000, 100000, 200000]) {
-        expect(Outings.statusFor(o, s), l.statusFor(s));
-      }
-    });
-  });
-
-  group('dayCount', () {
-    test('3 days for a Fri-Sun trip', () {
-      final o = outing(
-        startAt: DateTime(2026, 10, 16, 15),
-        endAt: DateTime(2026, 10, 19, 11),
-      );
-      expect(o.dayCount, 3);
-    });
-    test('1 day for a single evening', () {
-      final o = outing(
-        startAt: DateTime(2026, 10, 16, 19),
-        endAt: DateTime(2026, 10, 17, 1),
-      );
-      expect(o.dayCount, 1);
-    });
   });
 }
 </file>
@@ -36438,6 +36589,137 @@ void main() {
       expect(r.ok, isFalse);
       expect(r.errors.first, contains('at least one'));
     });
+  });
+}
+</file>
+
+<file path="test/domain/unit_reorder_test.dart">
+// test/domain/unit_reorder_test.dart
+
+import 'package:flutter/gestures.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:fuata/data/mock/mock_repositories.dart';
+import 'package:fuata/domain/models/limit_rule.dart';
+import 'package:fuata/domain/models/unit.dart';
+import 'package:fuata/ui/providers/app_providers.dart';
+import 'package:fuata/ui/screens/home_screen.dart';
+import 'package:fuata/ui/theme/app_theme.dart';
+import 'package:fuata/widgets/unit_card.dart';
+
+void main() {
+  MoneyUnit unit(String id, String name, int sortOrder) => MoneyUnit(
+    id: id,
+    name: name,
+    kind: UnitKind.cash,
+    currencyCode: 'KES',
+    iconEmoji: '💵',
+    color: const Color(0xFF2E9E6B),
+    openingBalanceMinor: 0,
+    sortOrder: sortOrder,
+    createdAt: DateTime(2026, 1, 1),
+  );
+
+  HomeState stateOf(List<MoneyUnit> units) => HomeState(
+    units: units,
+    balanceByUnit: {for (final u in units) u.id: 1000},
+    spentToday: 0,
+    dailyLimit: null,
+    status: SpendStatus.safe,
+    lately: const [],
+  );
+
+  setUp(() {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(SystemChannels.platform, (_) async => null);
+  });
+
+  Future<void> pumpRow(
+      WidgetTester tester,
+      HomeState state, {
+        ValueChanged<List<String>>? onReorder,
+      }) async {
+    tester.view.physicalSize = const Size(1080, 2400); // 360 dp wide
+    tester.view.devicePixelRatio = 3.0;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          settingsRepositoryProvider.overrideWithValue(
+            MockSettingsRepository(),
+          ),
+        ],
+        child: MaterialApp(
+          theme: AppTheme.light(),
+          home: Scaffold(
+            body: Padding(
+              padding: const EdgeInsets.all(20),
+              child: UnitRow(state: state, onReorder: onReorder),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+  }
+
+  testWidgets('long-press and drag a card reports the new order', (tester) async {
+    final state = stateOf([unit('a', 'Alpha', 1), unit('b', 'Bravo', 2)]);
+    List<String>? reported;
+    await pumpRow(tester, state, onReorder: (ids) => reported = ids);
+
+    final alphaCard = find.widgetWithText(UnitCard, 'Alpha');
+    final bravoCard = find.widgetWithText(UnitCard, 'Bravo');
+    final start = tester.getCenter(alphaCard);
+    final target = tester.getCenter(bravoCard);
+
+    // 1. Press and hold past the long-press delay (kLongPressTimeout = 500ms).
+    final gesture = await tester.startGesture(start);
+    await tester.pump(kLongPressTimeout + const Duration(milliseconds: 100));
+
+    // 2. Drag in small steps, pumping a frame each time, so the list
+    //    recomputes its insert index as the proxy crosses Bravo's midpoint.
+    final dx = (target.dx - start.dx) + 40; // a bit past Bravo's center
+    const steps = 20;
+    for (var i = 0; i < steps; i++) {
+      await gesture.moveBy(Offset(dx / steps, 0));
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    await tester.pump(const Duration(milliseconds: 100));
+
+    // 3. Drop.
+    await gesture.up();
+    await tester.pumpAndSettle();
+
+    expect(reported, ['b', 'a']);
+    expect(
+      tester.getCenter(find.text('Bravo')).dx,
+      lessThan(tester.getCenter(find.text('Alpha')).dx),
+    );
+  });
+
+  testWidgets('a quick drag scrolls instead of reordering', (tester) async {
+    final state = stateOf([unit('a', 'Alpha', 1), unit('b', 'Bravo', 2)]);
+    var calls = 0;
+    await pumpRow(tester, state, onReorder: (_) => calls++);
+
+    // A standard drag does NOT wait for kLongPressTimeout, so the
+    // ReorderableDelayedDragStartListener will not activate, preventing reorder.
+    await tester.drag(find.byType(UnitCard).first, const Offset(-150, 0));
+    await tester.pumpAndSettle();
+
+    expect(calls, 0);
+  });
+
+  testWidgets('without onReorder the row is the plain list', (tester) async {
+    final state = stateOf([unit('a', 'Alpha', 1), unit('b', 'Bravo', 2)]);
+    await pumpRow(tester, state);
+
+    expect(find.byType(ReorderableListView), findsNothing);
+    expect(find.text('Alpha'), findsOneWidget);
+    expect(find.text('Bravo'), findsOneWidget);
   });
 }
 </file>
@@ -37571,390 +37853,6 @@ abstract class OutingRepository {
 }
 </file>
 
-<file path="lib/ui/providers/app_providers.dart">
-import 'dart:async';
-
-import 'package:flutter_riverpod/flutter_riverpod.dart';
-
-import '../../data/db/app_database.dart';
-import '../../data/db/backup_repository.dart';
-import '../../data/db/drift_repositories.dart';
-import '../../domain/logic/backup_service.dart';
-import '../../domain/logic/ledger.dart';
-import '../../domain/logic/outings.dart';
-import '../../domain/models/category.dart';
-import '../../domain/models/limit_rule.dart';
-import '../../domain/models/outing.dart';
-import '../../domain/models/settings.dart';
-import '../../domain/models/template.dart';
-import '../../domain/models/transaction.dart';
-import '../../domain/models/unit.dart';
-import '../../domain/repositories/repositories.dart';
-
-/// One database for the app's lifetime. Opening the file is deferred
-/// until the first query (AppDatabase wraps it in a LazyDatabase), so
-/// creating this provider eagerly at startup is cheap.
-final appDatabaseProvider = Provider<AppDatabase>((ref) {
-  final db = AppDatabase();
-  ref.onDispose(db.close);
-  return db;
-});
-
-/// Issue #13: these four now point at the real drift-backed repositories
-/// instead of data/mock/mock_repositories.dart. No screen below needed to
-/// change for the swap — they only ever depended on the interfaces in
-/// domain/repositories/repositories.dart (design.md, "UI-first approach").
-/// The mock repositories are kept around for widget tests/previews.
-final unitRepositoryProvider = Provider<UnitRepository>((ref) {
-  return DriftUnitRepository(ref.watch(appDatabaseProvider));
-});
-
-final transactionRepositoryProvider = Provider<TransactionRepository>((ref) {
-  return DriftTransactionRepository(ref.watch(appDatabaseProvider));
-});
-
-final limitRepositoryProvider = Provider<LimitRepository>((ref) {
-  return DriftLimitRepository(ref.watch(appDatabaseProvider));
-});
-
-/// Issue #63: which limit alerts have already been shown.
-final alertLogRepositoryProvider = Provider<AlertLogRepository>((ref) {
-  return DriftAlertLogRepository(ref.watch(appDatabaseProvider));
-});
-
-final settingsRepositoryProvider = Provider<SettingsRepository>((ref) {
-  return DriftSettingsRepository(ref.watch(appDatabaseProvider));
-});
-
-/// Issue #24: whole-database export/import, and the service the Back up &
-/// restore screen talks to. Not a stream — read once to export or plan,
-/// written once (in a transaction) when the person confirms.
-final backupRepositoryProvider = Provider<BackupRepository>((ref) {
-  return DriftBackupRepository(ref.watch(appDatabaseProvider));
-});
-
-final backupServiceProvider = Provider<BackupService>((ref) {
-  return BackupService(ref.watch(backupRepositoryProvider));
-});
-
-/// Issue #20: templates built by the rule builder, persisted in the
-/// Templates drift table that #13 created.
-final templateRepositoryProvider = Provider<TemplateRepository>((ref) {
-  return DriftTemplateRepository(ref.watch(appDatabaseProvider));
-});
-
-final templatesProvider = StreamProvider<List<CaptureTemplate>>((ref) {
-  return ref.watch(templateRepositoryProvider).watchTemplates();
-});
-
-/// Templates for one unit — used by the unit page to show how many
-/// reading rules a unit already has.
-final unitTemplatesProvider =
-    StreamProvider.family<List<CaptureTemplate>, String>((ref, unitId) {
-      return ref
-          .watch(templateRepositoryProvider)
-          .watchTemplates(unitId: unitId);
-    });
-
-final unitsProvider = StreamProvider<List<MoneyUnit>>((ref) {
-  return ref.watch(unitRepositoryProvider).watchUnits();
-});
-
-/// Every unit, archived ones included. History (Activity, transaction
-/// detail) watches this so a row whose unit has been put away reads
-/// "Cash (archived)" rather than "Unknown" (finding F9).
-final allUnitsProvider = StreamProvider<List<MoneyUnit>>((ref) {
-  return ref.watch(unitRepositoryProvider).watchUnits(includeArchived: true);
-});
-
-/// Just the archived ones, most recently archived first. Plain provider,
-/// not a stream — it's derived from [allUnitsProvider] and falls back to
-/// an empty list while the underlying stream is still loading, the same
-/// shape as [pendingTransactionsProvider] and [allowedPackagesProvider].
-///
-/// Sorted by `archivedAt` when both units have it; when one doesn't (an
-/// older backup, or a unit archived before the column existed), sortOrder
-/// is the tiebreak so the list still has a stable order.
-final archivedUnitsProvider = Provider<List<MoneyUnit>>((ref) {
-  final all = ref.watch(allUnitsProvider).value ?? const <MoneyUnit>[];
-  return all.where((u) => u.archived).toList()
-    ..sort((a, b) {
-      final ad = a.archivedAt;
-      final bd = b.archivedAt;
-      if (ad != null && bd != null) return bd.compareTo(ad);
-      if (ad != null) return -1;
-      if (bd != null) return 1;
-      return a.sortOrder.compareTo(b.sortOrder);
-    });
-});
-
-final transactionsProvider = StreamProvider<List<MoneyTransaction>>((ref) {
-  return ref.watch(transactionRepositoryProvider).watchTransactions();
-});
-
-final limitsProvider = StreamProvider<List<LimitRule>>((ref) {
-  return ref.watch(limitRepositoryProvider).watchLimits();
-});
-
-/// Settings, with a synchronous-feeling default: screens that just want
-/// "the current settings, or sensible defaults while loading" can read
-/// `ref.watch(currentSettingsProvider)` instead of unwrapping an
-/// AsyncValue every time (mirrors how HomeState hides its own loading).
-final settingsProvider = StreamProvider<AppSettings>((ref) {
-  return ref.watch(settingsRepositoryProvider).watchSettings();
-});
-
-final currentSettingsProvider = Provider<AppSettings>((ref) {
-  return ref.watch(settingsProvider).value ?? AppSettings.defaults;
-});
-
-/// Fires once at each local midnight so everything derived from "which
-/// day is it" — Home, the banner, the alerts, the widget, Summary — rolls
-/// over without the person doing anything (issue #107).
-///
-/// A Notifier rather than a StreamProvider: a stream yielding `null`
-/// emits an equal `AsyncData<void>` every time, and Riverpod's default
-/// `==` comparison means only the first tick would notify watchers. An
-/// incrementing int is always a new value.
-class MidnightTicker extends Notifier<int> {
-  Timer? _timer;
-
-  @override
-  int build() {
-    _schedule();
-    ref.onDispose(() => _timer?.cancel());
-    return 0;
-  }
-
-  /// Recompute now, then re-arm for the next boundary. Called on app
-  /// resume: a phone asleep across midnight never fired the timer, and
-  /// resume is the moment the person will actually look at the screen.
-  void refresh() {
-    state = state + 1;
-    _schedule();
-  }
-
-  void _schedule() {
-    final now = DateTime.now();
-    // DateTime normalises day overflow, so a month end and a year end are
-    // handled without special cases.
-    final nextMidnight = DateTime(now.year, now.month, now.day + 1);
-    var delay = nextMidnight.difference(now);
-    // A clock that hasn't moved (or was moved backwards) would give a
-    // non-positive delay, and Timer(<=0) spins the isolate. A one-second
-    // floor keeps the loop alive without hammering it.
-    if (delay <= Duration.zero) delay = const Duration(seconds: 1);
-    _timer?.cancel();
-    _timer = Timer(delay, () {
-      state = state + 1;
-      _schedule();
-    });
-  }
-}
-
-final midnightTickProvider =
-NotifierProvider<MidnightTicker, int>(MidnightTicker.new);
-
-/// Everything Home needs, recomputed whenever units/transactions/limits
-/// change. Kept as one bundle per the storage/perf note in the build
-/// notes: fewer moving parts for the UI to juggle.
-class HomeState {
-  final List<MoneyUnit> units;
-  final Map<String, int> balanceByUnit; // minor units
-  final int spentToday;
-  final LimitRule? dailyLimit;
-  final SpendStatus status;
-  final List<MoneyTransaction> lately;
-  /// Spending for the last seven days, oldest first, today last (issue #82).
-  /// Minor units. Computed here rather than in the widget so the strip and
-  /// the summary it opens read from the same rule (Ledger.spentByDay).
-  final List<int> spentByDay;
-
-  /// #30: the outing that's active right now, or null.
-  final Outing? activeOuting;
-  /// Spending in the outing's window, in minor units.
-  final int outingSpent;
-  /// Outing status, or the daily status when no outing is active.
-  final SpendStatus outingStatus;
-  /// The outing's caption ("ends Fri 20:00"), or null when no outing.
-  final String? outingCaption;
-
-  const HomeState({
-    required this.units,
-    required this.balanceByUnit,
-    required this.spentToday,
-    required this.dailyLimit,
-    required this.status,
-    required this.lately,
-    this.spentByDay = const [0, 0, 0, 0, 0, 0, 0],
-    this.activeOuting,
-    this.outingSpent = 0,
-    this.outingStatus = SpendStatus.safe,
-    this.outingCaption,
-  });
-
-  static const empty = HomeState(
-    units: [],
-    balanceByUnit: {},
-    spentToday: 0,
-    dailyLimit: null,
-    status: SpendStatus.safe,
-    lately: [],
-  );
-
-  // Effective values: the outing wins when active.
-  SpendStatus get effectiveStatus =>
-      activeOuting != null ? outingStatus : status;
-
-  LimitRule? get effectiveLimit =>
-      activeOuting != null ? activeOuting!.asLimit() : dailyLimit;
-
-  int get effectiveSpent =>
-      activeOuting != null ? outingSpent : spentToday;
-
-  int get effectiveRemaining {
-    if (activeOuting != null) return activeOuting!.amountMinor - outingSpent;
-    if (dailyLimit == null) return 0;
-    return dailyLimit!.amountMinor - spentToday;
-  }
-
-  int get leftToday =>
-      dailyLimit == null ? 0 : dailyLimit!.amountMinor - spentToday;
-}
-
-final homeStateProvider = Provider<AsyncValue<HomeState>>((ref) {
-  // Re-run on each midnight tick: without this a Home screen left open
-  // across the boundary keeps showing yesterday's total and status until
-  // something else changes (issue #107).
-  ref.watch(midnightTickProvider);
-  final unitsAsync = ref.watch(unitsProvider);
-  final allUnitsAsync = ref.watch(allUnitsProvider);
-  final txAsync = ref.watch(transactionsProvider);
-  final limitsAsync = ref.watch(limitsProvider);
-  final outingAsync = ref.watch(outingsProvider);
-
-  if (unitsAsync.isLoading ||
-      allUnitsAsync.isLoading ||
-      txAsync.isLoading ||
-      limitsAsync.isLoading) {
-    return const AsyncValue.loading();
-  }
-  final error = unitsAsync.error ??
-      allUnitsAsync.error ??
-      txAsync.error ??
-      limitsAsync.error;
-  if (error != null) return AsyncValue.error(error, StackTrace.current);
-
-  final units = unitsAsync.value ?? [];
-  final allUnits = allUnitsAsync.value ?? [];
-  final transactions = txAsync.value ?? [];
-  final limits = limitsAsync.value ?? [];
-  final outings = outingAsync.value ?? const <Outing>[];
-
-  final now = DateTime.now();
-
-  final balances = {
-    for (final u in units) u.id: Ledger.balanceOf(u, transactions),
-  };
-
-  final (start, end) = Ledger.todayRange(now);
-  final spentToday = Ledger.spentInPeriod(transactions, start, end);
-  final spentByDay = Ledger.spentByDay(transactions, now: now);
-
-  final dailyLimit = limits
-      .where(
-        (l) =>
-            l.enabled &&
-            l.scope == LimitScope.overall &&
-            l.period == LimitPeriod.day,
-      )
-      .firstOrNull;
-
-  final status = Ledger.statusFor(dailyLimit, spentToday);
-
-  final lately = List<MoneyTransaction>.from(transactions)
-    ..sort((a, b) => b.occurredAt.compareTo(a.occurredAt));
-
-  // #30: active outing (banner-gated? no — Home hero shows the outing
-  // even if its banner is off; the banner flag only affects the
-  // notification).
-  final activeOuting = Outings.activeFrom(outings, now: now);
-  int outingSpent = 0;
-  SpendStatus outingStatus = SpendStatus.safe;
-  String? outingCaption;
-  if (activeOuting != null) {
-    final currencyByUnit = {
-      for (final u in allUnits) u.id: u.currencyCode,
-    };
-    outingSpent = Outings.spentIn(
-      activeOuting,
-      transactions,
-      currencyByUnit: currencyByUnit,
-    );
-    outingStatus = Outings.statusFor(activeOuting, outingSpent);
-    outingCaption = OutingState(
-      outing: activeOuting,
-      spentMinor: outingSpent,
-      remainingMinor: activeOuting.amountMinor - outingSpent,
-      status: outingStatus,
-      isActive: true,
-    ).caption(now);
-  }
-
-  return AsyncValue.data(
-    HomeState(
-      units: units,
-      balanceByUnit: balances,
-      spentToday: spentToday,
-      dailyLimit: dailyLimit,
-      status: status,
-      lately: lately.take(3).toList(),
-      spentByDay: spentByDay,
-      activeOuting: activeOuting,
-      outingSpent: outingSpent,
-      outingStatus: outingStatus,
-      outingCaption: outingCaption,
-    ),
-  );
-});
-
-final categoryRepositoryProvider = Provider<CategoryRepository>((ref) {
-  return DriftCategoryRepository(ref.watch(appDatabaseProvider));
-});
-
-/// Active categories, ordered. The picker in the add and fix sheets and
-/// the summary's per-category block both read this.
-final categoriesProvider = StreamProvider<List<Category>>((ref) {
-  return ref.watch(categoryRepositoryProvider).watchCategories();
-});
-
-/// Same, plus archived — the settings screen.
-final allCategoriesProvider = StreamProvider<List<Category>>((ref) {
-  return ref.watch(categoryRepositoryProvider).watchCategoriesIncludingArchived();
-});
-
-final outingRepositoryProvider = Provider<OutingRepository>((ref) {
-  return DriftOutingRepository(ref.watch(appDatabaseProvider));
-});
-
-final outingsProvider = StreamProvider<List<Outing>>((ref) {
-  return ref.watch(outingRepositoryProvider).watchOutings();
-});
-
-/// The outing that's active right now, or null. Recomputed on each
-/// midnight tick so an outing that ends at 23:59 disappears exactly at
-/// midnight without needing a settings write to trigger a rebuild.
-final activeOutingProvider = Provider<Outing?>((ref) {
-  ref.watch(midnightTickProvider);
-  final outings = ref.watch(outingsProvider).value ?? const <Outing>[];
-  return Outings.activeFrom(outings, now: DateTime.now());
-});
-
-extension _FirstOrNull<T> on Iterable<T> {
-  T? get firstOrNull => isEmpty ? null : first;
-}
-</file>
-
 <file path="lib/ui/screens/my_money_screen.dart">
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -38944,169 +38842,6 @@ class _RuleBuilderScreenState extends ConsumerState<RuleBuilderScreen> {
 }
 </file>
 
-<file path="lib/main.dart">
-import 'dart:async';
-
-import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
-
-import 'package:fuata/platform/banner.dart';
-import 'package:fuata/platform/notification_capture.dart';
-import 'package:fuata/platform/privacy.dart';
-import 'package:fuata/platform/scheduled_export.dart';
-import 'package:fuata/platform/share_intake.dart';
-import 'package:fuata/platform/summary_notifications.dart';
-import 'package:fuata/routing/app_router.dart';
-import 'package:fuata/routing/routes.dart';
-import 'package:fuata/ui/providers/alert_providers.dart';
-import 'package:fuata/ui/providers/app_providers.dart';
-import 'package:fuata/ui/providers/banner_providers.dart';
-import 'package:fuata/ui/providers/capture_providers.dart';
-import 'package:fuata/ui/providers/privacy_providers.dart';
-import 'package:fuata/ui/providers/scheduled_export_providers.dart';
-import 'package:fuata/ui/providers/summary_notifications_providers.dart';
-import 'package:fuata/ui/providers/widget_providers.dart';
-import 'package:fuata/ui/theme/app_theme.dart';
-
-import 'domain/models/settings.dart';
-
-void main() async {
-  WidgetsFlutterBinding.ensureInitialized();
-
-  // Issue #84: default to secure *before* the first frame, so the app
-  // switcher's initial snapshot is blank even before settings have been
-  // read. privacySyncProvider flips this to the person's real choice as
-  // soon as the settings stream emits.
-  await applySecure(true);
-
-  // Issue #31: load the timezone database before the first schedule, so
-  // "8pm" means 8pm local rather than 8pm UTC.
-  await SummaryNotificationScheduler.instance.init();
-
-  // Issue #22: register the background isolate entry point so Android can
-  // start it cold from a notification.
-  await registerCaptureCallback();
-
-  // Issue #35: register the scheduled-export background entry point so
-  // ScheduledExportReceiver can find it when the alarm fires.
-  await registerScheduledExportCallback();
-
-  // Issue #21: share-sheet intake.
-  await initShareIntake();
-
-  // Issue #16 / #73: read the launch action *before* the router is built
-  // so the router can pick the right initial location (—e.g. open /add
-  // straight from a banner + Add on a cold start).
-  final launchAction = await BannerPlatform.instance.initialActionFromLaunch();
-
-  runApp(
-    ProviderScope(
-      overrides: [initialBannerActionProvider.overrideWithValue(launchAction)],
-      child: const Fuata(),
-    ),
-  );
-}
-
-class Fuata extends ConsumerStatefulWidget {
-  const Fuata({super.key});
-
-  @override
-  ConsumerState<Fuata> createState() => _FuataState();
-}
-
-class _FuataState extends ConsumerState<Fuata> with WidgetsBindingObserver {
-  StreamSubscription<BannerAction>? _bannerSub;
-
-  @override
-  void initState() {
-    super.initState();
-    ref.read(shareIntakeListenerProvider);
-    ref.read(allowListSyncProvider);
-    ref.read(captureRefreshProvider);
-    _bannerSub = BannerPlatform.instance.actions.listen(_onBannerAction);
-
-    // Cold start from a banner tap in the *warm* case (the app was
-    // running, but nobody was listening yet).
-    final pending = BannerPlatform.instance.consumePendingAction();
-    if (pending != null) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) _onBannerAction(pending);
-      });
-    }
-    WidgetsBinding.instance.addObserver(this);
-  }
-
-  @override
-  void dispose() {
-    _bannerSub?.cancel();
-    WidgetsBinding.instance.removeObserver(this);
-    super.dispose();
-  }
-
-  /// Warm-start banner actions. The cold-start case is handled by the
-  /// router's `initialLocation`, so this only runs when the app is already
-  /// alive.
-  void _onBannerAction(BannerAction action) {
-    final router = ref.read(routerProvider);
-    switch (action) {
-      case BannerAction.open:
-        // The app is already coming to the front; land on Today.
-        router.go(Routes.homePath);
-      case BannerAction.quickAdd:
-        // The redirect bounces this to /onboarding while setup is
-        // unfinished; otherwise it opens the sheet.
-        router.push(Routes.addPath);
-    }
-  }
-
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) {
-      final db = ref.read(appDatabaseProvider);
-      db.markTablesUpdated([db.transactions, db.unparsedCaptures]);
-      // Issue #107: a phone that slept through midnight missed the timer
-      // entirely, and resume is the moment the person actually looks at
-      // the screen — so recompute now and re-arm for the next boundary.
-      ref.read(midnightTickProvider.notifier).refresh();
-    }
-
-    if (state == AppLifecycleState.paused) {
-      // The DB stays open — the listener's background isolate has no lock
-      // prompt and must keep capturing. This is a UI gate only.
-      if (ref.read(currentSettingsProvider).appLockEnabled) {
-        ref.read(unlockedThisSessionProvider.notifier).state = false;
-      }
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    ref.watch(bannerSyncProvider);
-    ref.watch(alertSyncProvider);
-    ref.watch(widgetSyncProvider); //Issue #29
-    ref.watch(privacySyncProvider); // issue #84
-    ref.watch(summaryNotificationSyncProvider); // Issue #31
-    ref.watch(scheduledExportSyncProvider);
-
-    final settings = ref.watch(currentSettingsProvider);
-    final router = ref.watch(routerProvider);
-
-    return MaterialApp.router(
-      debugShowCheckedModeBanner: false,
-      themeMode: settings.themeMode.flutterThemeMode,
-      theme: AppTheme.light(accent: settings.accent),
-      darkTheme: AppTheme.dark(accent: settings.accent),
-      routerConfig: router,
-      builder: FlutterSmartDialog.init(),
-      // rootNavigatorKey / rootScaffoldMessengerKey now come from the
-      // router's config; importing them from main.dart is no longer
-      // necessary anywhere else.
-    );
-  }
-}
-</file>
-
 <file path="test/data/db/app_database_test.dart">
 // Round-trip tests for the drift schema and repositories: every value
 // that goes in through a repository's write method should come back out
@@ -39716,6 +39451,100 @@ void main() {
 }
 </file>
 
+<file path="test/data/db/outings_repository_test.dart">
+import 'package:drift/native.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:fuata/data/db/app_database.dart';
+import 'package:fuata/data/db/drift_repositories.dart';
+import 'package:fuata/domain/models/outing.dart';
+
+void main() {
+  late AppDatabase db;
+  late DriftOutingRepository repo;
+
+  setUp(() {
+    db = AppDatabase(NativeDatabase.memory());
+    repo = DriftOutingRepository(db);
+  });
+  tearDown(() => db.close());
+
+  Outing outing(String id, {DateTime? endAt, String name = 'Trip'}) => Outing(
+    id: id,
+    name: name,
+    amountMinor: 150000,
+    currencyCode: 'KES',
+    startAt: DateTime(2026, 10, 15),
+    endAt: endAt ?? DateTime(2026, 10, 20),
+    createdAt: DateTime(2026, 10, 1),
+  );
+
+  test('round-trips through the repository', () async {
+    await repo.saveOuting(outing('o1', name: 'Mombasa'));
+    final outings = await repo.watchOutings().first;
+    expect(outings.single.name, 'Mombasa');
+    expect(outings.single.amountMinor, 150000);
+    expect(outings.single.startAt, DateTime(2026, 10, 15));
+  });
+
+  test('round-trips unitIds', () async {
+    await repo.saveOuting(outing('o1').copyWith(unitIds: {'cash', 'mpesa'}));
+    final outings = await repo.watchOutings().first;
+    expect(outings.single.unitIds, {'cash', 'mpesa'});
+  });
+
+  test('endOutingNow ends it early and stamps endAt', () async {
+    // Give it an endAt in the future so DateTime.now() is guaranteed to be before it
+    final original = outing('o1', endAt: DateTime.now().add(const Duration(days: 10)));
+    await repo.saveOuting(original);
+    final before = DateTime.now();
+    await repo.endOutingNow('o1');
+    final after = DateTime.now();
+    final o = (await repo.watchOutings().first).single;
+    expect(o.enabled, isFalse,
+        reason: 'endOutingNow must set enabled=false');
+    // Meaningful assertion: endAt moved to something earlier than the
+    // original future date. This is the one that catches the original bug
+    // (endAt never written at all).
+    expect(o.endAt.isBefore(original.endAt), isTrue,
+        reason: 'endAt must move back from ${original.endAt}');
+    // Sanity belt: endAt is approximately "now", not some arbitrary past
+    // value. Drift's dateTime() column stores Unix seconds, so the write
+    // truncates sub-second precision — a `before = ...147ms` and a write
+    // at `...312ms` both land in the DB as `...000s`. Comparing against
+    // a ±2-second window is what makes this test immune to that, and to
+    // wall-clock precision on any host.
+    final tolerance = const Duration(seconds: 2);
+    expect(o.endAt.isAfter(before.subtract(tolerance)), isTrue,
+        reason: 'endAt ($before) is earlier than "$before" minus the '
+            'tolerance — endOutingNow did not use a recent timestamp');
+    expect(o.endAt.isBefore(after.add(tolerance)), isTrue,
+        reason: 'endAt is later than "$after" plus the tolerance — '
+            'endOutingNow wrote a value from the future');
+    // Belt-and-braces: whatever the truncation did, the new endAt is
+    // within a couple of seconds of where `after` sat, so the person's
+    // "I came home just now" experience is preserved.
+    final delta = after.difference(o.endAt).inSeconds.abs();
+    expect(delta <= 2, isTrue,
+        reason: 'endAt should be within 2 seconds of "now" — got '
+            '${o.endAt}, delta ${delta}s');
+  });
+
+  test('saveOuting upserts by id', () async {
+    await repo.saveOuting(outing('o1', name: 'A'));
+    await repo.saveOuting(outing('o1', name: 'B'));
+    final outings = await repo.watchOutings().first;
+    expect(outings, hasLength(1));
+    expect(outings.single.name, 'B');
+  });
+
+  test('deleteOuting removes it', () async {
+    await repo.saveOuting(outing('o1'));
+    await repo.deleteOuting('o1');
+    expect(await repo.watchOutings().first, isEmpty);
+  });
+}
+</file>
+
 <file path="test/domain/backup_codec_test.dart">
 // Issue #24: the backup file format. Pure Dart, no database.
 
@@ -40267,6 +40096,177 @@ void main() {
     final decoded = BackupCodec.decode(jsonEncode(root));
     expect(decoded.ok, isTrue);
     expect(decoded.snapshot!.outings, isEmpty);
+  });
+}
+</file>
+
+<file path="test/domain/outings_test.dart">
+import 'package:flutter_test/flutter_test.dart';
+import 'package:fuata/domain/logic/outings.dart';
+import 'package:fuata/domain/models/limit_rule.dart';
+import 'package:fuata/domain/models/outing.dart';
+import 'package:fuata/domain/models/transaction.dart';
+
+void main() {
+  // Fri 17 Oct 2026, 10:00.
+  final now = DateTime(2026, 10, 17, 10);
+
+  Outing outing({
+    String id = 'o1',
+    DateTime? startAt,
+    DateTime? endAt,
+    Set<String> unitIds = const {},
+    bool enabled = true,
+    String currency = 'KES',
+    int amount = 1500000,  // 15,000.00
+    DateTime? createdAt,
+  }) => Outing(
+    id: id,
+    name: 'Mombasa trip',
+    amountMinor: amount,
+    currencyCode: currency,
+    startAt: startAt ?? DateTime(2026, 10, 15),
+    endAt: endAt ?? DateTime(2026, 10, 20),
+    unitIds: unitIds,
+    enabled: enabled,
+    createdAt: createdAt ?? DateTime(2026, 10, 1),
+  );
+
+  MoneyTransaction spend({
+    required int minor,
+    required String unitId,
+    DateTime? at,
+  }) => MoneyTransaction(
+    id: 't_${minor}_$unitId',
+    unitId: unitId,
+    type: TxType.spent,
+    amountMinor: -minor,
+    occurredAt: at ?? DateTime(2026, 10, 16),
+    createdAt: DateTime(2026, 10, 16),
+  );
+
+  group('isActive', () {
+    test('inside the window', () {
+      expect(outing().isActive(now), isTrue);
+    });
+    test('before the window', () {
+      final o = outing(startAt: DateTime(2030, 1, 1));
+      expect(o.isActive(now), isFalse);
+      expect(o.isUpcoming, isTrue);
+    });
+    test('after the window', () {
+      // Use a date definitively in the past relative to `now` (Oct 17, 2026)
+      final o = outing(endAt: DateTime(2026, 10, 10));
+      expect(o.isActive(now), isFalse);
+      expect(o.isPast, isTrue);
+    });
+    test('at the start, inclusive', () {
+      expect(outing(startAt: now).isActive(now), isTrue);
+    });
+    test('at the end, exclusive', () {
+      expect(outing(endAt: now).isActive(now), isFalse);
+    });
+    test('disabled is never active', () {
+      expect(outing(enabled: false).isActive(now), isFalse);
+    });
+  });
+
+  group('activeFrom', () {
+    test('returns the most recently created active outing', () {
+      final older = outing(id: 'old', createdAt: DateTime(2026, 9, 1));
+      final newer = outing(id: 'new', createdAt: DateTime(2026, 10, 1));
+      expect(
+        Outings.activeFrom([older, newer], now: now)?.id,
+        'new',
+      );
+    });
+    test('returns null when none are active', () {
+      final o = outing(startAt: DateTime(2027, 1, 1));
+      expect(Outings.activeFrom([o], now: now), isNull);
+    });
+  });
+
+  group('spentIn', () {
+    final currencyByUnit = {'cash': 'KES', 'mpesa': 'KES', 'usd': 'USD'};
+    final txs = [
+      spend(minor: 10000, unitId: 'cash'),
+      spend(minor: 20000, unitId: 'mpesa'),
+      spend(minor: 30000, unitId: 'usd'),   // USD — excluded
+      spend(
+        minor: 40000,
+        unitId: 'cash',
+        at: DateTime(2026, 10, 14),  // before the window
+      ),
+      spend(
+        minor: 50000,
+        unitId: 'cash',
+        at: DateTime(2026, 10, 21),  // after the window
+      ),
+    ];
+
+    test('all units: sums all in-window, in-currency spending', () {
+      expect(
+        Outings.spentIn(outing(), txs, currencyByUnit: currencyByUnit),
+        30000,  // 10000 + 20000
+      );
+    });
+
+    test('only selected units', () {
+      expect(
+        Outings.spentIn(
+          outing(unitIds: {'mpesa'}),
+          txs,
+          currencyByUnit: currencyByUnit,
+        ),
+        20000,
+      );
+    });
+
+    test('excludes transactions outside the window', () {
+      expect(
+        Outings.spentIn(
+          outing(startAt: DateTime(2026, 10, 16), endAt: DateTime(2026, 10, 17)),
+          [spend(minor: 8000, unitId: 'cash', at: DateTime(2026, 10, 16))],
+          currencyByUnit: currencyByUnit,
+        ),
+        8000,
+      );
+    });
+  });
+
+  group('statusFor', () {
+    test('safe/warning/danger/overdraft at 70/90/100', () {
+      final o = outing(amount: 100000);
+      expect(Outings.statusFor(o, 69999), SpendStatus.safe);
+      expect(Outings.statusFor(o, 70000), SpendStatus.warning);
+      expect(Outings.statusFor(o, 90000), SpendStatus.danger);
+      expect(Outings.statusFor(o, 100000), SpendStatus.overdraft);
+      expect(Outings.statusFor(o, 150000), SpendStatus.overdraft);
+    });
+    test('a status equals the same rule as the limit engine', () {
+      final o = outing(amount: 100000);
+      final l = o.asLimit();
+      for (final s in [0, 50000, 75000, 95000, 100000, 200000]) {
+        expect(Outings.statusFor(o, s), l.statusFor(s));
+      }
+    });
+  });
+
+  group('dayCount', () {
+    test('3 days for a Fri-Sun trip', () {
+      final o = outing(
+        startAt: DateTime(2026, 10, 16, 15),
+        endAt: DateTime(2026, 10, 19, 11),
+      );
+      expect(o.dayCount, 3);
+    });
+    test('1 day for a single evening', () {
+      final o = outing(
+        startAt: DateTime(2026, 10, 16, 19),
+        endAt: DateTime(2026, 10, 17, 1),
+      );
+      expect(o.dayCount, 1);
+    });
   });
 }
 </file>
@@ -43033,6 +43033,331 @@ class _Rec {
 }
 </file>
 
+<file path="docs/issue-status.md">
+# Issue status (generated 2026-10-30T08:18Z)
+
+Source of truth: GitHub. Regenerate with `scripts/refresh-issue-status.sh`.
+
+| # | State | Milestone | Title |
+|---|---|---|---|
+| #140 | CLOSED | v0.1 MVP | docs: publish app description and privacy policy site on GitHub Pages |
+| #118 | CLOSED | v1.1 Backlog | feat(settings): custom accent colour picker |
+| #117 | CLOSED | v1.1 Backlog | feat(units): reorder units on Home and My money |
+| #116 | CLOSED | v1.1 Backlog | feat(ui): Empty Home needs a call to action |
+| #115 | CLOSED | v1.1 Backlog | fix(ui): every provider error is a bare text message |
+| #114 | CLOSED | v1.1 Backlog | feat(settings): a single, app-wide currency |
+| #113 | CLOSED | v1.1 Backlog | feat(widget): surface and configure the home widget from Banner setup |
+| #112 | CLOSED | v0.1 MVP | fix(ui): Home shows "See my summaries" twice |
+| #111 | CLOSED | v0.1 MVP | fix(onboarding): "Show me how" doesn't open Auto-catch |
+| #110 | CLOSED | v0.1 MVP | fix(ui): Home hero number overflows for large amounts |
+| #109 | CLOSED | v0.1 MVP | fix(ledger): week-peek bars group by UTC day, not local day |
+| #108 | CLOSED | v0.1 MVP | fix(ledger): day/week/month ranges seem to include the wrong days |
+| #107 | CLOSED | v0.1 MVP | fix(ledger): day and limit numbers don't roll over at midnight |
+| #106 | CLOSED | v0.1 MVP | fix(ledger): day/week/month ranges seem to include the wrong days |
+| #105 | CLOSED | v0.1 MVP | fix(ledger): day and limit numbers don't roll over at midnight |
+| #87 | CLOSED | v0.1 MVP | fix(ui): educational empty state for reading rules |
+| #86 | CLOSED | v0.1 MVP | feat(banner): "no units" option |
+| #85 | CLOSED | v0.1 MVP | feat(data): erase everything |
+| #84 | CLOSED | v0.1 MVP | feat(privacy): FLAG_SECURE for Recents |
+| #83 | CLOSED | v0.1 MVP | feat(categories): rename and add categories |
+| #82 | CLOSED | v0.1 MVP | feat(ui): Week Peek home widget |
+| #81 | CLOSED | v0.1 MVP | feat(privacy): global hide amounts switch |
+| #80 | CLOSED | v0.1 MVP | feat(units): archived units screen and unarchive |
+| #79 | CLOSED | v0.1 MVP | refactor(ui): split Profile out of Me |
+| #78 | CLOSED | v0.1 MVP | feat(permissions): apps-to-watch explainer |
+| #77 | CLOSED | v0.1 MVP | feat(onboarding): welcome screen, StepFrame layout and units explainer |
+| #76 | CLOSED | v0.1 MVP | feat(onboarding): auto-catch walkthrough and banner permission copy |
+| #75 | CLOSED | v0.1 MVP | feat(permissions): notification-access primer dialog |
+| #74 | CLOSED | v0.1 MVP | fix(capture): don't store unmatched notification text |
+| #73 | CLOSED | v0.1 MVP | refactor(nav): adopt go_router and fix banner cold-start routing |
+| #72 | CLOSED | v0.1 MVP | fix(capture): rule builder code, payee and date parsing |
+| #71 | CLOSED | v0.1 MVP | fix(ui): add-unit action in My money app bar |
+| #70 | CLOSED | v0.1 MVP | fix(ui): make Home units and transactions tappable |
+| #69 | CLOSED | v0.1 MVP | fix(ui): Activity list doesn't scroll |
+| #63 | CLOSED | — | feat(limits): remaining 7.8 gaps — per-unit, alert levels, quiet hours, preview, firing alerts |
+| #56 | CLOSED | v1.1 Backlog | feat(capture): user-defined custom fields in rule builder |
+| #55 | CLOSED | v1.1 Backlog | feat(capture): "This part changes" wildcard in rule builder |
+| #39 | CLOSED | v1.1 Backlog | feat: Open-source licence review and contribution guide |
+| #38 | OPEN | v1.1 Backlog | feat: iOS manual/share-sheet edition |
+| #37 | OPEN | v1.1 Backlog | feat: Opt-in redacted diagnostics copy button |
+| #36 | OPEN | v1.1 Backlog | feat: Listener-inactive detection and manufacturer keep-alive guides |
+| #35 | CLOSED | v1.1 Backlog | feat: Scheduled encrypted export to a user-chosen folder |
+| #34 | CLOSED | v1.1 Backlog | feat: Template packs: export/import/share by file or QR, bundled presets |
+| #33 | OPEN | v1.1 Backlog | feat: Recurring bills and expected income |
+| #32 | OPEN | v1.1 Backlog | feat: Recipient to category rules |
+| #31 | CLOSED | v1.1 Backlog | feat: Scheduled daily/weekly/monthly summary notifications |
+| #30 | CLOSED | v1.1 Backlog | feat: Outing mode (temporary budget with its own banner) |
+| #29 | CLOSED | v1.1 Backlog | feat: Home screen widget |
+| #28 | CLOSED | v1.1 Backlog | feat: SQLCipher encryption with Android Keystore and app lock |
+| #27 | OPEN | v0.1 MVP | chore(release): v0.1.0 |
+| #26 | CLOSED | v0.1 MVP | test: manual device test pass |
+| #25 | CLOSED | v0.1 MVP | chore(privacy): remove INTERNET permission and disable backup |
+| #24 | CLOSED | v0.1 MVP | feat(data): JSON export/import |
+| #23 | CLOSED | v0.1 MVP | feat(insight): Today/Week/Month summaries |
+| #22 | CLOSED | v0.1 MVP | feat(capture): notification listener with app allow-list and dedupe |
+| #21 | CLOSED | v0.1 MVP | feat(capture): share/paste to review inbox |
+| #20 | CLOSED | v0.1 MVP | feat(capture): rule builder UI |
+| #19 | CLOSED | v0.1 MVP | feat(capture): template model and parser |
+| #18 | CLOSED | v0.1 MVP | spike: notification listener with app closed |
+| #17 | CLOSED | v0.1 MVP | feat(banner): banner setup screen with live preview |
+| #16 | CLOSED | v0.1 MVP | feat(banner): ongoing notification banner |
+| #15 | CLOSED | v0.1 MVP | feat(limits): limit engine and status |
+| #14 | CLOSED | v0.1 MVP | feat(ledger): computed balances, transfers, fees |
+| #13 | CLOSED | v0.1 MVP | feat(data): local database and repositories |
+| #12 | CLOSED | v0.1 MVP | feat(ui): Me and personalisation settings |
+| #11 | CLOSED | v0.1 MVP | feat(ui): My money and unit pages |
+| #10 | CLOSED | v0.1 MVP | feat(ui): Activity screen and transaction detail |
+| #9 | CLOSED | v0.1 MVP | feat(ui): add-transaction sheet |
+| #8 | CLOSED | v0.1 MVP | feat(ui): Home (Today) screen |
+| #7 | CLOSED | v0.1 MVP | feat(ui): onboarding flow |
+| #6 | CLOSED | v0.1 MVP | feat(ui): app theme, tokens and personalisation shell |
+| #5 | CLOSED | v0.1 MVP | docs: devlog and testing checklist |
+| #4 | CLOSED | v0.1 MVP | docs: design doc (data model, architecture, decision records) |
+| #3 | CLOSED | v0.1 MVP | docs: UI design brief and design tokens |
+| #2 | CLOSED | v0.1 MVP | docs: requirements document |
+| #1 | CLOSED | v0.1 MVP | chore: initialise repo and Flutter project |
+</file>
+
+<file path="lib/ui/screens/settings/settings_screen.dart">
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:fuata/widgets/contact_widget.dart';
+import 'package:fuata/widgets/help_diagnostics_widget.dart';
+import 'package:go_router/go_router.dart';
+
+import '../../../domain/logic/diagnostics.dart';
+import '../../../domain/models/limit_rule.dart';
+import '../../../domain/models/money.dart';
+import '../../../domain/models/outing.dart';
+import '../../../domain/models/settings.dart';
+import '../../../routing/routes.dart';
+import '../../../widgets/personalization/action_row.dart';
+import '../../providers/app_providers.dart';
+import '../../providers/capture_providers.dart';
+import '../../theme/app_colors.dart';
+import '../../theme/app_spacing.dart';
+import '../../theme/app_typography.dart';
+
+/// Settings (issue #79, finding F3): what used to be the Me tab, minus
+/// the profile — a list of rows, each opening its own screen, rather than
+/// cards with controls inline.
+///
+/// Rows are grouped into labelled sections (Money, Catching messages,
+/// Notifications, How it looks, Privacy & security) so the screen can be
+/// *scanned* instead of scrolled top-to-bottom. Groups are made visible
+/// by a small-caps header above them and by a wider gap between groups
+/// than within them; the ActionRows themselves are unchanged, so nothing
+/// else that uses ActionRow is affected.
+///
+/// "Profile" is deliberately not a row here. It's reached from the avatar
+/// on Today, which is where a person looks for their own name and colour;
+/// Settings is about the app.
+class SettingsScreen extends ConsumerWidget {
+  const SettingsScreen({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final settings = ref.watch(currentSettingsProvider);
+    final pendingCount = ref.watch(pendingTransactionsProvider).length;
+    final watchedApps = ref.watch(allowedPackagesProvider).length;
+    final dailyLimit = (ref.watch(limitsProvider).value ?? const <LimitRule>[])
+        .where(
+          (l) =>
+      l.scope == LimitScope.overall &&
+          l.period == LimitPeriod.day &&
+          l.enabled,
+    )
+        .firstOrNull;
+    final outingsCount =
+        (ref.watch(outingsProvider).value ?? const <Outing>[]).length;
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('Settings')),
+      body: SafeArea(
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(
+            AppSpacing.margin,
+            AppSpacing.sm,
+            AppSpacing.margin,
+            AppSpacing.xl,
+          ),
+          children: [
+            // ---- Money -------------------------------------------------
+            const _SectionHeader('Money'),
+            ActionRow(
+              icon: Icons.speed_rounded,
+              title: 'Limits & alerts',
+              subtitle: dailyLimit == null
+                  ? 'Set how much you can spend each day, week or month'
+                  : 'Daily limit: ${Money(dailyLimit.amountMinor, dailyLimit.currencyCode).format()}',
+              onTap: () => context.push(Routes.limitsPath),
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            ActionRow(
+              icon: Icons.flight_takeoff_rounded,
+              title: 'Outings',
+              subtitle: outingsCount == 0
+                  ? 'A temporary budget for a trip or a weekend'
+                  : outingsCount == 1
+                  ? '1 outing'
+                  : '$outingsCount outings',
+              onTap: () => context.push(Routes.outingsPath),
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            ActionRow(
+              icon: Icons.sell_outlined,
+              title: 'Categories',
+              subtitle: 'Rename, add or put away the categories you use',
+              onTap: () => context.push(Routes.settingsCategoriesPath),
+            ),
+
+            const SizedBox(height: AppSpacing.lg),
+
+            // ---- Catching messages ------------------------------------
+            const _SectionHeader('Catching messages'),
+            ActionRow(
+              icon: Icons.notifications_active_outlined,
+              title: 'Auto-catch',
+              subtitle: watchedApps == 0
+                  ? 'Off — pick the apps Fuata may read messages from'
+                  : watchedApps == 1
+                  ? 'Watching 1 app'
+                  : 'Watching $watchedApps apps',
+              onTap: () => context.push(Routes.autoCatchPath),
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            ActionRow(
+              icon: Icons.inbox_rounded,
+              title: 'Caught from your messages',
+              subtitle: pendingCount == 0
+                  ? 'Nothing waiting for your check'
+                  : '$pendingCount waiting for your check',
+              onTap: () => context.push(Routes.inboxPath),
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            ActionRow(
+              icon: Icons.mark_email_read_outlined,
+              title: 'Message reading rules',
+              subtitle: 'Teach Fuata to read a bank or mobile-money message',
+              onTap: () => context.push(Routes.ruleBuilderNewPath),
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            ActionRow(
+              icon: Icons.inventory_2_outlined,
+              title: 'Message reading packs',
+              subtitle: 'Ready-made rules for M-PESA, Airtel and banks',
+              onTap: () => context.push(Routes.templatePacksPath),
+            ),
+
+            const SizedBox(height: AppSpacing.lg),
+
+            // ---- Notifications ---------------------------------------
+            const _SectionHeader('Notifications'),
+            ActionRow(
+              icon: Icons.notifications_outlined,
+              title: 'Banner',
+              subtitle: settings.bannerEnabled
+                  ? 'On — choose what it shows'
+                  : 'Off — choose what the notification banner shows',
+              onTap: () => context.push(Routes.bannerPath),
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            ActionRow(
+              icon: Icons.schedule_send_outlined,
+              title: 'Summary notifications',
+              subtitle: settings.summaryNotificationsEnabled
+                  ? 'On — daily, weekly or monthly reminders'
+                  : 'Off — a periodic nudge about how your money went',
+              onTap: () => context.push(Routes.settingsSummaryNotificationsPath),
+            ),
+
+            const SizedBox(height: AppSpacing.lg),
+
+            // ---- How it looks ----------------------------------------
+            const _SectionHeader('How it looks'),
+            ActionRow(
+              icon: Icons.home_outlined,
+              title: 'Home',
+              subtitle: 'Headline number, sections',
+              onTap: () => context.push(Routes.settingsHomePath),
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            ActionRow(
+              icon: Icons.list_alt_rounded,
+              title: 'Detail level',
+              subtitle: settings.detailLevel.label,
+              onTap: () => context.push(Routes.settingsDetailPath),
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            ActionRow(
+              icon: Icons.palette_outlined,
+              title: 'Appearance',
+              subtitle: settings.themeMode.label,
+              onTap: () => context.push(Routes.settingsAppearancePath),
+            ),
+
+            const SizedBox(height: AppSpacing.lg),
+
+            // ---- Privacy & security ----------------------------------
+            const _SectionHeader('Privacy & security'),
+            ActionRow(
+              icon: Icons.fingerprint_rounded,
+              title: 'Security',
+              subtitle: settings.appLockEnabled
+                  ? 'App lock is on'
+                  : 'App lock is off — anyone with the phone can open Fuata',
+              onTap: () => context.push(Routes.settingsSecurityPath),
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            ActionRow(
+              icon: Icons.lock_outline_rounded,
+              title: 'Privacy & data',
+              subtitle: 'Lock-screen redaction, back up & restore',
+              onTap: () => context.push(Routes.settingsPrivacyPath),
+            ),
+
+            const SizedBox(height: AppSpacing.lg,),
+            const _SectionHeader('Help & diagnostics'),
+            HelpAndDiagnosticsWidget(),
+            const SizedBox(height: AppSpacing.md,),
+            Contact(),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Small-caps section header. Sits above a group of ActionRows; the
+/// wider gap after each group (`AppSpacing.lg`) is what separates the
+/// groups visually — the rows themselves keep their own border, so a
+/// section reads as a run of cards under a shared label rather than one
+/// big box (which would double up the ActionRow border and look noisy).
+class _SectionHeader extends StatelessWidget {
+  const _SectionHeader(this.title);
+  final String title;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    return Padding(
+      padding: const EdgeInsets.only(left: 4, bottom: AppSpacing.sm),
+      child: Text(
+        title.toUpperCase(),
+        style: AppTypography.labelSm.copyWith(
+          color: c.onSurfaceVariant,
+          letterSpacing: 0.08,
+        ),
+      ),
+    );
+  }
+}
+
+extension _FirstOrNull<T> on Iterable<T> {
+  T? get firstOrNull => isEmpty ? null : first;
+}
+</file>
+
 <file path="lib/ui/screens/home_screen.dart">
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -43683,331 +44008,6 @@ class _OutingBadge extends StatelessWidget {
       ),
     );
   }
-}
-</file>
-
-<file path="docs/issue-status.md">
-# Issue status (generated 2026-10-30T08:18Z)
-
-Source of truth: GitHub. Regenerate with `scripts/refresh-issue-status.sh`.
-
-| # | State | Milestone | Title |
-|---|---|---|---|
-| #140 | CLOSED | v0.1 MVP | docs: publish app description and privacy policy site on GitHub Pages |
-| #118 | CLOSED | v1.1 Backlog | feat(settings): custom accent colour picker |
-| #117 | CLOSED | v1.1 Backlog | feat(units): reorder units on Home and My money |
-| #116 | CLOSED | v1.1 Backlog | feat(ui): Empty Home needs a call to action |
-| #115 | CLOSED | v1.1 Backlog | fix(ui): every provider error is a bare text message |
-| #114 | CLOSED | v1.1 Backlog | feat(settings): a single, app-wide currency |
-| #113 | CLOSED | v1.1 Backlog | feat(widget): surface and configure the home widget from Banner setup |
-| #112 | CLOSED | v0.1 MVP | fix(ui): Home shows "See my summaries" twice |
-| #111 | CLOSED | v0.1 MVP | fix(onboarding): "Show me how" doesn't open Auto-catch |
-| #110 | CLOSED | v0.1 MVP | fix(ui): Home hero number overflows for large amounts |
-| #109 | CLOSED | v0.1 MVP | fix(ledger): week-peek bars group by UTC day, not local day |
-| #108 | CLOSED | v0.1 MVP | fix(ledger): day/week/month ranges seem to include the wrong days |
-| #107 | CLOSED | v0.1 MVP | fix(ledger): day and limit numbers don't roll over at midnight |
-| #106 | CLOSED | v0.1 MVP | fix(ledger): day/week/month ranges seem to include the wrong days |
-| #105 | CLOSED | v0.1 MVP | fix(ledger): day and limit numbers don't roll over at midnight |
-| #87 | CLOSED | v0.1 MVP | fix(ui): educational empty state for reading rules |
-| #86 | CLOSED | v0.1 MVP | feat(banner): "no units" option |
-| #85 | CLOSED | v0.1 MVP | feat(data): erase everything |
-| #84 | CLOSED | v0.1 MVP | feat(privacy): FLAG_SECURE for Recents |
-| #83 | CLOSED | v0.1 MVP | feat(categories): rename and add categories |
-| #82 | CLOSED | v0.1 MVP | feat(ui): Week Peek home widget |
-| #81 | CLOSED | v0.1 MVP | feat(privacy): global hide amounts switch |
-| #80 | CLOSED | v0.1 MVP | feat(units): archived units screen and unarchive |
-| #79 | CLOSED | v0.1 MVP | refactor(ui): split Profile out of Me |
-| #78 | CLOSED | v0.1 MVP | feat(permissions): apps-to-watch explainer |
-| #77 | CLOSED | v0.1 MVP | feat(onboarding): welcome screen, StepFrame layout and units explainer |
-| #76 | CLOSED | v0.1 MVP | feat(onboarding): auto-catch walkthrough and banner permission copy |
-| #75 | CLOSED | v0.1 MVP | feat(permissions): notification-access primer dialog |
-| #74 | CLOSED | v0.1 MVP | fix(capture): don't store unmatched notification text |
-| #73 | CLOSED | v0.1 MVP | refactor(nav): adopt go_router and fix banner cold-start routing |
-| #72 | CLOSED | v0.1 MVP | fix(capture): rule builder code, payee and date parsing |
-| #71 | CLOSED | v0.1 MVP | fix(ui): add-unit action in My money app bar |
-| #70 | CLOSED | v0.1 MVP | fix(ui): make Home units and transactions tappable |
-| #69 | CLOSED | v0.1 MVP | fix(ui): Activity list doesn't scroll |
-| #63 | CLOSED | — | feat(limits): remaining 7.8 gaps — per-unit, alert levels, quiet hours, preview, firing alerts |
-| #56 | CLOSED | v1.1 Backlog | feat(capture): user-defined custom fields in rule builder |
-| #55 | CLOSED | v1.1 Backlog | feat(capture): "This part changes" wildcard in rule builder |
-| #39 | CLOSED | v1.1 Backlog | feat: Open-source licence review and contribution guide |
-| #38 | OPEN | v1.1 Backlog | feat: iOS manual/share-sheet edition |
-| #37 | OPEN | v1.1 Backlog | feat: Opt-in redacted diagnostics copy button |
-| #36 | OPEN | v1.1 Backlog | feat: Listener-inactive detection and manufacturer keep-alive guides |
-| #35 | CLOSED | v1.1 Backlog | feat: Scheduled encrypted export to a user-chosen folder |
-| #34 | CLOSED | v1.1 Backlog | feat: Template packs: export/import/share by file or QR, bundled presets |
-| #33 | OPEN | v1.1 Backlog | feat: Recurring bills and expected income |
-| #32 | OPEN | v1.1 Backlog | feat: Recipient to category rules |
-| #31 | CLOSED | v1.1 Backlog | feat: Scheduled daily/weekly/monthly summary notifications |
-| #30 | CLOSED | v1.1 Backlog | feat: Outing mode (temporary budget with its own banner) |
-| #29 | CLOSED | v1.1 Backlog | feat: Home screen widget |
-| #28 | CLOSED | v1.1 Backlog | feat: SQLCipher encryption with Android Keystore and app lock |
-| #27 | OPEN | v0.1 MVP | chore(release): v0.1.0 |
-| #26 | CLOSED | v0.1 MVP | test: manual device test pass |
-| #25 | CLOSED | v0.1 MVP | chore(privacy): remove INTERNET permission and disable backup |
-| #24 | CLOSED | v0.1 MVP | feat(data): JSON export/import |
-| #23 | CLOSED | v0.1 MVP | feat(insight): Today/Week/Month summaries |
-| #22 | CLOSED | v0.1 MVP | feat(capture): notification listener with app allow-list and dedupe |
-| #21 | CLOSED | v0.1 MVP | feat(capture): share/paste to review inbox |
-| #20 | CLOSED | v0.1 MVP | feat(capture): rule builder UI |
-| #19 | CLOSED | v0.1 MVP | feat(capture): template model and parser |
-| #18 | CLOSED | v0.1 MVP | spike: notification listener with app closed |
-| #17 | CLOSED | v0.1 MVP | feat(banner): banner setup screen with live preview |
-| #16 | CLOSED | v0.1 MVP | feat(banner): ongoing notification banner |
-| #15 | CLOSED | v0.1 MVP | feat(limits): limit engine and status |
-| #14 | CLOSED | v0.1 MVP | feat(ledger): computed balances, transfers, fees |
-| #13 | CLOSED | v0.1 MVP | feat(data): local database and repositories |
-| #12 | CLOSED | v0.1 MVP | feat(ui): Me and personalisation settings |
-| #11 | CLOSED | v0.1 MVP | feat(ui): My money and unit pages |
-| #10 | CLOSED | v0.1 MVP | feat(ui): Activity screen and transaction detail |
-| #9 | CLOSED | v0.1 MVP | feat(ui): add-transaction sheet |
-| #8 | CLOSED | v0.1 MVP | feat(ui): Home (Today) screen |
-| #7 | CLOSED | v0.1 MVP | feat(ui): onboarding flow |
-| #6 | CLOSED | v0.1 MVP | feat(ui): app theme, tokens and personalisation shell |
-| #5 | CLOSED | v0.1 MVP | docs: devlog and testing checklist |
-| #4 | CLOSED | v0.1 MVP | docs: design doc (data model, architecture, decision records) |
-| #3 | CLOSED | v0.1 MVP | docs: UI design brief and design tokens |
-| #2 | CLOSED | v0.1 MVP | docs: requirements document |
-| #1 | CLOSED | v0.1 MVP | chore: initialise repo and Flutter project |
-</file>
-
-<file path="lib/ui/screens/settings/settings_screen.dart">
-import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:fuata/widgets/contact_widget.dart';
-import 'package:fuata/widgets/help_diagnostics_widget.dart';
-import 'package:go_router/go_router.dart';
-
-import '../../../domain/logic/diagnostics.dart';
-import '../../../domain/models/limit_rule.dart';
-import '../../../domain/models/money.dart';
-import '../../../domain/models/outing.dart';
-import '../../../domain/models/settings.dart';
-import '../../../routing/routes.dart';
-import '../../../widgets/personalization/action_row.dart';
-import '../../providers/app_providers.dart';
-import '../../providers/capture_providers.dart';
-import '../../theme/app_colors.dart';
-import '../../theme/app_spacing.dart';
-import '../../theme/app_typography.dart';
-
-/// Settings (issue #79, finding F3): what used to be the Me tab, minus
-/// the profile — a list of rows, each opening its own screen, rather than
-/// cards with controls inline.
-///
-/// Rows are grouped into labelled sections (Money, Catching messages,
-/// Notifications, How it looks, Privacy & security) so the screen can be
-/// *scanned* instead of scrolled top-to-bottom. Groups are made visible
-/// by a small-caps header above them and by a wider gap between groups
-/// than within them; the ActionRows themselves are unchanged, so nothing
-/// else that uses ActionRow is affected.
-///
-/// "Profile" is deliberately not a row here. It's reached from the avatar
-/// on Today, which is where a person looks for their own name and colour;
-/// Settings is about the app.
-class SettingsScreen extends ConsumerWidget {
-  const SettingsScreen({super.key});
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final settings = ref.watch(currentSettingsProvider);
-    final pendingCount = ref.watch(pendingTransactionsProvider).length;
-    final watchedApps = ref.watch(allowedPackagesProvider).length;
-    final dailyLimit = (ref.watch(limitsProvider).value ?? const <LimitRule>[])
-        .where(
-          (l) =>
-      l.scope == LimitScope.overall &&
-          l.period == LimitPeriod.day &&
-          l.enabled,
-    )
-        .firstOrNull;
-    final outingsCount =
-        (ref.watch(outingsProvider).value ?? const <Outing>[]).length;
-
-    return Scaffold(
-      appBar: AppBar(title: const Text('Settings')),
-      body: SafeArea(
-        child: ListView(
-          padding: const EdgeInsets.fromLTRB(
-            AppSpacing.margin,
-            AppSpacing.sm,
-            AppSpacing.margin,
-            AppSpacing.xl,
-          ),
-          children: [
-            // ---- Money -------------------------------------------------
-            const _SectionHeader('Money'),
-            ActionRow(
-              icon: Icons.speed_rounded,
-              title: 'Limits & alerts',
-              subtitle: dailyLimit == null
-                  ? 'Set how much you can spend each day, week or month'
-                  : 'Daily limit: ${Money(dailyLimit.amountMinor, dailyLimit.currencyCode).format()}',
-              onTap: () => context.push(Routes.limitsPath),
-            ),
-            const SizedBox(height: AppSpacing.sm),
-            ActionRow(
-              icon: Icons.flight_takeoff_rounded,
-              title: 'Outings',
-              subtitle: outingsCount == 0
-                  ? 'A temporary budget for a trip or a weekend'
-                  : outingsCount == 1
-                  ? '1 outing'
-                  : '$outingsCount outings',
-              onTap: () => context.push(Routes.outingsPath),
-            ),
-            const SizedBox(height: AppSpacing.sm),
-            ActionRow(
-              icon: Icons.sell_outlined,
-              title: 'Categories',
-              subtitle: 'Rename, add or put away the categories you use',
-              onTap: () => context.push(Routes.settingsCategoriesPath),
-            ),
-
-            const SizedBox(height: AppSpacing.lg),
-
-            // ---- Catching messages ------------------------------------
-            const _SectionHeader('Catching messages'),
-            ActionRow(
-              icon: Icons.notifications_active_outlined,
-              title: 'Auto-catch',
-              subtitle: watchedApps == 0
-                  ? 'Off — pick the apps Fuata may read messages from'
-                  : watchedApps == 1
-                  ? 'Watching 1 app'
-                  : 'Watching $watchedApps apps',
-              onTap: () => context.push(Routes.autoCatchPath),
-            ),
-            const SizedBox(height: AppSpacing.sm),
-            ActionRow(
-              icon: Icons.inbox_rounded,
-              title: 'Caught from your messages',
-              subtitle: pendingCount == 0
-                  ? 'Nothing waiting for your check'
-                  : '$pendingCount waiting for your check',
-              onTap: () => context.push(Routes.inboxPath),
-            ),
-            const SizedBox(height: AppSpacing.sm),
-            ActionRow(
-              icon: Icons.mark_email_read_outlined,
-              title: 'Message reading rules',
-              subtitle: 'Teach Fuata to read a bank or mobile-money message',
-              onTap: () => context.push(Routes.ruleBuilderNewPath),
-            ),
-            const SizedBox(height: AppSpacing.sm),
-            ActionRow(
-              icon: Icons.inventory_2_outlined,
-              title: 'Message reading packs',
-              subtitle: 'Ready-made rules for M-PESA, Airtel and banks',
-              onTap: () => context.push(Routes.templatePacksPath),
-            ),
-
-            const SizedBox(height: AppSpacing.lg),
-
-            // ---- Notifications ---------------------------------------
-            const _SectionHeader('Notifications'),
-            ActionRow(
-              icon: Icons.notifications_outlined,
-              title: 'Banner',
-              subtitle: settings.bannerEnabled
-                  ? 'On — choose what it shows'
-                  : 'Off — choose what the notification banner shows',
-              onTap: () => context.push(Routes.bannerPath),
-            ),
-            const SizedBox(height: AppSpacing.sm),
-            ActionRow(
-              icon: Icons.schedule_send_outlined,
-              title: 'Summary notifications',
-              subtitle: settings.summaryNotificationsEnabled
-                  ? 'On — daily, weekly or monthly reminders'
-                  : 'Off — a periodic nudge about how your money went',
-              onTap: () => context.push(Routes.settingsSummaryNotificationsPath),
-            ),
-
-            const SizedBox(height: AppSpacing.lg),
-
-            // ---- How it looks ----------------------------------------
-            const _SectionHeader('How it looks'),
-            ActionRow(
-              icon: Icons.home_outlined,
-              title: 'Home',
-              subtitle: 'Headline number, sections',
-              onTap: () => context.push(Routes.settingsHomePath),
-            ),
-            const SizedBox(height: AppSpacing.sm),
-            ActionRow(
-              icon: Icons.list_alt_rounded,
-              title: 'Detail level',
-              subtitle: settings.detailLevel.label,
-              onTap: () => context.push(Routes.settingsDetailPath),
-            ),
-            const SizedBox(height: AppSpacing.sm),
-            ActionRow(
-              icon: Icons.palette_outlined,
-              title: 'Appearance',
-              subtitle: settings.themeMode.label,
-              onTap: () => context.push(Routes.settingsAppearancePath),
-            ),
-
-            const SizedBox(height: AppSpacing.lg),
-
-            // ---- Privacy & security ----------------------------------
-            const _SectionHeader('Privacy & security'),
-            ActionRow(
-              icon: Icons.fingerprint_rounded,
-              title: 'Security',
-              subtitle: settings.appLockEnabled
-                  ? 'App lock is on'
-                  : 'App lock is off — anyone with the phone can open Fuata',
-              onTap: () => context.push(Routes.settingsSecurityPath),
-            ),
-            const SizedBox(height: AppSpacing.sm),
-            ActionRow(
-              icon: Icons.lock_outline_rounded,
-              title: 'Privacy & data',
-              subtitle: 'Lock-screen redaction, back up & restore',
-              onTap: () => context.push(Routes.settingsPrivacyPath),
-            ),
-
-            const SizedBox(height: AppSpacing.lg,),
-            const _SectionHeader('Help & diagnostics'),
-            HelpAndDiagnosticsWidget(),
-            const SizedBox(height: AppSpacing.md,),
-            Contact(),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-/// Small-caps section header. Sits above a group of ActionRows; the
-/// wider gap after each group (`AppSpacing.lg`) is what separates the
-/// groups visually — the rows themselves keep their own border, so a
-/// section reads as a run of cards under a shared label rather than one
-/// big box (which would double up the ActionRow border and look noisy).
-class _SectionHeader extends StatelessWidget {
-  const _SectionHeader(this.title);
-  final String title;
-
-  @override
-  Widget build(BuildContext context) {
-    final c = context.colors;
-    return Padding(
-      padding: const EdgeInsets.only(left: 4, bottom: AppSpacing.sm),
-      child: Text(
-        title.toUpperCase(),
-        style: AppTypography.labelSm.copyWith(
-          color: c.onSurfaceVariant,
-          letterSpacing: 0.08,
-        ),
-      ),
-    );
-  }
-}
-
-extension _FirstOrNull<T> on Iterable<T> {
-  T? get firstOrNull => isEmpty ? null : first;
 }
 </file>
 

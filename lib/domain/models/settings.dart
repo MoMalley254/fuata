@@ -198,6 +198,13 @@ class AppSettings {
   // eyeballed at least once.
   final bool autoAcceptCaptures;
 
+  /// Whether a freshly caught payment is announced with its own
+  /// notification — details in the text, plus Accept / Fix / Discard
+  /// buttons so it can be dealt with without opening the app. On by
+  /// default; it only ever fires for captures that are waiting for a
+  /// check (an auto-accepted capture has nothing left to decide).
+  final bool captureNotificationsEnabled;
+
   // Banner options (issue #17). Empty bannerUnitIds means "all units".
   final bool bannerEnabled;
   final BannerHeadline bannerHeadline;
@@ -315,6 +322,7 @@ class AppSettings {
     required this.amountsHiddenInRecents,
     required this.redactedLockScreenBanner,
     required this.autoAcceptCaptures,
+    this.captureNotificationsEnabled = true,
     required this.bannerEnabled,
     required this.bannerHeadline,
     required this.bannerUnitIds,
@@ -367,6 +375,7 @@ class AppSettings {
     amountsHiddenInRecents: false,
     redactedLockScreenBanner: true,
     autoAcceptCaptures: false,
+    captureNotificationsEnabled: true,
     bannerEnabled: false, // turned on by onboarding (#7) or the Banner screen
     bannerHeadline: BannerHeadline.leftToday,
     bannerUnitIds: <String>{},
@@ -416,6 +425,7 @@ class AppSettings {
     bool? amountsHiddenInRecents,
     bool? redactedLockScreenBanner,
     bool? autoAcceptCaptures,
+    bool? captureNotificationsEnabled,
     bool? bannerEnabled,
     BannerHeadline? bannerHeadline,
     Set<String>? bannerUnitIds,
@@ -466,6 +476,8 @@ class AppSettings {
       redactedLockScreenBanner:
       redactedLockScreenBanner ?? this.redactedLockScreenBanner,
       autoAcceptCaptures: autoAcceptCaptures ?? this.autoAcceptCaptures,
+      captureNotificationsEnabled:
+      captureNotificationsEnabled ?? this.captureNotificationsEnabled,
       bannerEnabled: bannerEnabled ?? this.bannerEnabled,
       bannerHeadline: bannerHeadline ?? this.bannerHeadline,
       bannerUnitIds: bannerUnitIds ?? this.bannerUnitIds,
