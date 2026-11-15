@@ -191,6 +191,7 @@ class BackupCodec {
     'amountsHiddenInRecents': s.amountsHiddenInRecents,
     'redactedLockScreenBanner': s.redactedLockScreenBanner,
     'autoAcceptCaptures': s.autoAcceptCaptures,
+    'captureNotificationsEnabled': s.captureNotificationsEnabled,
     'bannerEnabled': s.bannerEnabled,
     'bannerHeadline': s.bannerHeadline.name,
     'bannerUnitIds': (s.bannerUnitIds.toList()..sort()),
@@ -630,6 +631,10 @@ class BackupCodec {
         d.redactedLockScreenBanner,
       ),
       autoAcceptCaptures: flag('autoAcceptCaptures', d.autoAcceptCaptures),
+      captureNotificationsEnabled: flag(
+        'captureNotificationsEnabled',
+        d.captureNotificationsEnabled,
+      ),
       bannerEnabled: flag('bannerEnabled', d.bannerEnabled),
       bannerHeadline: pick(
         'bannerHeadline',

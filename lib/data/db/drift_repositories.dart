@@ -260,6 +260,7 @@ class DriftSettingsRepository implements SettingsRepository {
   static const _kAmountsHidden = 'amountsHiddenInRecents';
   static const _kRedactedBanner = 'redactedLockScreenBanner';
   static const _kAutoAccept = 'autoAcceptCaptures';
+  static const _kCaptureNotifications = 'captureNotificationsEnabled';
 
   static const _kBannerEnabled = 'bannerEnabled';
   static const _kBannerHeadline = 'bannerHeadline';
@@ -362,6 +363,10 @@ class DriftSettingsRepository implements SettingsRepository {
       SettingsEntriesCompanion.insert(
         key: _kAutoAccept,
         value: s.autoAcceptCaptures.toString(),
+      ),
+      SettingsEntriesCompanion.insert(
+        key: _kCaptureNotifications,
+        value: s.captureNotificationsEnabled.toString(),
       ),
       SettingsEntriesCompanion.insert(
         key: _kBannerEnabled,
@@ -538,6 +543,12 @@ class DriftSettingsRepository implements SettingsRepository {
       autoAcceptCaptures: boolOr(
         map[_kAutoAccept],
         defaults.autoAcceptCaptures,
+      ),
+      // Rows written before this setting existed have no key: on, which is
+      // the default for everyone.
+      captureNotificationsEnabled: boolOr(
+        map[_kCaptureNotifications],
+        defaults.captureNotificationsEnabled,
       ),
       bannerEnabled: boolOr(map[_kBannerEnabled], defaults.bannerEnabled),
       bannerHeadline: byName(
