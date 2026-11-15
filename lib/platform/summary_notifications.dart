@@ -28,6 +28,7 @@ import 'package:timezone/timezone.dart' as tz;
 
 import '../domain/models/settings.dart';
 import 'banner.dart';
+import 'capture_notification_actions.dart';
 
 /// The three bodies the scheduler puts into the three notifications. Each
 /// is computed once by the caller (which has the repositories) and handed
@@ -140,6 +141,11 @@ class SummaryNotificationScheduler {
       settings: const InitializationSettings(
         android: AndroidInitializationSettings('@mipmap/ic_launcher'),
       ),
+      // This runs first in main(); it must not leave the plugin without the
+      // capture-notification button handler that BannerPlatform.init also
+      // registers (the plugin has one registration, shared by both).
+      onDidReceiveBackgroundNotificationResponse:
+          captureNotificationBackgroundHandler,
     );
     _initialised = true;
   }

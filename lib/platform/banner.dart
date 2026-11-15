@@ -26,11 +26,62 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 import '../domain/logic/alert_engine.dart';
 import '../domain/logic/banner_content.dart';
+import '../domain/logic/capture_notification_content.dart';
 import '../domain/models/limit_alert.dart';
 import '../domain/models/limit_rule.dart';
+// Circular on purpose: init() registers the top-level background handler
+// that lives there, and that file posts through BannerPlatform. Dart allows
+// import cycles; the handler has to be named here so every isolate that
+// initialises the plugin re-registers it.
+import 'capture_notification_actions.dart';
 
 /// What the person did with the banner: opened it, or hit + Add (US-07).
 enum BannerAction { open, quickAdd }
+
+/// What the person did on a *capture* notification that needs the app:
+/// tapped its body, pressed Fix, or pressed Update balance. Accept and
+/// Discard never need the app — they run in the background isolate (see
+/// capture_notification_actions.dart) and never reach this type.
+enum CaptureTapKind { open, fix, updateBalance }
+
+class CaptureNotificationTap {
+  final CaptureTapKind kind;
+  final String transactionId;
+  const CaptureNotificationTap(this.kind, this.transactionId);
+
+  static const _payloadPrefix = 'capture:';
+
+  static String payloadFor(String transactionId) =>
+      '$_payloadPrefix$transactionId';
+
+  /// The transaction id inside a capture notification's payload, or null for
+  /// a payload that isn't one (the banner and alerts carry none).
+  static String? transactionIdFrom(String? payload) {
+    if (payload == null || !payload.startsWith(_payloadPrefix)) return null;
+    final id = payload.substring(_payloadPrefix.length);
+    return id.isEmpty ? null : id;
+  }
+
+  /// Null for anything that isn't a capture notification, and for Accept /
+  /// Discard (handled without the app).
+  static CaptureNotificationTap? fromResponse(NotificationResponse response) {
+    final id = transactionIdFrom(response.payload);
+    if (id == null) return null;
+    return switch (response.actionId) {
+      BannerPlatform.captureFixAction => CaptureNotificationTap(
+        CaptureTapKind.fix,
+        id,
+      ),
+      BannerPlatform.captureBalanceAction => CaptureNotificationTap(
+        CaptureTapKind.updateBalance,
+        id,
+      ),
+      BannerPlatform.captureAcceptAction ||
+      BannerPlatform.captureDiscardAction => null,
+      _ => CaptureNotificationTap(CaptureTapKind.open, id),
+    };
+  }
+}
 
 class BannerPlatform {
   BannerPlatform._();
@@ -76,8 +127,34 @@ class BannerPlatform {
   static const summaryChannelDescription =
       'Daily, weekly and monthly reminders of how your money went.';
 
+  /// Caught-payment notifications: the one with Accept / Fix / Discard
+  /// buttons. High importance so it heads-up — the whole point is acting on
+  /// it from wherever the person is. Its own channel, so it can be muted in
+  /// Android's settings without touching the banner or the limit alerts.
+  static const captureChannelId = 'fuata_captures';
+  static const captureChannelName = 'Caught payments';
+  static const captureChannelDescription =
+      'A payment Fuata caught, with buttons to accept, fix or discard it.';
+
+  /// The same notifications during quiet hours: they still arrive, without
+  /// sound or a heads-up. A separate channel for the same reason as
+  /// [quietAlertChannelId].
+  static const quietCaptureChannelId = 'fuata_captures_quiet';
+  static const quietCaptureChannelName = 'Caught payments (quiet hours)';
+  static const quietCaptureChannelDescription =
+      'Caught payments that arrive during your quiet hours, without sound.';
+
+  /// Action ids on a capture notification. Accept and Discard run in the
+  /// background; Fix and Update balance bring the app up.
+  static const captureAcceptAction = 'capture_accept';
+  static const captureFixAction = 'capture_fix';
+  static const captureDiscardAction = 'capture_discard';
+  static const captureBalanceAction = 'capture_balance';
+
   final _plugin = FlutterLocalNotificationsPlugin();
   final _actions = StreamController<BannerAction>.broadcast();
+  final _captureTaps = StreamController<CaptureNotificationTap>.broadcast();
+  CaptureNotificationTap? _pendingCaptureTap;
   bool _initialised = false;
   bool _permissionAsked = false;
 
@@ -96,6 +173,11 @@ class BannerPlatform {
     await _plugin.initialize(
       settings: initSettings,
       onDidReceiveNotificationResponse: _onResponse,
+      // Accept / Discard on a capture notification. Registered here, in
+      // every isolate that initialises the plugin, so Android can find it
+      // even when the UI isn't running.
+      onDidReceiveBackgroundNotificationResponse:
+          captureNotificationBackgroundHandler,
     );
     await _createChannels();
     _initialised = true;
@@ -140,6 +222,25 @@ class BannerPlatform {
 
     await android.createNotificationChannel(
       const AndroidNotificationChannel(
+        captureChannelId,
+        captureChannelName,
+        description: captureChannelDescription,
+        importance: Importance.high,
+      ),
+    );
+    await android.createNotificationChannel(
+      const AndroidNotificationChannel(
+        quietCaptureChannelId,
+        quietCaptureChannelName,
+        description: quietCaptureChannelDescription,
+        importance: Importance.low,
+        playSound: false,
+        enableVibration: false,
+      ),
+    );
+
+    await android.createNotificationChannel(
+      const AndroidNotificationChannel(
         summaryChannelId,
         summaryChannelName,
         description: summaryChannelDescription,
@@ -151,6 +252,22 @@ class BannerPlatform {
   BannerAction? _pending;
 
   void _onResponse(NotificationResponse response) {
+    // A capture notification: Fix / Update balance / a tap on its body.
+    // (Accept and Discard are background-only and never arrive here.)
+    final captureId = CaptureNotificationTap.transactionIdFrom(
+      response.payload,
+    );
+    if (captureId != null) {
+      final tap = CaptureNotificationTap.fromResponse(response);
+      if (tap == null) return;
+      if (_captureTaps.hasListener) {
+        _captureTaps.add(tap);
+      } else {
+        _pendingCaptureTap = tap; // cold start: Fuata drains it after frame 1
+      }
+      return;
+    }
+
     final action = response.actionId == 'quick_add'
         ? BannerAction.quickAdd
         : BannerAction.open;
@@ -162,6 +279,18 @@ class BannerPlatform {
     } else {
       _pending = action;
     }
+  }
+
+  /// Fix / Update balance / body taps on capture notifications. Broadcast,
+  /// like [actions].
+  Stream<CaptureNotificationTap> get captureTaps => _captureTaps.stream;
+
+  /// One-shot read for a cold start: the capture-notification tap that
+  /// launched the app, if any. Cleared on read.
+  CaptureNotificationTap? consumePendingCaptureTap() {
+    final t = _pendingCaptureTap;
+    _pendingCaptureTap = null;
+    return t;
   }
 
   /// One-shot read for a cold start: the banner action that launched the
@@ -227,6 +356,127 @@ class BannerPlatform {
         ),
       ),
     );
+  }
+
+  /// Post a caught payment with Accept / Fix / Discard buttons (US-09/11).
+  /// Its id is derived from the transaction, so a re-post replaces rather
+  /// than stacks, and so [cancelCapture] can find it again. [quiet] posts it
+  /// on the silent channel (quiet hours).
+  Future<void> showCapture(
+    CaptureNotificationContent content, {
+    required bool quiet,
+    required bool redactOnLockScreen,
+  }) async {
+    await init();
+    await _requestPermissionOnce();
+    await _plugin.show(
+      id: captureIdFor(content.transactionId),
+      title: content.title,
+      body: content.body,
+      payload: CaptureNotificationTap.payloadFor(content.transactionId),
+      notificationDetails: NotificationDetails(
+        android: AndroidNotificationDetails(
+          quiet ? quietCaptureChannelId : captureChannelId,
+          quiet ? quietCaptureChannelName : captureChannelName,
+          channelDescription: quiet
+              ? quietCaptureChannelDescription
+              : captureChannelDescription,
+          importance: quiet ? Importance.low : Importance.high,
+          priority: quiet ? Priority.low : Priority.high,
+          autoCancel: true,
+          visibility: redactOnLockScreen
+              ? NotificationVisibility.private
+              : NotificationVisibility.public,
+          icon: '@mipmap/ic_launcher',
+          styleInformation: BigTextStyleInformation(content.body),
+          actions: const [
+            // Background: no app launch. cancelNotification removes it the
+            // moment it is pressed, so a second press can't double-act.
+            AndroidNotificationAction(
+              captureAcceptAction,
+              'Accept',
+              showsUserInterface: false,
+              cancelNotification: true,
+            ),
+            // Fixing needs the person's hands, so this one opens the app
+            // straight onto the Fix sheet.
+            AndroidNotificationAction(
+              captureFixAction,
+              'Fix',
+              showsUserInterface: true,
+              cancelNotification: true,
+            ),
+            AndroidNotificationAction(
+              captureDiscardAction,
+              'Discard',
+              showsUserInterface: false,
+              cancelNotification: true,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// "Added — but the balance looks off", with an Update balance button that
+  /// opens the app on that sheet. Same id as the capture it follows, so it
+  /// takes that notification's place.
+  Future<void> showBalanceMismatch(
+    CaptureNotificationContent content, {
+    required bool redactOnLockScreen,
+  }) async {
+    await init();
+    await _plugin.show(
+      id: captureIdFor(content.transactionId),
+      title: content.title,
+      body: content.body,
+      payload: CaptureNotificationTap.payloadFor(content.transactionId),
+      notificationDetails: NotificationDetails(
+        android: AndroidNotificationDetails(
+          captureChannelId,
+          captureChannelName,
+          channelDescription: captureChannelDescription,
+          importance: Importance.high,
+          priority: Priority.high,
+          autoCancel: true,
+          visibility: redactOnLockScreen
+              ? NotificationVisibility.private
+              : NotificationVisibility.public,
+          icon: '@mipmap/ic_launcher',
+          styleInformation: BigTextStyleInformation(content.body),
+          actions: const [
+            AndroidNotificationAction(
+              captureBalanceAction,
+              'Update balance',
+              showsUserInterface: true,
+              cancelNotification: true,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Removes a capture's notification — used when the person deals with the
+  /// capture in the app, so a stale Accept button isn't left in the shade.
+  Future<void> cancelCapture(String transactionId) async {
+    // Housekeeping after the real work (a confirm, a discard, a fix) has
+    // already been saved — it must never be what makes that look like it
+    // failed, and it has no plugin to talk to in widget tests.
+    try {
+      await init();
+      await _plugin.cancel(id: captureIdFor(transactionId));
+    } catch (_) {}
+  }
+
+  /// Same FNV-1a as [alertIdFor], in its own id range (5,000,000 and up) so
+  /// the two can never collide with each other, the banner or the summaries.
+  static int captureIdFor(String transactionId) {
+    var h = 0x811c9dc5;
+    for (final unit in transactionId.codeUnits) {
+      h = ((h ^ unit) * 0x01000193) & 0x7fffffff;
+    }
+    return 5000000 + (h % 1000000);
   }
 
   /// Stable across runs and isolates (String.hashCode is not guaranteed
@@ -343,6 +593,13 @@ class BannerPlatform {
     if (details?.didNotificationLaunchApp != true) return null;
     final response = details!.notificationResponse;
     if (response == null) return null;
+    // A capture notification launched us: park it for Fuata to act on after
+    // the first frame, and leave the router on its normal start location.
+    final captureTap = CaptureNotificationTap.fromResponse(response);
+    if (captureTap != null) {
+      _pendingCaptureTap = captureTap;
+      return null;
+    }
     return response.actionId == 'quick_add'
         ? BannerAction.quickAdd
         : BannerAction.open;

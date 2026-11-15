@@ -96,10 +96,16 @@ final allowListSyncProvider = Provider<void>((ref) {
 /// affected tables changed so Home, Activity and the inbox refresh.
 final captureRefreshProvider = Provider<void>((ref) {
   final db = ref.watch(appDatabaseProvider);
-  listenForCaptureChanges(
-        () => db.markTablesUpdated([db.transactions, db.unparsedCaptures]),
-  );
-  ref.onDispose(() => listenForCaptureChanges(null));
+  void refresh() => db.markTablesUpdated([db.transactions, db.unparsedCaptures]);
+
+  listenForCaptureChanges(refresh);
+  // The capture notification's Accept / Discard buttons write from the
+  // plugin's own background isolate and can't use the native ping above.
+  listenForCaptureActionPings(refresh);
+  ref.onDispose(() {
+    listenForCaptureChanges(null);
+    listenForCaptureActionPings(null);
+  });
 });
 
 /// Everything sitting in the review inbox right now: pending captures
