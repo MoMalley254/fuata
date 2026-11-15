@@ -5,6 +5,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
 
 import 'package:fuata/platform/banner.dart';
+import 'package:fuata/routing/app_keys.dart';
+import 'package:fuata/widgets/sheets/fix_captured_sheet.dart';
+import 'package:fuata/widgets/sheets/update_balance_sheet.dart';
+import 'package:fuata/domain/logic/ledger.dart';
 import 'package:fuata/platform/notification_capture.dart';
 import 'package:fuata/platform/privacy.dart';
 import 'package:fuata/platform/scheduled_export.dart';
@@ -70,6 +74,13 @@ class Fuata extends ConsumerStatefulWidget {
 
 class _FuataState extends ConsumerState<Fuata> with WidgetsBindingObserver {
   StreamSubscription<BannerAction>? _bannerSub;
+  StreamSubscription<CaptureNotificationTap>? _captureTapSub;
+
+  /// A Fix / Update balance press on a capture notification that couldn't be
+  /// acted on yet — the app was still loading, or locked. Held until it can
+  /// be (see [_openPendingCaptureTap]); the sheet must never appear on top
+  /// of the lock screen.
+  CaptureNotificationTap? _pendingCaptureTap;
 
   @override
   void initState() {
@@ -78,6 +89,16 @@ class _FuataState extends ConsumerState<Fuata> with WidgetsBindingObserver {
     ref.read(allowListSyncProvider);
     ref.read(captureRefreshProvider);
     _bannerSub = BannerPlatform.instance.actions.listen(_onBannerAction);
+    _captureTapSub = BannerPlatform.instance.captureTaps.listen(
+      _onCaptureTap,
+    );
+    // Cold start from a capture notification's Fix button (or its body).
+    final launchTap = BannerPlatform.instance.consumePendingCaptureTap();
+    if (launchTap != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _onCaptureTap(launchTap);
+      });
+    }
 
     // Cold start from a banner tap in the *warm* case (the app was
     // running, but nobody was listening yet).
@@ -93,6 +114,7 @@ class _FuataState extends ConsumerState<Fuata> with WidgetsBindingObserver {
   @override
   void dispose() {
     _bannerSub?.cancel();
+    _captureTapSub?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -110,6 +132,69 @@ class _FuataState extends ConsumerState<Fuata> with WidgetsBindingObserver {
         // The redirect bounces this to /onboarding while setup is
         // unfinished; otherwise it opens the sheet.
         router.push(Routes.addPath);
+    }
+  }
+
+  /// A press on a capture notification that needs the app. Everything waits
+  /// in [_pendingCaptureTap] until the app is ready (settings loaded,
+  /// onboarded) and unlocked, then [_openPendingCaptureTap] takes the person
+  /// to the inbox and, for Fix / Update balance, raises the right sheet.
+  void _onCaptureTap(CaptureNotificationTap tap) {
+    _pendingCaptureTap = tap;
+    WidgetsBinding.instance.addPostFrameCallback(
+      (_) => _openPendingCaptureTap(),
+    );
+  }
+
+  Future<void> _openPendingCaptureTap() async {
+    final tap = _pendingCaptureTap;
+    if (tap == null || !mounted) return;
+
+    // Not ready: leave it parked. The listeners in build() call back here
+    // when settings finish loading or the person unlocks.
+    final settings = ref.read(settingsProvider).value;
+    if (settings == null || !settings.onboardingComplete) return;
+    if (ref.read(lockedProvider)) return;
+    // The overlay's context sits *under* the root Navigator, which is what
+    // showModalBottomSheet needs; the navigator's own context does not.
+    final overlayContext = rootNavigatorKey.currentState?.overlay?.context;
+    if (overlayContext == null) return;
+
+    _pendingCaptureTap = null;
+    // The inbox goes up first so that closing the sheet lands the person
+    // where the capture lives.
+    final router = ref.read(routerProvider);
+    router.go(Routes.homePath);
+    router.push(Routes.inboxPath);
+    if (tap.kind == CaptureTapKind.open) return;
+
+    final all = await ref
+        .read(transactionRepositoryProvider)
+        .watchTransactions()
+        .first;
+    final tx = all.where((t) => t.id == tap.transactionId).firstOrNull;
+    if (!mounted || !overlayContext.mounted) return;
+
+    switch (tap.kind) {
+      case CaptureTapKind.fix:
+        // Gone, or already accepted in the app: nothing left to fix.
+        if (tx == null || tx.isConfirmed) {
+          rootScaffoldMessengerKey.currentState?.showSnackBar(
+            const SnackBar(content: Text('That one is already sorted.')),
+          );
+          return;
+        }
+        await showFixCapturedSheet(overlayContext, tx);
+      case CaptureTapKind.updateBalance:
+        final units = await ref.read(unitRepositoryProvider).watchUnits().first;
+        final unit = units.where((u) => u.id == tx?.unitId).firstOrNull;
+        if (tx == null || unit == null) return;
+        showUpdateBalanceSheet(
+          unit: unit,
+          currentBalanceMinor: Ledger.balanceOf(unit, all),
+        );
+      case CaptureTapKind.open:
+        break;
     }
   }
 
@@ -141,6 +226,10 @@ class _FuataState extends ConsumerState<Fuata> with WidgetsBindingObserver {
     ref.watch(privacySyncProvider); // issue #84
     ref.watch(summaryNotificationSyncProvider); // Issue #31
     ref.watch(scheduledExportSyncProvider);
+
+    // A parked capture-notification press waits on these two things.
+    ref.listen(settingsProvider, (_, _) => _openPendingCaptureTap());
+    ref.listen(lockedProvider, (_, _) => _openPendingCaptureTap());
 
     final settings = ref.watch(currentSettingsProvider);
     final router = ref.watch(routerProvider);
