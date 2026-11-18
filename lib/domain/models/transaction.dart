@@ -51,15 +51,19 @@ class MoneyTransaction {
   bool get countsAsSpending => type == TxType.spent && isConfirmed;
   bool get countsAsIncome => type == TxType.got && isConfirmed;
 
-  MoneyTransaction copyWith({TxStatus? status, String? rawText}) {
+  static const _unset = Object();
+
+  MoneyTransaction copyWith({TxStatus? status, Object? rawText = _unset,
+    Object? categoryId = _unset,
+    Object? note = _unset,}) {
     return MoneyTransaction(
       id: id,
       unitId: unitId,
       type: type,
       amountMinor: amountMinor,
       counterparty: counterparty,
-      categoryId: categoryId,
-      note: note,
+      categoryId: identical(categoryId, _unset) ? this.categoryId : categoryId as String?,
+      note: identical(note, _unset) ? this.note : note as String?,
       code: code,
       occurredAt: occurredAt,
       createdAt: createdAt,
@@ -69,7 +73,7 @@ class MoneyTransaction {
       parentId: parentId,
       templateId: templateId,
       balanceAfterMinor: balanceAfterMinor,
-      rawText: rawText ?? this.rawText,
+      rawText: identical(rawText, _unset) ? this.rawText : rawText as String?,
     );
   }
 }
