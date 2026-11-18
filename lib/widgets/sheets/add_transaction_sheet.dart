@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:fuata/domain/models/parsed_paste.dart';
 import 'package:fuata/domain/models/unit.dart';
 import 'package:fuata/ui/providers/app_providers.dart';
 import 'package:fuata/ui/theme/app_colors.dart';
+import 'package:fuata/widgets/paste_message_widget.dart';
 import 'package:fuata/widgets/provider_error_card.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
@@ -47,6 +49,7 @@ class _AddTransactionSheetState extends ConsumerState<AddTransactionSheet> {
   bool _saving = false;
   String? _error;
   String? _categoryId;
+  String? _code; // transaction code from parsed message
 
   void _tapDigit(String d) {
     setState(() {
@@ -64,6 +67,41 @@ class _AddTransactionSheetState extends ConsumerState<AddTransactionSheet> {
     setState(
       () => _amountInput = _amountInput.substring(0, _amountInput.length - 1),
     );
+  }
+
+  void _onParsedFromPaste(ParsedPaste parsed) {
+    setState(() {
+      // Populate amount (convert minor to major for the input field)
+      final exponent = 2; // KES has 2 decimal places
+      final major = parsed.amountMinor / 100;
+      _amountInput = major.toStringAsFixed(2).replaceAll(RegExp(r'.?0+$'), '');
+      // Set type
+      _type = parsed.type;
+
+      // Set counterparty
+      _counterpartyController.text = parsed.counterparty ?? '';
+
+      // Set date
+      if (parsed.occurredAt != null) {
+        _occurredAt = parsed.occurredAt!;
+      }
+
+      // Set unit
+      _fromUnitId = parsed.unitId;
+
+      // Set fee if present
+      if (parsed.feeMinor != null && parsed.feeMinor! > 0) {
+        final feeMajor = parsed.feeMinor! / 100;
+        _feeController.text =
+            feeMajor.toStringAsFixed(2).replaceAll(RegExp(r'\.?0+$'), '');
+        _moreExpanded = true; // Show the "More" section so user can see fee
+      }
+
+      // Store code for later use
+      _code = parsed.code;
+
+      _error = null;
+    });
   }
 
   @override
@@ -143,6 +181,8 @@ class _AddTransactionSheetState extends ConsumerState<AddTransactionSheet> {
                 ),
               ),
             ),
+            PasteMessageWidget(onParsed: _onParsedFromPaste,),
+            const SizedBox(height: AppSpacing.lg),
             TypeToggle(
               type: _type,
               onChanged: (t) => setState(() => _type = t),
@@ -325,6 +365,7 @@ class _AddTransactionSheetState extends ConsumerState<AddTransactionSheet> {
             counterparty: counterparty,
             categoryId: _categoryId,
             note: note,
+            code: _code,
             occurredAt: _occurredAt,
             createdAt: now,
           ),
