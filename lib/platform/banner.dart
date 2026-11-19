@@ -22,11 +22,13 @@
 import 'dart:async';
 import 'dart:ui';
 
+import 'package:flutter/foundation.dart' hide Category;
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 import '../domain/logic/alert_engine.dart';
 import '../domain/logic/banner_content.dart';
 import '../domain/logic/capture_notification_content.dart';
+import '../domain/models/category.dart';
 import '../domain/models/limit_alert.dart';
 import '../domain/models/limit_rule.dart';
 // Circular on purpose: init() registers the top-level background handler
@@ -76,8 +78,8 @@ class CaptureNotificationTap {
         CaptureTapKind.updateBalance,
         id,
       ),
-      BannerPlatform.captureAcceptAction ||
-      BannerPlatform.captureDiscardAction => null,
+      _ when BannerPlatform.isBackgroundCaptureAction(response.actionId) =>
+        null,
       _ => CaptureNotificationTap(CaptureTapKind.open, id),
     };
   }
@@ -150,6 +152,35 @@ class BannerPlatform {
   static const captureFixAction = 'capture_fix';
   static const captureDiscardAction = 'capture_discard';
   static const captureBalanceAction = 'capture_balance';
+
+  /// Issue #152: note and category from the notification itself. All three
+  /// run in the background. "Add details" swaps the buttons to Note /
+  /// Category / Fix; Note is an inline reply field; Category swaps them to
+  /// the person's most-used categories, and pressing one of those (its id is
+  /// [captureSetCategoryPrefix] + the category id) saves it.
+  static const captureDetailsAction = 'capture_details';
+  static const captureNoteAction = 'capture_note';
+  static const captureCategoryAction = 'capture_category';
+  static const captureSetCategoryPrefix = 'capture_setcat:';
+
+  /// Presses handled in the background isolate: they never open the app and
+  /// must never be mistaken for a body tap.
+  static bool isBackgroundCaptureAction(String? actionId) =>
+      actionId == captureAcceptAction ||
+      actionId == captureDiscardAction ||
+      actionId == captureDetailsAction ||
+      actionId == captureNoteAction ||
+      actionId == captureCategoryAction ||
+      (actionId?.startsWith(captureSetCategoryPrefix) ?? false);
+
+  /// The category id inside a category button's action id, else null.
+  static String? categoryIdFromAction(String? actionId) {
+    if (actionId == null || !actionId.startsWith(captureSetCategoryPrefix)) {
+      return null;
+    }
+    final id = actionId.substring(captureSetCategoryPrefix.length);
+    return id.isEmpty ? null : id;
+  }
 
   final _plugin = FlutterLocalNotificationsPlugin();
   final _actions = StreamController<BannerAction>.broadcast();
@@ -362,10 +393,18 @@ class BannerPlatform {
   /// Its id is derived from the transaction, so a re-post replaces rather
   /// than stacks, and so [cancelCapture] can find it again. [quiet] posts it
   /// on the silent channel (quiet hours).
+  ///
+  /// [mode] picks the buttons (see [CaptureNotificationMode]); [categoryChoices]
+  /// is only read in the categories mode. [update] is for re-posting the same
+  /// notification after a button was pressed on it: Android then updates it in
+  /// place without buzzing or heads-up-ing a second time.
   Future<void> showCapture(
     CaptureNotificationContent content, {
     required bool quiet,
     required bool redactOnLockScreen,
+    CaptureNotificationMode mode = CaptureNotificationMode.main,
+    List<Category> categoryChoices = const [],
+    bool update = false,
   }) async {
     await init();
     await _requestPermissionOnce();
@@ -388,34 +427,86 @@ class BannerPlatform {
               ? NotificationVisibility.private
               : NotificationVisibility.public,
           icon: '@mipmap/ic_launcher',
+          onlyAlertOnce: update,
           styleInformation: BigTextStyleInformation(content.body),
-          actions: const [
-            // Background: no app launch. cancelNotification removes it the
-            // moment it is pressed, so a second press can't double-act.
-            AndroidNotificationAction(
-              captureAcceptAction,
-              'Accept',
-              showsUserInterface: false,
-              cancelNotification: true,
-            ),
-            // Fixing needs the person's hands, so this one opens the app
-            // straight onto the Fix sheet.
-            AndroidNotificationAction(
-              captureFixAction,
-              'Fix',
-              showsUserInterface: true,
-              cancelNotification: true,
-            ),
-            AndroidNotificationAction(
-              captureDiscardAction,
-              'Discard',
-              showsUserInterface: false,
-              cancelNotification: true,
-            ),
-          ],
+          actions: _captureActions(mode, categoryChoices),
         ),
       ),
     );
+  }
+
+  /// Android shows at most three actions on a notification, so each mode is
+  /// exactly three or fewer.
+  List<AndroidNotificationAction> _captureActions(
+    CaptureNotificationMode mode,
+    List<Category> categoryChoices,
+  ) {
+    switch (mode) {
+      case CaptureNotificationMode.main:
+        return const [
+          // Background: no app launch. cancelNotification removes it the
+          // moment it is pressed, so a second press can't double-act.
+          AndroidNotificationAction(
+            captureAcceptAction,
+            'Accept',
+            showsUserInterface: false,
+            cancelNotification: true,
+          ),
+          // Swaps this notification's buttons in place (it is re-posted by
+          // the background handler), so it must not cancel it.
+          AndroidNotificationAction(
+            captureDetailsAction,
+            'Add details',
+            showsUserInterface: false,
+            cancelNotification: false,
+          ),
+          AndroidNotificationAction(
+            captureDiscardAction,
+            'Discard',
+            showsUserInterface: false,
+            cancelNotification: true,
+          ),
+        ];
+      case CaptureNotificationMode.details:
+        return const [
+          // An inline reply field. Not cancelled: Android keeps the
+          // notification with a spinner until it is re-posted, which the
+          // handler always does (or cancels it, if the row is gone).
+          AndroidNotificationAction(
+            captureNoteAction,
+            'Note',
+            showsUserInterface: false,
+            cancelNotification: false,
+            inputs: [AndroidNotificationActionInput(label: 'Add a note')],
+          ),
+          AndroidNotificationAction(
+            captureCategoryAction,
+            'Category',
+            showsUserInterface: false,
+            cancelNotification: false,
+          ),
+          // Fixing needs the person's hands, so this one opens the app
+          // straight onto the Fix sheet.
+          AndroidNotificationAction(
+            captureFixAction,
+            'Fix',
+            showsUserInterface: true,
+            cancelNotification: true,
+          ),
+        ];
+      case CaptureNotificationMode.categories:
+        return [
+          for (final c in categoryChoices.take(
+            CaptureNotificationText.maxCategoryButtons,
+          ))
+            AndroidNotificationAction(
+              '$captureSetCategoryPrefix${c.id}',
+              '${c.emoji} ${c.name}',
+              showsUserInterface: false,
+              cancelNotification: false,
+            ),
+        ];
+    }
   }
 
   /// "Added — but the balance looks off", with an Update balance button that
@@ -500,11 +591,16 @@ class BannerPlatform {
   Future<void> _requestPermissionOnce() async {
     if (_permissionAsked) return;
     _permissionAsked = true;
-    final android = _plugin
-        .resolvePlatformSpecificImplementation<
+    try {
+      final android = _plugin
+          .resolvePlatformSpecificImplementation<
           AndroidFlutterLocalNotificationsPlugin
-        >();
-    await android?.requestNotificationsPermission();
+      >();
+      await android?.requestNotificationsPermission();
+    } catch (e) {
+      // No Activity in a background isolate: skip the prompt, the UI isolate asks.
+      debugPrint('[banner] permission prompt skipped: ${e.runtimeType}');
+    }
   }
 
   AndroidNotificationDetails _androidDetails(

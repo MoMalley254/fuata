@@ -11,6 +11,7 @@
 // ---------------------------------------------------------------------------
 import 'package:intl/intl.dart';
 
+import '../models/category.dart';
 import '../models/money.dart';
 import '../models/transaction.dart';
 import '../models/unit.dart';
@@ -26,8 +27,47 @@ class CaptureNotificationContent {
   });
 }
 
+/// Which set of buttons a capture notification shows. Android shows at most
+/// three actions, so the extra jobs (note, category) live one step behind
+/// "Add details" rather than being crammed onto the first row.
+enum CaptureNotificationMode {
+  /// Accept · Add details · Discard.
+  main,
+
+  /// Note (inline reply) · Category · Fix.
+  details,
+
+  /// The person's most-used categories, one button each.
+  categories,
+}
+
 class CaptureNotificationText {
   CaptureNotificationText._();
+
+  /// How many category buttons fit on one notification (Android's limit on
+  /// actions).
+  static const maxCategoryButtons = 3;
+
+  /// The categories to offer as buttons: the ones used most on confirmed
+  /// transactions, ties (and a fresh install with no history) falling back
+  /// to the person's own category order. Archived ones are never offered.
+  static List<Category> topCategories({
+    required List<Category> categories,
+    required List<MoneyTransaction> transactions,
+    int limit = maxCategoryButtons,
+  }) {
+    final uses = <String, int>{};
+    for (final t in transactions) {
+      final id = t.categoryId;
+      if (id != null && t.isConfirmed) uses[id] = (uses[id] ?? 0) + 1;
+    }
+    final active = categories.where((c) => !c.archived).toList()
+      ..sort((a, b) {
+        final byUse = (uses[b.id] ?? 0).compareTo(uses[a.id] ?? 0);
+        return byUse != 0 ? byUse : a.sortOrder.compareTo(b.sortOrder);
+      });
+    return active.take(limit).toList();
+  }
 
   /// [fees] are the capture's child rows (ADR-005); they are folded into the
   /// title as "+ 5.00 fee", exactly as PendingCard does. [amountsHidden] is
@@ -39,6 +79,7 @@ class CaptureNotificationText {
     required MoneyUnit? unit,
     required bool amountsHidden,
     required String currencyCode,
+    Category? category,
   }) {
     final currency = unit?.currencyCode ?? currencyCode;
     String money(int minor) => amountsHidden
@@ -67,6 +108,9 @@ class CaptureNotificationText {
       ].join(' · '),
       if (transaction.balanceAfterMinor != null)
         'Balance in the message: ${money(transaction.balanceAfterMinor!)}',
+      if (category != null) 'Category: ${category.emoji} ${category.name}',
+      if (transaction.note != null && transaction.note!.trim().isNotEmpty)
+        'Note: ${transaction.note!.trim()}',
     ].where((l) => l.isNotEmpty).toList();
 
     return CaptureNotificationContent(
