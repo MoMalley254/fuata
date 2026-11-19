@@ -162,6 +162,23 @@ class _PendingCardState extends ConsumerState<PendingCard> {
   }
 
   @override
+  void didUpdateWidget(covariant PendingCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Issue #152: the note can be changed from the capture notification
+    // while this card is on screen. Take the saved value in, unless the
+    // person is mid-edit here (the field differs from what was last saved),
+    // in which case their typing wins.
+    final incoming = widget.t.note;
+    final typingHere = _noteController.text.trim() != (_savedNote ?? '');
+    if (incoming != _savedNote && !typingHere) {
+      _savedNote = incoming;
+      _noteController.removeListener(_onNoteChanged);
+      _noteController.text = incoming ?? '';
+      _noteController.addListener(_onNoteChanged);
+    }
+  }
+
+  @override
   void dispose() {
     _noteDebounce?.cancel();
     _flushNoteOnDispose();

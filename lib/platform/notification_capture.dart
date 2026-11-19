@@ -230,7 +230,7 @@ Future<bool> _captureOne(String packageName, String text) async {
       // failure must never turn this capture into an error.
       if (outcome is Captured && !outcome.autoAccepted) {
         try {
-          await _announceCapture(db, outcome.transactionId);
+          await announceCapture(db, outcome.transactionId);
         } catch (e) {
           debugPrint('[capture] notification failed: ${e.runtimeType}');
         }
@@ -289,16 +289,40 @@ Future<void> refreshDerivedState(AppDatabase db) async {
 /// freshly captured, pending transaction. Honours the person's switch (off
 /// means nothing is posted), their hide-amounts and lock-screen choices and
 /// their quiet hours.
-Future<void> _announceCapture(AppDatabase db, String transactionId) async {
+///
+/// Also the way a capture notification is *re-posted* (issue #152): after a
+/// note or category is saved from its buttons, or "Add details" swaps them,
+/// the handler calls this with [update] true and the notification changes in
+/// place — rebuilt from the saved row, so it always shows what is really
+/// stored. Returns false when there is no pending row left to announce (the
+/// caller should then take the notification down).
+Future<bool> announceCapture(
+  AppDatabase db,
+  String transactionId, {
+  CaptureNotificationMode mode = CaptureNotificationMode.main,
+  bool update = false,
+}) async {
   final settings = await DriftSettingsRepository(db).watchSettings().first;
-  if (!settings.captureNotificationsEnabled) return;
+  if (!settings.captureNotificationsEnabled) return true;
 
   final all = await DriftTransactionRepository(db).watchTransactions().first;
   final tx = all.where((t) => t.id == transactionId).firstOrNull;
-  if (tx == null) return;
+  if (tx == null || tx.isConfirmed) return false;
   final fees = all.where((t) => t.parentId == transactionId).toList();
   final units = await DriftUnitRepository(db).watchUnits().first;
   final unit = units.where((u) => u.id == tx.unitId).firstOrNull;
+  final categories = await DriftCategoryRepository(db).watchCategories().first;
+  final category = categories.where((c) => c.id == tx.categoryId).firstOrNull;
+
+  // No categories to offer: the picker would be an empty notification.
+  final choices = CaptureNotificationText.topCategories(
+    categories: categories,
+    transactions: all,
+  );
+  final effectiveMode =
+      mode == CaptureNotificationMode.categories && choices.isEmpty
+      ? CaptureNotificationMode.main
+      : mode;
 
   final content = CaptureNotificationText.build(
     transaction: tx,
@@ -306,6 +330,7 @@ Future<void> _announceCapture(AppDatabase db, String transactionId) async {
     unit: unit,
     amountsHidden: settings.amountsHidden,
     currencyCode: settings.currencyCode,
+    category: category,
   );
   final quiet =
       settings.quietHoursEnabled &&
@@ -318,7 +343,11 @@ Future<void> _announceCapture(AppDatabase db, String transactionId) async {
     content,
     quiet: quiet,
     redactOnLockScreen: settings.redactedLockScreenBanner,
+    mode: effectiveMode,
+    categoryChoices: choices,
+    update: update,
   );
+  return true;
 }
 
 /// Rebuilds the banner from the same repositories the capture just wrote

@@ -120,6 +120,33 @@ class CaptureReview {
     return true;
   }
 
+  /// Sets (or clears, with null) the category of a pending capture.
+  ///
+  /// Writes to the very same row the inbox card and the Fix sheet edit, from
+  /// a fresh read, so the three can't drift apart. Returns false when
+  /// there is no pending row under that id.
+  Future<bool> setCategory(String transactionId, String? categoryId) async {
+    final all = await _transactions.watchTransactions().first;
+    final t = _pending(all, transactionId);
+    if (t == null) return false;
+    await _transactions.updateTransaction(t.copyWith(categoryId: categoryId));
+    return true;
+  }
+
+  /// Sets the note of a pending capture; blank clears it (the inbox card
+  /// stores a blank note as null too). Same row, same rules as
+  /// [setCategory]. Returns false when there is no pending row.
+  Future<bool> setNote(String transactionId, String? note) async {
+    final all = await _transactions.watchTransactions().first;
+    final t = _pending(all, transactionId);
+    if (t == null) return false;
+    final trimmed = note?.trim();
+    await _transactions.updateTransaction(
+      t.copyWith(note: (trimmed == null || trimmed.isEmpty) ? null : trimmed),
+    );
+    return true;
+  }
+
   /// Only a *pending* row can be accepted or discarded from a capture
   /// notification. A confirmed row with the same id means the person
   /// already accepted it in the app, and a stale Discard button must never

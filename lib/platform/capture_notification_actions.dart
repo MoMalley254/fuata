@@ -9,6 +9,13 @@
 // form), so it is *not* handled here: it launches the app onto the Fix sheet
 // (BannerPlatform.captureTaps, handled in main.dart).
 //
+// Issue #152: "Add details" swaps the buttons to Note (an inline reply
+// field) / Category / Fix, and Category swaps them to the person's most-used
+// categories. Choosing one saves it to the *same pending row* the inbox card
+// and the Fix sheet edit (CaptureReview.setCategory / setNote) and re-posts
+// the notification in place with the saved value in its body, so the three
+// places can't disagree.
+//
 // What a press does, start to finish:
 //   1. open a database connection (one per press, closed straight after —
 //      the pattern the capture isolate uses; see notification_capture.dart),
@@ -58,26 +65,104 @@ Future<void> handleCaptureNotificationResponse(
   final transactionId = CaptureNotificationTap.transactionIdFrom(
     response.payload,
   );
-  if (transactionId == null) return;
+  if (transactionId == null) {
+    debugPrint('[capture-action] no capture id in payload');
+    return;
+  }
+  // Action ids are fixed strings (or a category id), never user text.
+  debugPrint('[capture-action] got ${response.actionId}');
 
   switch (response.actionId) {
     case BannerPlatform.captureAcceptAction:
       await _run(() => _accept(transactionId));
     case BannerPlatform.captureDiscardAction:
       await _run(() => _discard(transactionId));
+    case BannerPlatform.captureDetailsAction:
+      await _run(
+        () => _repost(transactionId, CaptureNotificationMode.details),
+      );
+    case BannerPlatform.captureCategoryAction:
+      await _run(
+        () => _repost(transactionId, CaptureNotificationMode.categories),
+      );
+    case BannerPlatform.captureNoteAction:
+      await _run(() => _setNote(transactionId, response.input));
     default:
+      final categoryId = BannerPlatform.categoryIdFromAction(
+        response.actionId,
+      );
+      if (categoryId != null) {
+        await _run(() => _setCategory(transactionId, categoryId));
+      }
       // Fix / Update balance / a body tap open the app and are handled in
-      // the UI isolate. Nothing to do in the background.
+      // the UI isolate. Nothing more to do in the background.
       return;
   }
 }
 
+/// Swaps the buttons on a notification that is still waiting for a check.
+/// If the row has been dealt with elsewhere, the notification goes instead:
+/// a stale button must not linger.
+Future<void> _repost(String transactionId, CaptureNotificationMode mode) async {
+  final db = AppDatabase();
+  try {
+    final stillPending = await announceCapture(
+      db,
+      transactionId,
+      mode: mode,
+      update: true,
+    );
+    if (!stillPending) {
+      await BannerPlatform.instance.cancelCapture(transactionId);
+    }
+  } finally {
+    await db.close();
+  }
+}
+
+Future<void> _setNote(String transactionId, String? input) async {
+  final db = AppDatabase();
+  try {
+    final saved = await _review(db).setNote(transactionId, input);
+    if (!saved) {
+      // Also clears the spinner Android leaves after an inline reply.
+      await BannerPlatform.instance.cancelCapture(transactionId);
+      return;
+    }
+    await announceCapture(db, transactionId, update: true);
+    pingUiAfterCaptureAction();
+  } finally {
+    await db.close();
+  }
+}
+
+Future<void> _setCategory(String transactionId, String categoryId) async {
+  final db = AppDatabase();
+  try {
+    final saved = await _review(db).setCategory(transactionId, categoryId);
+    if (!saved) {
+      await BannerPlatform.instance.cancelCapture(transactionId);
+      return;
+    }
+    await announceCapture(db, transactionId, update: true);
+    pingUiAfterCaptureAction();
+  } finally {
+    await db.close();
+  }
+}
+
+CaptureReview _review(AppDatabase db) => CaptureReview(
+  transactions: DriftTransactionRepository(db),
+  units: DriftUnitRepository(db),
+);
+
 Future<void> _run(Future<void> Function() body) async {
   try {
     await body();
-  } catch (e) {
-    // Type only — a message could echo what was on the notification.
-    debugPrint('[capture-action] failed: ${e.runtimeType}');
+  } catch (e, st) {
+    // Type only — a message could echo what was on the notification. The
+    // stack names code locations, not data, so it is safe and shows *where*.
+    debugPrint('[capture-action] failed: ${e.runtimeType}\n$st');
   }
 }
 
