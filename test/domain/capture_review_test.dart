@@ -172,6 +172,70 @@ void main() {
     });
   });
 
+  group('category and note from the notification (#152)', () {
+    test('setCategory writes to the same pending row and nothing else', () async {
+      await txs.addTransaction(capture());
+
+      expect(await review.setCategory('cap_1', 'cat_food'), isTrue);
+
+      final row = (await byId('cap_1'))!;
+      expect(row.categoryId, 'cat_food');
+      expect(row.isConfirmed, isFalse); // still waiting for Accept
+      expect(row.amountMinor, -35000);
+      expect(row.counterparty, 'JAVA HOUSE');
+    });
+
+    test('setNote trims, and a blank note clears it', () async {
+      await txs.addTransaction(capture());
+
+      await review.setNote('cap_1', '  lunch with Amina  ');
+      expect((await byId('cap_1'))!.note, 'lunch with Amina');
+
+      await review.setNote('cap_1', '   ');
+      expect((await byId('cap_1'))!.note, isNull);
+    });
+
+    test('a note and a category set one after the other both survive', () async {
+      await txs.addTransaction(capture());
+
+      await review.setNote('cap_1', 'team lunch');
+      await review.setCategory('cap_1', 'cat_food');
+
+      final row = (await byId('cap_1'))!;
+      expect(row.note, 'team lunch');
+      expect(row.categoryId, 'cat_food');
+    });
+
+    test('what was set survives Accept', () async {
+      await txs.addTransaction(capture());
+      await review.setNote('cap_1', 'team lunch');
+      await review.setCategory('cap_1', 'cat_food');
+
+      await review.accept('cap_1');
+
+      final row = (await byId('cap_1'))!;
+      expect(row.isConfirmed, isTrue);
+      expect(row.note, 'team lunch');
+      expect(row.categoryId, 'cat_food');
+    });
+
+    test('a stale button cannot touch a row already confirmed', () async {
+      await txs.addTransaction(capture(status: TxStatus.confirmed));
+
+      expect(await review.setCategory('cap_1', 'cat_food'), isFalse);
+      expect(await review.setNote('cap_1', 'late'), isFalse);
+
+      final row = (await byId('cap_1'))!;
+      expect(row.categoryId, isNull);
+      expect(row.note, isNull);
+    });
+
+    test('an unknown id is a quiet no-op', () async {
+      expect(await review.setCategory('nope', 'cat_food'), isFalse);
+      expect(await review.setNote('nope', 'x'), isFalse);
+    });
+  });
+
   group('the capture-notifications setting', () {
     test('is on by default, and an old settings table reads as on', () async {
       final repo = DriftSettingsRepository(db);

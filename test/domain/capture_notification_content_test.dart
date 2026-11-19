@@ -4,6 +4,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fuata/domain/logic/capture_notification_content.dart';
+import 'package:fuata/domain/models/category.dart';
 import 'package:fuata/domain/models/money.dart';
 import 'package:fuata/domain/models/transaction.dart';
 import 'package:fuata/domain/models/unit.dart';
@@ -146,5 +147,82 @@ void main() {
     );
     expect(masked.body, contains(kHiddenAmountMask));
     expect(masked.body, isNot(contains('700')));
+  });
+
+  group('category and note (#152)', () {
+    final food = defaultCategories.firstWhere((c) => c.id == 'cat_food');
+
+    test('the body shows the category and the note once they are set', () {
+      final c = CaptureNotificationText.build(
+        transaction: tx().copyWith(note: '  team lunch '),
+        fees: const [],
+        unit: unit,
+        amountsHidden: false,
+        currencyCode: 'KES',
+        category: food,
+      );
+
+      expect(c.body, contains('Category: ${food.emoji} Food'));
+      expect(c.body, contains('Note: team lunch'));
+    });
+
+    test('and says nothing about them while they are not', () {
+      final c = build(tx());
+
+      expect(c.body, isNot(contains('Category')));
+      expect(c.body, isNot(contains('Note')));
+    });
+
+    MoneyTransaction used(String id, String categoryId, {bool pending = false}) =>
+        MoneyTransaction(
+          id: id,
+          unitId: 'u_mm',
+          type: TxType.spent,
+          amountMinor: -100,
+          categoryId: categoryId,
+          occurredAt: at,
+          createdAt: at,
+          status: pending ? TxStatus.pending : TxStatus.confirmed,
+        );
+
+    test('the most-used categories come first, three at most', () {
+      final top = CaptureNotificationText.topCategories(
+        categories: defaultCategories,
+        transactions: [
+          used('1', 'cat_transport'),
+          used('2', 'cat_transport'),
+          used('3', 'cat_transport'),
+          used('4', 'cat_bills'),
+          used('5', 'cat_bills'),
+          used('6', 'cat_health'),
+        ],
+      );
+
+      expect(top.map((c) => c.id), ['cat_transport', 'cat_bills', 'cat_health']);
+    });
+
+    test('ties and a fresh install fall back to the person\'s own order', () {
+      final top = CaptureNotificationText.topCategories(
+        categories: defaultCategories,
+        transactions: const [],
+      );
+
+      expect(top.map((c) => c.id), ['cat_food', 'cat_transport', 'cat_airtime']);
+    });
+
+    test('pending rows do not count as use, and archived ones are never offered', () {
+      final archivedFood = defaultCategories
+          .map((c) => c.id == 'cat_food' ? c.copyWith(archived: true) : c)
+          .toList();
+
+      final top = CaptureNotificationText.topCategories(
+        categories: archivedFood,
+        transactions: [
+          for (var i = 0; i < 5; i++) used('p$i', 'cat_shopping', pending: true),
+        ],
+      );
+
+      expect(top.map((c) => c.id), ['cat_transport', 'cat_airtime', 'cat_bills']);
+    });
   });
 }
