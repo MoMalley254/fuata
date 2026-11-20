@@ -15,6 +15,7 @@ import '../../routing/routes.dart';
 import '../../ui/theme/app_spacing.dart';
 import '../../ui/theme/app_typography.dart';
 import '../app_chips.dart';
+import '../capture_review/paste_message_card.dart';
 import '../category_chip_row.dart';
 
 /// Opens the add-transaction sheet. Wraps the real route so callers keep
@@ -29,7 +30,15 @@ Future<void> showAddTransactionSheet(
 
 class AddTransactionSheet extends ConsumerStatefulWidget {
   final String? initialUnitId;
-  const AddTransactionSheet({super.key, required this.initialUnitId});
+  /// Issue #153: when set, the sheet opens pre-filled from this parse and
+  /// shows the extracted-details card instead of the Paste button.
+  final ParsedPaste? initialParsed;
+
+  /// Issue #153: when set, called after a successful save instead of popping
+  /// the route (the widget flow has no router). Gets a one-line confirmation.
+  /// Must not throw — the row is already saved.
+  final Future<void> Function(String message)? onSaved;
+  const AddTransactionSheet({super.key, required this.initialUnitId, this.initialParsed, this.onSaved});
 
   @override
   ConsumerState<AddTransactionSheet> createState() =>
@@ -69,45 +78,34 @@ class _AddTransactionSheetState extends ConsumerState<AddTransactionSheet> {
     );
   }
 
-  void _onParsedFromPaste(ParsedPaste parsed) {
-    setState(() {
-      // Populate amount (convert minor to major for the input field)
-      final exponent = 2; // KES has 2 decimal places
-      final major = parsed.amountMinor / 100;
-      _amountInput = major.toStringAsFixed(2).replaceAll(RegExp(r'.?0+$'), '');
-      // Set type
-      _type = parsed.type;
+  void _onParsedFromPaste(ParsedPaste parsed) =>
+      setState(() => _applyParsed(parsed));
 
-      // Set counterparty
-      _counterpartyController.text = parsed.counterparty ?? '';
-
-      // Set date
-      if (parsed.occurredAt != null) {
-        _occurredAt = parsed.occurredAt!;
-      }
-
-      // Set unit
-      _fromUnitId = parsed.unitId;
-
-      // Set fee if present
-      if (parsed.feeMinor != null && parsed.feeMinor! > 0) {
-        final feeMajor = parsed.feeMinor! / 100;
-        _feeController.text =
-            feeMajor.toStringAsFixed(2).replaceAll(RegExp(r'\.?0+$'), '');
-        _moreExpanded = true; // Show the "More" section so user can see fee
-      }
-
-      // Store code for later use
-      _code = parsed.code;
-
-      _error = null;
-    });
+  /// Fills the form from a parse. No setState: initState calls it too.
+  void _applyParsed(ParsedPaste parsed) {
+    _amountInput = _majorText(parsed.amountMinor);
+    _type = parsed.type;
+    _counterpartyController.text = parsed.counterparty ?? '';
+    if (parsed.occurredAt != null) _occurredAt = parsed.occurredAt!;
+    _fromUnitId = parsed.unitId;
+    if (parsed.feeMinor != null && parsed.feeMinor! > 0) {
+      _feeController.text = _majorText(parsed.feeMinor!);
+      _moreExpanded = true; // show the fee so the person can see it
+    }
+    _code = parsed.code;
+    _error = null;
   }
+
+  /// "1250.50" / "1500" — no trailing zeros, no dangling dot.
+  static String _majorText(int minor) =>
+      (minor / 100).toStringAsFixed(2).replaceAll(RegExp(r'\.?0+$'), '');
 
   @override
   void initState() {
     super.initState();
     _fromUnitId = widget.initialUnitId;
+    final parsed = widget.initialParsed;
+    if (parsed != null) _applyParsed(parsed);
   }
 
   @override
@@ -181,7 +179,14 @@ class _AddTransactionSheetState extends ConsumerState<AddTransactionSheet> {
                 ),
               ),
             ),
-            PasteMessageWidget(onParsed: _onParsedFromPaste,),
+            if (widget.initialParsed != null)
+              PasteMessageCard(
+                text: widget.initialParsed!.rawText,
+                parsed: widget.initialParsed,
+                error: null,
+              )
+            else
+              PasteMessageWidget(onParsed: _onParsedFromPaste),
             const SizedBox(height: AppSpacing.lg),
             TypeToggle(
               type: _type,
@@ -399,6 +404,12 @@ class _AddTransactionSheetState extends ConsumerState<AddTransactionSheet> {
         }
       }
 
+      final onSaved = widget.onSaved;
+      if (onSaved != null) {
+        await onSaved(_savedMessage(amount, counterparty));
+        return;
+      }
+
       if (mounted) {
         if (context.canPop()) {
           context.pop();
@@ -414,6 +425,17 @@ class _AddTransactionSheetState extends ConsumerState<AddTransactionSheet> {
         _error = 'Could not save, please try again';
       });
     }
+  }
+
+  /// "Added KSh 500 spent · Naivas" — the widget flow's toast.
+  String _savedMessage(Money amount, String? counterparty) {
+    final what = _type == TxType.spent
+        ? 'spent'
+        : _type == TxType.got
+        ? 'received'
+        : 'moved';
+    final who = counterparty == null ? '' : ' · $counterparty';
+    return 'Added ${amount.format()} $what$who';
   }
 }
 
