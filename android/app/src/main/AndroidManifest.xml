@@ -105,6 +105,18 @@
                 android:name="android.appwidget.provider"
                 android:resource="@xml/fuata_widget_info" />
         </receiver>
+        <!-- Issue #153: the widget's Paste button. Transparent, own task, off the
+     recents list; not exported (only the widget's PendingIntent starts it). -->
+        <activity
+            android:name=".WidgetPasteActivity"
+            android:exported="false"
+            android:theme="@style/WidgetPasteTheme"
+            android:taskAffinity=""
+            android:excludeFromRecents="true"
+            android:launchMode="standard"
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
+            android:hardwareAccelerated="true"
+            android:windowSoftInputMode="adjustResize" />
 
         <!-- Issue #31: flutter_local_notifications' boot receiver. It
      re-arms every scheduled notification after the phone reboots.
