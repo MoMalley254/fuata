@@ -10,6 +10,9 @@ import android.os.Bundle
 import android.view.View
 import android.widget.RemoteViews
 
+import io.flutter.embedding.android.FlutterActivityLaunchConfigs
+import io.flutter.embedding.android.FlutterFragmentActivity
+
 /**
  * The home-screen widget (issue #29): a small at-a-glance card matching
  * the notification banner — status emoji, big number, caption, optional
@@ -108,35 +111,50 @@ class FuataWidgetProvider : AppWidgetProvider() {
             views.setOnClickPendingIntent(R.id.widget_root, pending)
         }
 
+        // Issue #153 follow-up 6.2: the paste target is a labelled pill on a
+        // rich widget and the bare icon on a compact one. Both fire the same
+        // intent; only one is visible.
+        val paste = pastePendingIntent(context)
+        val rich = isRich(context, id, snapshot)
+        views.setViewVisibility(R.id.widget_paste_pill, if (rich) View.VISIBLE else View.GONE)
+        views.setViewVisibility(R.id.widget_paste, if (rich) View.GONE else View.VISIBLE)
+        views.setOnClickPendingIntent(R.id.widget_paste_pill, paste)
+        views.setOnClickPendingIntent(R.id.widget_paste, paste)
         return views
     }
 
     /**
-     * Whether this instance shows the split line. A forced variant wins;
+     * Whether this instance uses the rich layout. A forced variant wins;
      * `auto` uses the minimum width the launcher reports, so a 2-cell
-     * widget stays compact and a 3-cell one gets the split. The split
-     * line is empty when the person switched it off or no unit is in the
-     * widget's currency, and empty means hide.
+     * widget stays compact and a 3-cell one goes rich. Drives both the split
+     * line and the labelled paste pill, so they always change together.
+     * A null snapshot (nothing pushed yet) counts as auto.
+     */
+    private fun isRich(
+        context: Context,
+        id: Int,
+        snapshot: WidgetDataStore.Snapshot?,
+    ): Boolean = when (snapshot?.variant) {
+        "compact" -> false
+        "rich" -> true
+        else -> {
+            val options = AppWidgetManager.getInstance(context)
+                .getAppWidgetOptions(id)
+            options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH) >=
+                    RICH_MIN_WIDTH_DP
+        }
+    }
+
+    /**
+     * Whether this instance shows the split line. The split line is empty
+     * when the person switched it off or no unit is in the widget's
+     * currency, and empty means hide.
      */
     private fun shouldShowSplit(
         context: Context,
         id: Int,
         snapshot: WidgetDataStore.Snapshot,
-    ): Boolean {
-        if (snapshot.splitLine.isEmpty()) return false
-        return when (snapshot.variant) {
-            "compact" -> false
-            "rich" -> true
-            else -> {
-                val options = AppWidgetManager.getInstance(context)
-                    .getAppWidgetOptions(id)
-                val widthDp = options.getInt(
-                    AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH,
-                )
-                widthDp >= RICH_MIN_WIDTH_DP
-            }
-        }
-    }
+    ): Boolean = snapshot.splitLine.isNotEmpty() && isRich(context, id, snapshot)
 
     private fun statusColour(context: Context, status: String): Int =
         context.getColor(
@@ -147,6 +165,28 @@ class FuataWidgetProvider : AppWidgetProvider() {
                 else -> R.color.status_safe
             },
         )
+
+    /**
+     * Issue #153: Paste opens the transparent paste activity. NEW_TASK +
+     * CLEAR_TASK so a second tap never lands on a stale instance with an old
+     * clipboard. Transparent background mode is what lets the sheet float over
+     * the launcher.
+     */
+    private fun pastePendingIntent(context: Context): PendingIntent {
+        val intent = FlutterFragmentActivity
+            .NewEngineIntentBuilder(WidgetPasteActivity::class.java)
+            .backgroundMode(FlutterActivityLaunchConfigs.BackgroundMode.transparent)
+            .build(context)
+            .apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+            }
+        return PendingIntent.getActivity(
+            context,
+            1, // 0 is the open-the-app intent
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+    }
 
     companion object {
         /** Called from HomeWidgetChannel after every Dart-side write. */

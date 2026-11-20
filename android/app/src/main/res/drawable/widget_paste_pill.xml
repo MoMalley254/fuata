@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Issue #153 follow-up 6.2: filled accent pill behind "Paste message".
+     The 8dp insets keep the *drawn* pill 32dp tall inside a 48dp-tall view,
+     so the tap target is large and the header row is not. -->
+<inset xmlns:android="http://schemas.android.com/apk/res/android"
+    android:insetTop="8dp"
+    android:insetBottom="8dp">
+    <shape android:shape="rectangle">
+        <solid android:color="@color/widget_accent" />
+        <corners android:radius="16dp" />
+    </shape>
+</inset>
