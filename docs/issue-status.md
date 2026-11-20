@@ -1,9 +1,12 @@
-# Issue status (generated 2026-10-30T08:18Z)
+# Issue status (generated 2026-11-20T08:06Z)
 
 Source of truth: GitHub. Regenerate with `scripts/refresh-issue-status.sh`.
 
 | # | State | Milestone | Title |
 |---|---|---|---|
+| #153 | OPEN | — | Add a paste action to the home-screen widget |
+| #152 | CLOSED | — | Let people add a category and a note from the notification |
+| #151 | CLOSED | — | Make capture notification actions dismiss it and capture/discard message |
 | #140 | CLOSED | v0.1 MVP | docs: publish app description and privacy policy site on GitHub Pages |
 | #118 | CLOSED | v1.1 Backlog | feat(settings): custom accent colour picker |
 | #117 | CLOSED | v1.1 Backlog | feat(units): reorder units on Home and My money |
@@ -43,7 +46,7 @@ Source of truth: GitHub. Regenerate with `scripts/refresh-issue-status.sh`.
 | #55 | CLOSED | v1.1 Backlog | feat(capture): "This part changes" wildcard in rule builder |
 | #39 | CLOSED | v1.1 Backlog | feat: Open-source licence review and contribution guide |
 | #38 | OPEN | v1.1 Backlog | feat: iOS manual/share-sheet edition |
-| #37 | OPEN | v1.1 Backlog | feat: Opt-in redacted diagnostics copy button |
+| #37 | CLOSED | v1.1 Backlog | feat: Opt-in redacted diagnostics copy button |
 | #36 | OPEN | v1.1 Backlog | feat: Listener-inactive detection and manufacturer keep-alive guides |
 | #35 | CLOSED | v1.1 Backlog | feat: Scheduled encrypted export to a user-chosen folder |
 | #34 | CLOSED | v1.1 Backlog | feat: Template packs: export/import/share by file or QR, bundled presets |
@@ -53,7 +56,7 @@ Source of truth: GitHub. Regenerate with `scripts/refresh-issue-status.sh`.
 | #30 | CLOSED | v1.1 Backlog | feat: Outing mode (temporary budget with its own banner) |
 | #29 | CLOSED | v1.1 Backlog | feat: Home screen widget |
 | #28 | CLOSED | v1.1 Backlog | feat: SQLCipher encryption with Android Keystore and app lock |
-| #27 | OPEN | v0.1 MVP | chore(release): v0.1.0 |
+| #27 | CLOSED | v0.1 MVP | chore(release): v0.1.0 |
 | #26 | CLOSED | v0.1 MVP | test: manual device test pass |
 | #25 | CLOSED | v0.1 MVP | chore(privacy): remove INTERNET permission and disable backup |
 | #24 | CLOSED | v0.1 MVP | feat(data): JSON export/import |
