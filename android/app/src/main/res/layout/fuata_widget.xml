@@ -32,6 +32,44 @@
             android:textColor="@color/widget_on_surface_variant"
             android:textSize="13sp"
             tools:text="left today" />
+
+        <!-- Issue #153 follow-up 6.2. Rich widgets: a labelled pill.
+             Visible height 32dp, tap target 44dp+ via the vertical padding
+             (the header row is tight, so the extra sits inside the view).
+             Compact widgets: icon only, below. The provider shows one. -->
+        <TextView
+            android:id="@+id/widget_paste_pill"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:layout_marginTop="-8dp"
+            android:layout_marginBottom="-8dp"
+            android:background="@drawable/widget_paste_pill"
+            android:contentDescription="Paste a payment message into Fuata"
+            android:drawableStart="@drawable/ic_widget_paste_on_accent"
+            android:drawablePadding="6dp"
+            android:gravity="center_vertical"
+            android:minHeight="48dp"
+            android:paddingStart="12dp"
+            android:paddingEnd="14dp"
+            android:text="Paste message"
+            android:textColor="@color/widget_on_accent"
+            android:textSize="13sp"
+            android:textStyle="bold" />
+
+        <!-- 48dp tap target; the outlined circle is inset so it still looks
+             32dp. Negative vertical margins keep the header row's height. -->
+        <ImageView
+            android:id="@+id/widget_paste"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:layout_marginStart="4dp"
+            android:layout_marginTop="-12dp"
+            android:layout_marginBottom="-12dp"
+            android:background="@drawable/widget_paste_button"
+            android:contentDescription="Paste a payment message into Fuata"
+            android:padding="14dp"
+            android:src="@drawable/ic_widget_paste" />
     </LinearLayout>
 
     <LinearLayout
@@ -70,7 +108,7 @@
         android:layout_marginTop="10dp"
         android:max="100"
         android:progressTint="@color/widget_accent" />
-    
+
     <TextView
         android:id="@+id/widget_split_line"
         android:layout_width="match_parent"

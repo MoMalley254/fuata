@@ -29,3 +29,8 @@ const String privacyMethodName = 'fuata/privacy';
 // (folder picker) off the background engine, where there is no Activity.
 const String scheduledExportMethodName = 'fuata/scheduled_export';
 const String scheduledExportBackgroundMethodName = 'fuata/scheduled_export_bg';
+
+// Issue #153. The widget's Paste button starts a transparent activity with
+// its own Flutter engine; this is that engine's channel (clipboard read,
+// close-with-toast, open-the-app).
+const String widgetPasteMethodName = 'fuata/widget_paste';

@@ -11,6 +11,8 @@
 
 import 'dart:io';
 
+import 'package:flutter/foundation.dart' show debugPrint;
+
 import 'package:drift/drift.dart';
 import 'package:drift/native.dart';
 import 'package:path/path.dart' as p;
@@ -98,20 +100,34 @@ class AppDatabase extends _$AppDatabase {
   }
 }
 
+/// Timing aid for the widget paste delay (#153 follow-up 6.1). Switched on by
+/// runWidgetPaste(); off everywhere else, so the main app logs nothing.
+bool traceDbOpen = false;
+
 LazyDatabase _openConnection() {
   return LazyDatabase(() async {
+    final sw = Stopwatch()..start();
+    void trace(String stage) {
+      if (traceDbOpen) {
+        debugPrint('[widget-paste-db] +${sw.elapsedMilliseconds}ms  $stage');
+      }
+    }
+
+    trace('open started');
     // Unencrypted SQLite in v0.1 (ADR-010, time-boxed decision).
     // SQLCipher + Android Keystore is planned for v1.1, at which point
     // this is where the cipher key gets wired in.
     final dir = await getApplicationDocumentsDirectory();
+    trace('documents dir resolved');
     final file = File(p.join(dir.path, 'fuata.sqlite'));
 
     // #28: the key is read from Android Keystore on every open. It is not
     // cached in memory beyond the process lifetime, and never written
     // anywhere else.
     final key = await DbKey.getOrCreate();
+    trace('key read from keystore');
 
-    return NativeDatabase.createInBackground(
+    final connection = NativeDatabase.createInBackground(
       file,
       setup: (rawDb) {
         // `x'...'` tells SQLCipher this is a raw hex key, not a passphrase
@@ -121,5 +137,7 @@ LazyDatabase _openConnection() {
         rawDb.execute('SELECT count(*) FROM sqlite_master;');
       },
     );
+    trace('background isolate spawned (cipher setup runs lazily on first query)');
+    return connection;
   });
 }

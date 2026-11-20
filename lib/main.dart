@@ -6,6 +6,7 @@ import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
 
 import 'package:fuata/platform/banner.dart';
 import 'package:fuata/routing/app_keys.dart';
+import 'package:fuata/ui/widget_paste/widget_paste_app.dart';
 import 'package:fuata/widgets/sheets/fix_captured_sheet.dart';
 import 'package:fuata/widgets/sheets/update_balance_sheet.dart';
 import 'package:fuata/domain/logic/ledger.dart';
@@ -27,6 +28,11 @@ import 'package:fuata/ui/providers/widget_providers.dart';
 import 'package:fuata/ui/theme/app_theme.dart';
 
 import 'domain/models/settings.dart';
+
+/// Issue #153: entry point for the widget's transparent paste activity
+/// (WidgetPasteActivity.kt). Not the app — no router, no onboarding.
+@pragma('vm:entry-point')
+void widgetPasteMain() => runWidgetPaste();
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -56,6 +62,8 @@ void main() async {
   // so the router can pick the right initial location (—e.g. open /add
   // straight from a banner + Add on a cold start).
   final launchAction = await BannerPlatform.instance.initialActionFromLaunch();
+
+
 
   runApp(
     ProviderScope(

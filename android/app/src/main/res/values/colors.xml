@@ -8,6 +8,8 @@
     <color name="widget_on_surface_variant">#FF3E4948</color>
     <color name="widget_outline">#FFBDC9C7</color>
     <color name="widget_accent">#FF006762</color>
+    <!-- #153 follow-up 6.2: text/icon on the filled paste pill. -->
+    <color name="widget_on_accent">#FFFFFFFF</color>
     <!-- Status colours, same in both themes (matching AppColors). -->
     <color name="status_safe">#FF2E9E6B</color>
     <color name="status_warning">#FFE8A317</color>
