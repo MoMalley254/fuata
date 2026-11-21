@@ -344,7 +344,7 @@ Replaces the #18 spike (`listener_spike.dart`, the spike `NotificationListener.k
 
 **Picking apps without a broad permission.** The picker lists launchable apps via a launcher-intent `<queries>` entry, not `QUERY_ALL_PACKAGES`. Consequence: an app with no launcher icon cannot be picked; debug builds have an "add by package name" field so `adb shell cmd notification post` (posted as `com.android.shell`) can still be allow-listed for testing.
 
-**Known limitations (not bugs):** the Dart callback handle is only valid for the build that registered it, so after an app *update* capture resumes once the app has been opened once; the access status on the Auto-catch screen is the *grant*, not proof the service is bound (§5.1 — detecting that is #36); a notification that arrives while the app has never been opened since install is dropped.
+**Known limitations (not bugs):** the Dart callback handle is only valid for the build that registered it, so after an app *update* capture resumes once the app has been opened once; the access status on the Auto-catch screen is the *grant*, not proof the service is bound (§5.1 — #36 adds a best-guess "looks inactive" check on top, see §5.7); a notification that arrives while the app has never been opened since install is dropped.
 
 ### 5.3 Banner rendering on MIUI (found during #16)
 
@@ -446,3 +446,36 @@ load. This is the one place in the app where "over-protect briefly" is
 the correct default — worst case the person sees a blank card for a few
 milliseconds on their own device; the alternative is a real screenshot
 of their money.
+
+### 5.7 Listener-inactive detection and keep-alive guides (issue #36)
+
+**Status: implemented; device verification pending.** Nothing below has been run on the MIUI phone yet. The behaviours in "To confirm on a device" are hypotheses, not findings; record the results in testing.md and replace this paragraph when they are in.
+
+**Why a heuristic.** Android has no API that says "your listener is bound right now". `isNotificationAccessEnabled` (§5.2) reads the grant, and §5.1 documents a phone where the grant is on but the system never binds the service. What the service *does* get is `onListenerConnected` / `onListenerDisconnected`.
+
+**What is recorded (native).** `NotificationListener.kt` stamps both callbacks into `CaptureStore` (SharedPreferences, because the listener process may be alive when the app is not). Times only — never notification content, so the allow-list gate and US-10 are untouched. `onListenerDisconnected` also calls `requestRebind`. `CaptureStore` also keeps a *grant first seen* time: stamped by whichever happens first (the app reading the grant, or the listener connecting), cleared when the grant is seen to be gone or the listener disconnects. Boot time is `now - elapsedRealtime()`, so a connect from before the last boot is not counted.
+
+**What is computed (Dart).** `fuata/capture` `getListenerStatus` returns the raw times; `computeListenerStatus` (`lib/domain/logic/listener_status.dart`, pure, unit-tested) turns them into:
+
+| Status | Rule |
+|---|---|
+| `off` | Not granted. |
+| `active` | A connect since max(grant, boot), and no disconnect newer than it. |
+| `unknown` | Not active, but within `kListenerGrace` (2 min, **a starting value**) of the grant, the boot, or the latest disconnect. |
+| `stalled` | Not active and the grace period has run out. |
+
+The grace period also applies after a disconnect (not only after a grant or boot), because a rebind has just been requested and takes a moment; without it every `am kill` would flash "stalled" first.
+
+**Healing.** `requestRebind` runs from `onListenerDisconnected`, once per Auto-catch visit when the screen first sees `stalled`, and as the first step of **Fix it**. It should cover the `am kill` case (devlog #18). It cannot cover the MIUI never-bound case, so **Fix it** then walks the person through the Settings → Notification access off→on toggle (§5.1). The screen re-checks on `resumed` and, while `unknown`, every 10 s.
+
+**Wording.** "Looks active" / "doesn't look active", never "broken": it is evidence, not proof. The UI does not imply that fixing it guarantees capture (testing.md already says it can't).
+
+**Guides.** `lib/data/constants/keep_alive_guides.dart` is a static table keyed by lower-cased `Build.MANUFACTURER`, with a generic fallback, shown by `KeepAliveGuideScreen` (reachable from Auto-catch at any time). Only Xiaomi/Redmi/Poco is in it — the one confirmed case (Autostart on, battery unrestricted, locked in recents). Add a manufacturer only after its steps are checked on a real device, and record the OS version in `checkedOn` (Xiaomi's is not recorded yet). Buttons open only *public* settings screens (`openSystemSettings`: battery optimisation list, App info, notification access); vendor pages have no public intent, so those steps are plain text. No new permissions — `ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` was deliberately not used because it needs one.
+
+**Left out of v1 (per the proposal).** Surfacing `stalled` outside the Auto-catch screen (banner / one-off notification). Consequence: the self-heal above only runs when the person opens Auto-catch or the listener itself is disconnected; nothing nudges someone who never opens it.
+
+**To confirm on a device (MIUI, then a release build — overlaps #26).**
+1. Does a UI-toggle grant go `unknown → active`, and an adb-only grant end `stalled` after the grace period?
+2. Does `requestRebind` recover `am kill`, or does it stay `stalled`? Does the answer differ between debug and release?
+3. Is 2 min the right grace period? How long after boot does the listener actually bind?
+4. Does `onListenerDisconnected` fire on revoke, `am kill` and `am force-stop`? (The re-grant logic assumes a revoke is seen either there or by the app reading the grant.)
