@@ -18,6 +18,7 @@ class Routes {
   static const limits = 'limits';
   static const banner = 'banner';
   static const autoCatch = 'autoCatch';
+  static const keepAlive = 'keepAlive';
   static const backup = 'backup';
 
   static const profile = 'profile';
@@ -54,6 +55,7 @@ class Routes {
   static const limitsPath = '/settings/limits';
   static const bannerPath = '/settings/banner';
   static const autoCatchPath = '/settings/auto-catch';
+  static const keepAlivePath = '/settings/auto-catch/keep-alive';
   static const backupPath = '/settings/backup';
   static const archivedUnits = 'archivedUnits';
 

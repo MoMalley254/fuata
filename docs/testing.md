@@ -239,10 +239,25 @@ Run against real drift repositories on an in-memory database (`test/domain/captu
 - [ ] **After reboot:** capture still works without opening the app
 - [ ] **Battery optimisation on:** note behaviour; the "keep me alive" guidance is shown
 - [ ] Revoke notification access: app detects it and warns; re-grant restores capture
+
+### Listener-inactive detection and keep-alive guides (issue #36)
+Needs the MIUI phone for the never-bound cases. Record what actually happened next to each box; the design.md 5.7 "To confirm" list is waiting on these.
+- [ ] Fresh grant through Settings: status goes "checking" → "looks active"
+- [ ] Grant via `cmd notification allow_listener` on MIUI: status ends "doesn't look active" after the grace period
+- [ ] Off→on toggle in Settings: status returns to "looks active"
+- [ ] **Fix it** on a stalled listener: tries the rebind, then offers the off→on walkthrough; after the toggle the card turns green
+- [ ] `am kill`: note whether it shows "doesn't look active" or recovers by itself via `requestRebind`
+- [ ] `am force-stop`: note the same
+- [ ] Reboot without opening the app: open Auto-catch afterwards — status settles on "looks active"
+- [ ] Revoke access: status "off" with the access-off warning; re-grant goes back to "looks active"
+- [ ] A quiet listener (no notifications for hours) still reads "looks active" — status must not depend on recent captures
+- [ ] Keep-alive guide: Xiaomi steps on a Xiaomi device, the generic guide elsewhere; each button opens its screen (or says it can't) and no step claims a guarantee
+- [ ] Wording check: nowhere does the UI say "broken"
+- [ ] **Release build:** repeat the `am kill`, reboot and Fix it cases (debug and release behave differently, devlog #18)
 - [ ] Duplicate notification (same code) produces one transaction only
 - [ ] Banner updates when a captured transaction is confirmed
 - [ ] Settings → Auto-catch lists installed apps; switching one on/off survives closing the app
-- [ ] Auto-catch shows "Access is on/off" correctly, and updates after coming back from Android's settings
+- [ ] Auto-catch shows the right status — off / checking / "looks active" / "doesn't look active" — and updates after coming back from Android's settings
 - [ ] **Open app on Home, then trigger an allow-listed notification: the pending item appears without restarting or switching tabs** (the background isolate writes through its own connection)
 - [ ] Same, with the app closed, then open it: the pending item is there
 - [ ] Post a notification from an app that is *not* switched on, then check the database: no transaction and no unparsed row

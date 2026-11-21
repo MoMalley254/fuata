@@ -25,6 +25,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:fuata/platform/widget_bridge.dart';
 
+import '../data/constants/keep_alive_guides.dart';
 import '../data/constants/method_channels_constants.dart';
 import '../data/db/app_database.dart';
 import '../data/db/drift_repositories.dart';
@@ -32,6 +33,7 @@ import '../domain/logic/alert_engine.dart';
 import '../domain/logic/banner_loader.dart';
 import '../domain/logic/capture_notification_content.dart';
 import '../domain/logic/capture_pipeline.dart';
+import '../domain/logic/listener_status.dart';
 import '../domain/logic/serial_queue.dart';
 import '../domain/logic/widget_content.dart';
 import 'alerts.dart';
@@ -81,11 +83,105 @@ Future<void> openNotificationAccessSettings() async {
 }
 
 /// Whether the person has granted Fuata notification access. This is the
-/// *grant*, not proof the service is bound (design.md 5.1) — detecting a
-/// granted-but-unbound listener is #36.
+/// *grant*, not proof the service is bound (design.md 5.1). For whether the
+/// listener looks bound, use [getListenerStatus] (#36).
 Future<bool> isNotificationAccessEnabled() async {
   try {
     return await _channel.invokeMethod<bool>('isNotificationAccessEnabled') ??
+        false;
+  } on MissingPluginException {
+    return false;
+  } on PlatformException {
+    return false;
+  }
+}
+
+/// What [getListenerStatus] found: the computed [status] plus the raw times
+/// it came from (null = never recorded).
+class ListenerReading {
+  final ListenerStatus status;
+  final DateTime? connectedAt;
+  final DateTime? disconnectedAt;
+  const ListenerReading({
+    required this.status,
+    this.connectedAt,
+    this.disconnectedAt,
+  });
+}
+
+DateTime? _fromMillis(Object? v) =>
+    v is int ? DateTime.fromMillisecondsSinceEpoch(v) : null;
+
+/// Whether notification access is granted AND the listener looks bound
+/// (issue #36). Native records Android's onListenerConnected /
+/// onListenerDisconnected; [computeListenerStatus] turns those into a
+/// status. A best guess, never proof — callers say "looks inactive", not
+/// "broken".
+///
+/// Off-device (widget tests, non-Android) there is no native side: reports
+/// [ListenerStatus.off], matching [isNotificationAccessEnabled].
+Future<ListenerReading> getListenerStatus() async {
+  const off = ListenerReading(status: ListenerStatus.off);
+  try {
+    final raw = await _channel.invokeMapMethod<String, Object?>(
+      'getListenerStatus',
+    );
+    if (raw == null) return off;
+    final connectedAt = _fromMillis(raw['connectedAt']);
+    final disconnectedAt = _fromMillis(raw['disconnectedAt']);
+    final bootAt = _fromMillis(raw['bootAt']);
+    final status = computeListenerStatus(
+      granted: raw['granted'] == true,
+      connectedAt: connectedAt,
+      disconnectedAt: disconnectedAt,
+      grantedAt: _fromMillis(raw['grantedAt']),
+      // Native always sends it; if it ever did not, "just booted" is the
+      // safe reading (inside the grace period, no alarm).
+      bootAt: bootAt ?? DateTime.now(),
+      now: DateTime.now(),
+    );
+    return ListenerReading(
+      status: status,
+      connectedAt: connectedAt,
+      disconnectedAt: disconnectedAt,
+    );
+  } on MissingPluginException {
+    return off;
+  } on PlatformException {
+    return off;
+  }
+}
+
+/// Asks Android to bind the listener again. Cheap; covers the `am kill`
+/// case (devlog #18) but not a never-bound MIUI grant, which needs the
+/// Settings off→on toggle (design.md 5.1). True if the request was made.
+Future<bool> requestListenerRebind() async {
+  try {
+    return await _channel.invokeMethod<bool>('requestListenerRebind') ?? false;
+  } on MissingPluginException {
+    return false;
+  } on PlatformException {
+    return false;
+  }
+}
+
+/// `Build.MANUFACTURER`, lower-cased, or null if unavailable. Picks the
+/// keep-alive guide ([keepAliveGuideFor]).
+Future<String?> getDeviceManufacturer() async {
+  try {
+    return await _channel.invokeMethod<String>('getManufacturer');
+  } on MissingPluginException {
+    return null;
+  } on PlatformException {
+    return null;
+  }
+}
+
+/// Opens one of the public system screens a keep-alive step points at.
+/// False if the phone has no such screen.
+Future<bool> openSystemSettings(SettingsTarget target) async {
+  try {
+    return await _channel.invokeMethod<bool>('openSystemSettings', target.name) ??
         false;
   } on MissingPluginException {
     return false;
