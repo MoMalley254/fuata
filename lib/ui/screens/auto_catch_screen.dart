@@ -1,10 +1,15 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:fuata/widgets/personalization/section_card.dart';
+import 'package:go_router/go_router.dart';
 
+import '../../domain/logic/listener_status.dart';
 import '../../domain/models/capture_source.dart';
 import '../../platform/notification_capture.dart';
+import '../../routing/routes.dart';
 import '../../widgets/permissions/app_to_watch_dialog.dart';
 import '../../widgets/permissions/notification_access_primer.dart';
 import '../../widgets/personalization/action_row.dart';
@@ -23,6 +28,11 @@ import '../theme/app_typography.dart';
 /// The promise this screen makes, and the listener keeps: only apps
 /// switched on here are ever read; a notification from any other app is
 /// dropped the instant it arrives and never stored.
+///
+/// Issue #36: the status card has four states (off / unknown / active /
+/// stalled) instead of on/off, because the grant alone does not prove
+/// Android bound the listener (design.md 5.1). The wording is always
+/// "looks inactive", never "broken": detection is a best guess.
 
 class AutoCatchScreen extends ConsumerStatefulWidget {
   const AutoCatchScreen({super.key});
@@ -33,7 +43,17 @@ class AutoCatchScreen extends ConsumerStatefulWidget {
 
 class _AutoCatchScreenState extends ConsumerState<AutoCatchScreen>
     with WidgetsBindingObserver {
-  bool? _accessEnabled; // null until the first check returns
+  ListenerReading? _reading; // null until the first check returns
+  Timer? _recheck;
+  bool _autoRebindTried = false; // once per visit; "Fix it" is the manual one
+  bool _fixing = false;
+
+  ListenerStatus? get _status => _reading?.status;
+
+  /// The grant (not the binding): drives "Turn on / Manage access" and the
+  /// "starts working once access is on" hint.
+  bool? get _accessEnabled =>
+      _status == null ? null : _status != ListenerStatus.off;
   List<InstalledApp>? _apps; // null while loading
   String _query = '';
   final _packageController = TextEditingController();
@@ -42,14 +62,14 @@ class _AutoCatchScreenState extends ConsumerState<AutoCatchScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _refreshAccess();   // read the current grant — do not open settings
-    // _handleTurnOnAccess();
+    _refreshAccess();   // read the current status — do not open settings
     _loadApps();
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _recheck?.cancel();
     _packageController.dispose();
     super.dispose();
   }
@@ -61,24 +81,87 @@ class _AutoCatchScreenState extends ConsumerState<AutoCatchScreen>
     if (state == AppLifecycleState.resumed) _refreshAccess();
   }
 
-  /// Read the current notification-access grant and update the status card.
-  /// A pure read: never opens a dialog, never opens Android's settings.
+  /// Read the current status and update the status card. A pure read: never
+  /// opens a dialog, never opens Android's settings. (The one side effect is
+  /// a cheap rebind request the first time the listener looks stalled.)
   Future<void> _refreshAccess() async {
-    final enabled = await isNotificationAccessEnabled();
+    final reading = await getListenerStatus();
     if (!mounted) return;
 
-    final wasNull = _accessEnabled == null;
-    final changed = !wasNull && _accessEnabled != enabled;
-    setState(() => _accessEnabled = enabled);
+    final wasGranted = _accessEnabled;
+    final nowGranted = reading.status != ListenerStatus.off;
+    final changed = wasGranted != null && wasGranted != nowGranted;
+    setState(() => _reading = reading);
+
+    // "Unknown" is a grace period that ends on its own, with no event to
+    // tell us: look again shortly so it settles without a manual refresh.
+    _recheck?.cancel();
+    if (reading.status == ListenerStatus.unknown) {
+      _recheck = Timer(const Duration(seconds: 10), _refreshAccess);
+    }
+
+    // Stalled: ask Android to bind us again. Covers the `am kill` case
+    // (devlog #18); it does nothing for a never-bound MIUI grant, which is
+    // what "Fix it" is for.
+    if (reading.status == ListenerStatus.stalled && !_autoRebindTried) {
+      _autoRebindTried = true;
+      unawaited(requestListenerRebind());
+    }
 
     // Only speak up when the person just came back from a *change*: on a
     // fresh open, and on a resume where nothing moved, the status card
     // already says everything.
-    if (changed && enabled) {
+    if (changed && nowGranted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Access is on 🎉')),
       );
     }
+  }
+
+  /// "Fix it": try the cheap rebind first; if the listener still doesn't
+  /// look bound, walk the person through the off→on toggle in Android's own
+  /// settings — the path design.md 5.1 documents as working.
+  Future<void> _handleFixIt() async {
+    if (_fixing) return;
+    setState(() => _fixing = true);
+    await requestListenerRebind();
+    // A successful rebind reconnects within moments.
+    await Future<void>.delayed(const Duration(seconds: 2));
+    await _refreshAccess();
+    if (!mounted) return;
+    setState(() => _fixing = false);
+
+    if (_status == ListenerStatus.active) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Auto-catch looks active again.')),
+      );
+      return;
+    }
+
+    final open = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('One more step'),
+        content: const Text(
+          'Sometimes Android stops sending notifications to Fuata without '
+          'telling it. Switching Fuata’s access off and on again in '
+          'Android’s own list usually wakes it up.\n\n'
+          'On the next screen, switch Fuata off, then on. Come back here '
+          'and this will check again.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Not now'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Open the list'),
+          ),
+        ],
+      ),
+    );
+    if (open == true) await openNotificationAccessSettings();
   }
 
   /// The "Turn on access" / "Manage access" button: explain what's about to
@@ -214,6 +297,7 @@ class _AutoCatchScreenState extends ConsumerState<AutoCatchScreen>
           });
 
     final accessOn = _accessEnabled == true;
+    final stalled = _status == ListenerStatus.stalled;
 
     return Scaffold(
       appBar: AppBar(title: const Text('Auto-Catch')),
@@ -241,47 +325,29 @@ class _AutoCatchScreenState extends ConsumerState<AutoCatchScreen>
                   ),
                 ),
                 const SizedBox(height: AppSpacing.md),
-                Container(
-                  padding: const EdgeInsets.all(AppSpacing.md),
-                  decoration: BoxDecoration(
-                    color: accessOn
-                        ? c.statusSafeContainer
-                        : c.statusWarningContainer,
-                    borderRadius: BorderRadius.circular(
-                      AppSpacing.unitTileRadius,
-                    ),
-                  ),
-                  child: Row(
-                    children: [
-                      Icon(
-                        accessOn
-                            ? Icons.check_circle_outline_rounded
-                            : Icons.info_outline_rounded,
-                        color: accessOn ? c.statusSafe : c.statusWarning,
-                      ),
-                      const SizedBox(width: AppSpacing.sm),
-                      Expanded(
-                        child: Text(
-                          _accessEnabled == null
-                              ? 'Checking…'
-                              : accessOn
-                              ? 'Access is on.'
-                              : 'Access is off, so nothing is caught from '
-                                    'notifications yet.',
-                          style: AppTypography.bodySm.copyWith(
-                            color: c.onSurface,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
+                _StatusCard(status: _status),
                 const SizedBox(height: AppSpacing.sm),
                 ActionRow(
                   icon: Icons.notifications_active_outlined,
                   title: accessOn ? 'Manage access' : 'Turn on access',
                   subtitle: 'Opens Android’s notification access list',
                   onTap: _handleTurnOnAccess,
+                ),
+                if (stalled) ...[
+                  const SizedBox(height: AppSpacing.sm),
+                  ActionRow(
+                    icon: Icons.build_circle_outlined,
+                    title: _fixing ? 'Checking…' : 'Fix it',
+                    subtitle: 'Tries to wake Fuata up, then shows what to do',
+                    onTap: _handleFixIt,
+                  ),
+                ],
+                const SizedBox(height: AppSpacing.sm),
+                ActionRow(
+                  icon: Icons.battery_saver_outlined,
+                  title: 'Keep Fuata running',
+                  subtitle: 'Steps for phones that stop background apps',
+                  onTap: () => context.push(Routes.keepAlivePath),
                 ),
                 const SizedBox(height: AppSpacing.sm),
                 Text(
@@ -378,6 +444,78 @@ class _AutoCatchScreenState extends ConsumerState<AutoCatchScreen>
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// The four-state status line (issue #36). "Looks", not "is": it is built
+/// from Android's bind/unbind callbacks, which is evidence, not proof.
+class _StatusCard extends StatelessWidget {
+  const _StatusCard({required this.status});
+
+  /// Null until the first check returns.
+  final ListenerStatus? status;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+
+    final (IconData icon, Color iconColor, Color? fill, String text) =
+        switch (status) {
+      null => (
+        Icons.hourglass_empty_rounded,
+        c.onSurfaceVariant,
+        null,
+        'Checking…',
+      ),
+      ListenerStatus.off => (
+        Icons.info_outline_rounded,
+        c.statusWarning,
+        c.statusWarningContainer,
+        'Access is off, so nothing is caught from notifications yet.',
+      ),
+      ListenerStatus.unknown => (
+        Icons.hourglass_empty_rounded,
+        c.onSurfaceVariant,
+        null,
+        'Access is on. Checking that Fuata is receiving notifications…',
+      ),
+      ListenerStatus.active => (
+        Icons.check_circle_outline_rounded,
+        c.statusSafe,
+        c.statusSafeContainer,
+        'Access is on and Auto-catch looks active.',
+      ),
+      ListenerStatus.stalled => (
+        Icons.info_outline_rounded,
+        c.statusWarning,
+        c.statusWarningContainer,
+        'Access is on, but Auto-catch doesn’t look active. Payments may '
+            'be missed until it’s fixed.',
+      ),
+    };
+
+    return Container(
+      padding: const EdgeInsets.all(AppSpacing.md),
+      decoration: BoxDecoration(
+        color: fill,
+        border: fill == null
+            ? Border.all(color: c.outlineVariant.withValues(alpha: 0.35))
+            : null,
+        borderRadius: BorderRadius.circular(AppSpacing.unitTileRadius),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, color: iconColor),
+          const SizedBox(width: AppSpacing.sm),
+          Expanded(
+            child: Text(
+              text,
+              style: AppTypography.bodySm.copyWith(color: c.onSurface),
+            ),
+          ),
+        ],
       ),
     );
   }
