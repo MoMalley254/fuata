@@ -16,6 +16,7 @@ import '../ui/screens/auto_catch_screen.dart';
 import '../ui/screens/banner_setup_screen.dart';
 import '../ui/screens/data_backup_screen.dart';
 import '../ui/screens/home_screen.dart';
+import '../ui/screens/keep_alive_guide_screen.dart';
 import '../ui/screens/limits_screen.dart';
 import '../ui/screens/manage_rules_screen.dart';
 import '../ui/screens/my_money_screen.dart';
@@ -270,6 +271,12 @@ final routerProvider = Provider<GoRouter>((ref) {
           name: Routes.autoCatch,
           parentNavigatorKey: rootNavigatorKey,
           builder: (_, _) => const AutoCatchScreen(),
+        ),
+        GoRoute(
+          path: Routes.keepAlivePath,
+          name: Routes.keepAlive,
+          parentNavigatorKey: rootNavigatorKey,
+          builder: (_, _) => const KeepAliveGuideScreen(),
         ),
         GoRoute(
           path: Routes.backupPath,
